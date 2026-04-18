@@ -11,6 +11,11 @@ This directory decomposes the original high-level business specification into bu
 5. [Success Metrics and KPIs](./05-success-metrics-and-kpis.md)
 6. [Rollout and Adoption Plan](./06-rollout-and-adoption-plan.md)
 
+## ADRs
+
+1. [ADR 001: Database and Data Access](./adr/001-database-and-data-access.md)
+2. [ADR 002: Authentication Strategy](./adr/002-authentication-strategy.md)
+
 ## Features
 
 1. [Project Profiles](./features/01-project-profiles/)
