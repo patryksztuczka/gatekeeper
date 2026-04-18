@@ -1,0 +1,110 @@
+apps/backend/test/env.d.ts
+  05b30795d1880d48 1-3
+apps/backend/worker-configuration.d.ts
+  05b30795d1880d48 1-7752,7754-7972,7974-8648,8650,8652,8654,8656,8658,8660-10189,10192-10195,10200-13024
+pnpm-workspace.yaml
+  05b30795d1880d48 2-3
+apps/backend-hono/package.json
+  4e796efe0a29ad1f 5-26
+apps/web/tsconfig.json
+  05b30795d1880d48 3
+apps/backend/src/index.ts
+  05b30795d1880d48 15-17
+apps/backend-hono/src/index.ts
+  4e796efe0a29ad1f 1-9
+apps/web/vite.config.ts
+  05b30795d1880d48 1-22
+packages/oxlint-config/base.ts
+  05b30795d1880d48 1-17
+apps/backend/tsconfig.json
+  05b30795d1880d48 2-21
+apps/backend/oxlint.config.ts
+  05b30795d1880d48 1-20
+.zed/settings.json
+  05b30795d1880d48 1-185
+oxfmt.config.ts
+  4e796efe0a29ad1f 14
+  05b30795d1880d48 2-9,15-23,25,30-35
+.github/workflows/web.yml
+  05b30795d1880d48 1-63
+apps/backend-hono/test/env.d.ts
+  4e796efe0a29ad1f 1-3
+apps/backend/package.json
+  05b30795d1880d48 2,5-22
+apps/web/tsconfig.node.json
+  05b30795d1880d48 2-23
+apps/backend-hono/vitest.config.mts
+  4e796efe0a29ad1f 1-11
+apps/backend-hono/test/index.spec.ts
+  4e796efe0a29ad1f 1-18
+apps/backend-hono/wrangler.jsonc
+  4e796efe0a29ad1f 5-38
+apps/web/src/App.tsx
+  05b30795d1880d48 1-16,33-102
+apps/backend/test/tsconfig.json
+  05b30795d1880d48 1-8
+apps/web/src/index.css
+  05b30795d1880d48 1-110
+apps/backend-hono/tsconfig.json
+  4e796efe0a29ad1f 2-22
+apps/backend-hono/oxlint.config.ts
+  4e796efe0a29ad1f 1-21
+.github/workflows/backend.yml
+  4e796efe0a29ad1f 6,18,51,54,57,60,63,66
+  05b30795d1880d48 1-5,7-17,19-50,52-53,55-56,58-59,61-62,64-65
+apps/web/tsconfig.app.json
+  05b30795d1880d48 2-24
+apps/web/src/main.tsx
+  05b30795d1880d48 1-10
+apps/backend/test/index.spec.ts
+  05b30795d1880d48 1-24
+apps/web/package.json
+  05b30795d1880d48 8-15,18-19,22-35
+apps/backend/wrangler.jsonc
+  05b30795d1880d48 2-7
+turbo.json
+  05b30795d1880d48 8,16-17
+apps/web/oxlint.config.ts
+  05b30795d1880d48 1-17
+apps/backend/vitest.config.mts
+  05b30795d1880d48 1-11
+apps/backend-hono/test/tsconfig.json
+  4e796efe0a29ad1f 1-8
+apps/backend-hono/worker-configuration.d.ts
+  4e796efe0a29ad1f 1-13024
+package.json
+  05b30795d1880d48 8-11,14-15,20-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.0",
+  "base_commit_sha": "f046084b8011dd980650df4cf817b3751558482a",
+  "prompts": {
+    "05b30795d1880d48": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_25f3bd939ffesh9WXfjlk1hZg7",
+        "model": "openai/gpt-5.4"
+      },
+      "human_author": "Patryk Sztuczka",
+      "messages": [],
+      "total_additions": 25152,
+      "total_deletions": 12796,
+      "accepted_lines": 13747,
+      "overriden_lines": 29
+    },
+    "4e796efe0a29ad1f": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_25edce5a9ffebEo9z26s1Mluq6",
+        "model": "openai/gpt-5.4"
+      },
+      "human_author": "Patryk Sztuczka",
+      "messages": [],
+      "total_additions": 13157,
+      "total_deletions": 22,
+      "accepted_lines": 13157,
+      "overriden_lines": 0
+    }
+  }
+}
