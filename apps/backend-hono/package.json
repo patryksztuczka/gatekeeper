@@ -6,6 +6,10 @@
     "dev": "wrangler dev",
     "start": "wrangler dev",
     "deploy": "wrangler deploy",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "wrangler d1 migrations apply DATABASE --local",
+    "db:migrate:remote": "wrangler d1 migrations apply DATABASE --remote",
+    "db:studio": "drizzle-kit studio",
     "check-types": "tsc --noEmit",
     "lint": "NODE_OPTIONS=--experimental-strip-types pnpm -w exec oxlint . --deny-warnings",
     "lint:fix": "NODE_OPTIONS=--experimental-strip-types pnpm -w exec oxlint . --fix",
@@ -15,10 +19,13 @@
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
+    "dotenv": "^17.2.3",
+    "drizzle-orm": "^0.45.2",
     "hono": "^4.12.14"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.12.4",
+    "drizzle-kit": "^0.31.7",
     "typescript": "^5.5.2",
     "vitest": "~3.2.0",
     "wrangler": "^4.83.0"
