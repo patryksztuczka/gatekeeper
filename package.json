@@ -5,16 +5,19 @@
     "build": "turbo run build",
     "dev": "turbo run dev",
     "lint": "turbo run lint",
-    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
-    "check-types": "turbo run check-types"
+    "format": "NODE_OPTIONS=--experimental-strip-types oxfmt .",
+    "format:check": "NODE_OPTIONS=--experimental-strip-types oxfmt --check .",
+    "check-types": "turbo run check-types",
+    "test": "turbo run test"
   },
   "devDependencies": {
-    "prettier": "^3.7.4",
+    "oxfmt": "^0.45.0",
+    "oxlint": "^1.60.0",
     "turbo": "^2.9.6",
     "typescript": "5.9.2"
   },
-  "packageManager": "pnpm@9.0.0",
   "engines": {
-    "node": ">=18"
-  }
+    "node": "25.8.0"
+  },
+  "packageManager": "pnpm@10.33.0"
 }

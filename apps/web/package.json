@@ -1,28 +1,37 @@
 {
   "name": "web",
-  "version": "0.1.0",
-  "type": "module",
+  "version": "0.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
-    "dev": "next dev --port 3000",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint --max-warnings 0",
-    "check-types": "next typegen && tsc --noEmit"
+    "dev": "vite",
+    "build": "pnpm run check-types && vite build",
+    "check-types": "tsc -b",
+    "lint": "NODE_OPTIONS=--experimental-strip-types pnpm -w exec oxlint . --deny-warnings",
+    "lint:fix": "NODE_OPTIONS=--experimental-strip-types pnpm -w exec oxlint . --fix",
+    "format": "NODE_OPTIONS=--experimental-strip-types oxfmt .",
+    "format:check": "NODE_OPTIONS=--experimental-strip-types oxfmt --check .",
+    "test": "vitest run --passWithNoTests",
+    "preview": "vite preview"
   },
   "dependencies": {
-    "@repo/ui": "workspace:*",
-    "next": "16.2.0",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
   },
   "devDependencies": {
-    "@repo/eslint-config": "workspace:*",
-    "@repo/typescript-config": "workspace:*",
-    "@types/node": "^22.15.3",
-    "@types/react": "19.2.2",
-    "@types/react-dom": "19.2.2",
-    "eslint": "^9.39.1",
-    "typescript": "5.9.2"
+    "@babel/core": "^7.29.0",
+    "@rolldown/plugin-babel": "^0.2.2",
+    "@tailwindcss/vite": "^4.1.14",
+    "@types/babel__core": "^7.20.5",
+    "@types/node": "^24.12.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "babel-plugin-react-compiler": "^1.0.0",
+    "tailwindcss": "^4.1.14",
+    "typescript": "~6.0.2",
+    "vite": "^8.0.4",
+    "vite-plugin-oxlint": "^2.0.1",
+    "vitest": "~3.2.0"
   }
 }
