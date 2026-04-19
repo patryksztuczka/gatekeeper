@@ -14,6 +14,13 @@ const authHeaders = {
 const verificationCallbackURL = 'http://localhost:8787/sign-in';
 const mailpitSendUrl = 'http://127.0.0.1:8025/api/v1/send';
 
+type CapturedEmail = {
+  Subject: string;
+  Text: string;
+};
+
+const sentEmails: CapturedEmail[] = [];
+
 function createCredentials(prefix: string) {
   const token = crypto.randomUUID();
 
@@ -89,13 +96,64 @@ async function getMembershipResolution(headers: Headers) {
   return (await response.json()) as MembershipResolutionResponse;
 }
 
+async function getInvitationEntry(invitationId: string, headers?: Headers) {
+  const response = await app.request(`http://example.com/api/auth/invitations/${invitationId}`, {
+    headers,
+  });
+
+  return {
+    body: (await response.json()) as {
+      action: string;
+      invitation: {
+        email: string;
+        id: string;
+        organizationId: string;
+        organizationName: string;
+        role: string | null;
+      } | null;
+      status: string;
+      viewer: {
+        email: string | null;
+        emailVerified: boolean | null;
+        isAuthenticated: boolean;
+      };
+    },
+    status: response.status,
+  };
+}
+
+function getLatestInviteLink() {
+  const latestEmail = sentEmails.at(-1);
+  const inviteLink = latestEmail?.Text.match(/https?:\/\/\S+/)?.[0];
+
+  expect(inviteLink).toBeTruthy();
+
+  if (!inviteLink) {
+    throw new Error('Expected an invitation URL in the latest email.');
+  }
+
+  return inviteLink;
+}
+
 beforeEach(() => {
+  sentEmails.length = 0;
+
   const originalFetch = globalThis.fetch;
 
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
 
     if (url === mailpitSendUrl) {
+      if (typeof init?.body !== 'string') {
+        throw new Error('Expected Mailpit request body to be a JSON string.');
+      }
+
+      const parsedEmail = JSON.parse(init.body) as {
+        Subject: string;
+        Text: string;
+      };
+
+      sentEmails.push(parsedEmail);
       return new Response(null, { status: 200 });
     }
 
@@ -175,6 +233,41 @@ describe('organization membership resolution', () => {
         ],
         status: 'needs-organization-choice',
       });
+    });
+  });
+
+  describe('invitation issuance', () => {
+    it('creates an invite in the active organization context and sends an invite link', async () => {
+      const owner = createCredentials('invite-admin');
+
+      await signUpUser(owner);
+
+      const ownerSessionHeaders = await signInUser(owner);
+      const secondOrganization = await createOrganization(ownerSessionHeaders, 'invite-target', false);
+
+      expect(secondOrganization.id).toBeTruthy();
+
+      await auth.api.setActiveOrganization({
+        body: {
+          organizationId: secondOrganization.id,
+        },
+        headers: ownerSessionHeaders,
+      });
+
+      sentEmails.length = 0;
+
+      const invitation = await auth.api.createInvitation({
+        body: {
+          email: createCredentials('active-org-invitee').email,
+          role: 'member',
+        },
+        headers: ownerSessionHeaders,
+      });
+
+      expect(invitation.organizationId).toBe(secondOrganization.id);
+      expect(sentEmails).toHaveLength(1);
+      expect(sentEmails[0]?.Subject).toBe(`Join ${secondOrganization.name} on Gatekeeper`);
+      expect(getLatestInviteLink()).toContain(`/invite/${invitation.id}`);
     });
   });
 
@@ -327,6 +420,224 @@ describe('organization membership resolution', () => {
         status: 'needs-organization-creation',
       });
       expect(session?.session.activeOrganizationId).toBeNull();
+    });
+  });
+
+  describe('invitation entry state', () => {
+    it('returns a pending invite state for unauthenticated invite links', async () => {
+      const owner = createCredentials('entry-owner');
+
+      await signUpUser(owner);
+
+      const ownerSessionHeaders = await signInUser(owner);
+      const ownerOrganization = (await auth.api.listOrganizations({ headers: ownerSessionHeaders }))[0];
+
+      expect(ownerOrganization?.id).toBeTruthy();
+
+      if (!ownerOrganization?.id) {
+        throw new Error('Expected a default organization for the invite entry owner.');
+      }
+
+      const invitedUser = createCredentials('entry-user');
+      const invitation = await auth.api.createInvitation({
+        body: {
+          email: invitedUser.email,
+          organizationId: ownerOrganization.id,
+          role: 'member',
+        },
+        headers: ownerSessionHeaders,
+      });
+
+      const invitationEntry = await getInvitationEntry(invitation.id);
+
+      expect(invitationEntry.status).toBe(200);
+      expect(invitationEntry.body).toMatchObject({
+        action: 'ready-for-authentication',
+        invitation: {
+          email: invitedUser.email,
+          id: invitation.id,
+          organizationId: ownerOrganization.id,
+          organizationName: ownerOrganization.name,
+          role: 'member',
+        },
+        status: 'pending',
+        viewer: {
+          email: null,
+          emailVerified: null,
+          isAuthenticated: false,
+        },
+      });
+    });
+
+    it('returns ready-to-accept for the authenticated invite recipient', async () => {
+      const owner = createCredentials('entry-ready-owner');
+
+      await signUpUser(owner);
+
+      const ownerSessionHeaders = await signInUser(owner);
+      const ownerOrganization = (await auth.api.listOrganizations({ headers: ownerSessionHeaders }))[0];
+
+      expect(ownerOrganization?.id).toBeTruthy();
+
+      if (!ownerOrganization?.id) {
+        throw new Error('Expected a default organization for the ready-to-accept owner.');
+      }
+
+      const invitedUser = createCredentials('entry-ready-user');
+      const invitation = await auth.api.createInvitation({
+        body: {
+          email: invitedUser.email,
+          organizationId: ownerOrganization.id,
+          role: 'member',
+        },
+        headers: ownerSessionHeaders,
+      });
+
+      await signUpUser(invitedUser);
+
+      const invitedUserSessionHeaders = await signInUser(invitedUser);
+      const invitationEntry = await getInvitationEntry(invitation.id, invitedUserSessionHeaders);
+
+      expect(invitationEntry.status).toBe(200);
+      expect(invitationEntry.body).toMatchObject({
+        action: 'ready-to-accept',
+        status: 'pending',
+        viewer: {
+          email: invitedUser.email,
+          emailVerified: true,
+          isAuthenticated: true,
+        },
+      });
+    });
+
+    it('returns an expired state for expired invite links', async () => {
+      const owner = createCredentials('entry-expired-owner');
+
+      await signUpUser(owner);
+
+      const ownerSessionHeaders = await signInUser(owner);
+      const ownerOrganization = (await auth.api.listOrganizations({ headers: ownerSessionHeaders }))[0];
+
+      expect(ownerOrganization?.id).toBeTruthy();
+
+      if (!ownerOrganization?.id) {
+        throw new Error('Expected a default organization for the expired invite entry owner.');
+      }
+
+      const invitation = await auth.api.createInvitation({
+        body: {
+          email: createCredentials('entry-expired-user').email,
+          organizationId: ownerOrganization.id,
+          role: 'member',
+        },
+        headers: ownerSessionHeaders,
+      });
+
+      await db
+        .update(invitations)
+        .set({ expiresAt: new Date(Date.now() - 60_000) })
+        .where(eq(invitations.id, invitation.id));
+
+      const invitationEntry = await getInvitationEntry(invitation.id);
+
+      expect(invitationEntry.status).toBe(200);
+      expect(invitationEntry.body).toMatchObject({
+        action: 'unavailable',
+        status: 'expired',
+      });
+    });
+
+    it('returns an accepted state for already used invite links', async () => {
+      const owner = createCredentials('entry-accepted-owner');
+
+      await signUpUser(owner);
+
+      const ownerSessionHeaders = await signInUser(owner);
+      const ownerOrganization = (await auth.api.listOrganizations({ headers: ownerSessionHeaders }))[0];
+
+      expect(ownerOrganization?.id).toBeTruthy();
+
+      if (!ownerOrganization?.id) {
+        throw new Error('Expected a default organization for the accepted invite entry owner.');
+      }
+
+      const invitedUser = createCredentials('entry-accepted-user');
+      const invitation = await auth.api.createInvitation({
+        body: {
+          email: invitedUser.email,
+          organizationId: ownerOrganization.id,
+          role: 'member',
+        },
+        headers: ownerSessionHeaders,
+      });
+
+      await signUpUser(invitedUser);
+
+      const invitedUserSessionHeaders = await signInUser(invitedUser);
+      await auth.api.acceptInvitation({
+        body: {
+          invitationId: invitation.id,
+        },
+        headers: invitedUserSessionHeaders,
+      });
+
+      const invitationEntry = await getInvitationEntry(invitation.id);
+
+      expect(invitationEntry.status).toBe(200);
+      expect(invitationEntry.body).toMatchObject({
+        action: 'unavailable',
+        status: 'accepted',
+      });
+    });
+
+    it('returns a canceled state for canceled invite links', async () => {
+      const owner = createCredentials('entry-canceled-owner');
+
+      await signUpUser(owner);
+
+      const ownerSessionHeaders = await signInUser(owner);
+      const ownerOrganization = (await auth.api.listOrganizations({ headers: ownerSessionHeaders }))[0];
+
+      expect(ownerOrganization?.id).toBeTruthy();
+
+      if (!ownerOrganization?.id) {
+        throw new Error('Expected a default organization for the canceled invite entry owner.');
+      }
+
+      const invitation = await auth.api.createInvitation({
+        body: {
+          email: createCredentials('entry-canceled-user').email,
+          organizationId: ownerOrganization.id,
+          role: 'member',
+        },
+        headers: ownerSessionHeaders,
+      });
+
+      await auth.api.cancelInvitation({
+        body: {
+          invitationId: invitation.id,
+        },
+        headers: ownerSessionHeaders,
+      });
+
+      const invitationEntry = await getInvitationEntry(invitation.id);
+
+      expect(invitationEntry.status).toBe(200);
+      expect(invitationEntry.body).toMatchObject({
+        action: 'unavailable',
+        status: 'canceled',
+      });
+    });
+
+    it('returns not found for invalid invite links', async () => {
+      const invitationEntry = await getInvitationEntry(crypto.randomUUID());
+
+      expect(invitationEntry.status).toBe(404);
+      expect(invitationEntry.body).toMatchObject({
+        action: 'unavailable',
+        invitation: null,
+        status: 'invalid',
+      });
     });
   });
 

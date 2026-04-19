@@ -1,35 +1,16 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import { Link } from 'react-router';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
+import { getAuthErrorMessage } from '../../features/auth/auth-errors';
 import { signIn } from '../../features/auth/auth-client';
-
-const getAuthErrorMessage = (result: unknown, fallback: string): string | null => {
-  if (!result || typeof result !== 'object' || !('error' in result)) {
-    return null;
-  }
-
-  const error = result.error;
-
-  if (typeof error === 'string') {
-    return error;
-  }
-
-  if (
-    error &&
-    typeof error === 'object' &&
-    'message' in error &&
-    typeof error.message === 'string'
-  ) {
-    return error.message;
-  }
-
-  return fallback;
-};
 
 export function SignInPage() {
   const navigate = useNavigate();
-  const [email, setEmail] = useState('');
+  const [searchParams] = useSearchParams();
+  const redirectTo = searchParams.get('redirectTo') || '/';
+  const invitedEmail = searchParams.get('email') || '';
+  const isInviteJourney = redirectTo.startsWith('/invite/');
+  const [email, setEmail] = useState(invitedEmail);
   const [password, setPassword] = useState('');
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -46,7 +27,7 @@ export function SignInPage() {
         email,
         password,
         rememberMe: false,
-        callbackURL: window.location.origin,
+        callbackURL: `${window.location.origin}${redirectTo}`,
       });
 
       const message = getAuthErrorMessage(result, 'Unable to sign in.');
@@ -57,7 +38,7 @@ export function SignInPage() {
       }
 
       setStatus('Signed in successfully. Redirecting...');
-      navigate('/');
+      navigate(redirectTo);
     } catch (caughtError) {
       const message = caughtError instanceof Error ? caughtError.message : 'Unable to sign in.';
       setError(message);
@@ -82,6 +63,12 @@ export function SignInPage() {
       </div>
 
       <div className="mt-6 space-y-4">
+        {isInviteJourney ? (
+          <p className="rounded-xl border border-sky-400/25 bg-sky-400/10 px-4 py-3 text-sm text-sky-100">
+            Sign in with the invited account to accept this organization invite.
+          </p>
+        ) : null}
+
         <label className="block text-sm font-medium text-slate-200">
           Email
           <input
@@ -137,7 +124,10 @@ export function SignInPage() {
 
       <p className="mt-5 text-center text-sm text-slate-400">
         New to Gatekeeper?{' '}
-        <Link to="/sign-up" className="font-medium text-sky-300 transition hover:text-sky-200">
+        <Link
+          to={`/sign-up?redirectTo=${encodeURIComponent(redirectTo)}${invitedEmail ? `&email=${encodeURIComponent(invitedEmail)}` : ''}`}
+          className="font-medium text-sky-300 transition hover:text-sky-200"
+        >
           Create an account
         </Link>
       </p>

@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { auth } from './lib/auth';
 import { env } from 'cloudflare:workers';
-import { resolveMembershipResolution } from './lib/auth-organization';
+import { resolveInvitationEntryState, resolveMembershipResolution } from './lib/auth-organization';
 
 const app = new Hono();
 
@@ -35,6 +35,23 @@ app.get('/api/auth/membership-resolution', async (c) => {
   });
 
   return c.json(resolution);
+});
+
+app.get('/api/auth/invitations/:invitationId', async (c) => {
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  const invitation = await resolveInvitationEntryState(c.req.param('invitationId'),
+    session
+      ? {
+          email: session.user.email,
+          emailVerified: session.user.emailVerified,
+        }
+      : null,
+  );
+
+  return c.json(invitation, invitation.status === 'invalid' ? 404 : 200);
 });
 
 app.on(['POST', 'GET'], '/api/auth/*', (c) => auth.handler(c.req.raw));

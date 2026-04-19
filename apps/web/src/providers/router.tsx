@@ -31,6 +31,18 @@ const router = createBrowserRouter([
         ],
       },
       {
+        element: <AuthLayout />,
+        children: [
+          {
+            path: '/invite/:invitationId',
+            lazy: async () => {
+              const { InvitationPage } = await import('../components/pages/invitation');
+              return { Component: InvitationPage };
+            },
+          },
+        ],
+      },
+      {
         element: <ProtectedRoute />,
         children: [
           {

@@ -9,11 +9,11 @@ export function AuthLayout() {
             Gatekeeper authentication
           </div>
           <h1 className="mt-6 text-4xl font-semibold tracking-tight text-white sm:text-5xl">
-            Simple sign in and sign up flows for the first release.
+            Authentication and organization invites for the first release.
           </h1>
           <p className="mt-4 max-w-2xl text-base leading-7 text-slate-300 sm:text-lg">
-            Email and password only, with email verification and password recovery prepared in the
-            backend.
+            Email and password only, with verification, password recovery, and invite-based access
+            handled in the backend.
           </p>
 
           <div className="mt-8 grid gap-4 sm:grid-cols-2">

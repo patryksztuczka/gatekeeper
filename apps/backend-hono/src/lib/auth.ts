@@ -24,6 +24,14 @@ import { sendEmail } from './email';
 const sevenDaysInSeconds = 60 * 60 * 24 * 7;
 const oneDayInSeconds = 60 * 60 * 24;
 
+function getAppOrigin() {
+  return env.TRUSTED_ORIGINS.split(',')[0]?.trim() || env.BETTER_AUTH_URL;
+}
+
+function getInvitationLink(invitationId: string) {
+  return `${getAppOrigin().replace(/\/$/, '')}/invite/${invitationId}`;
+}
+
 export const auth = betterAuth({
   appName: 'Gatekeeper',
   baseURL: env.BETTER_AUTH_URL,
@@ -109,5 +117,19 @@ export const auth = betterAuth({
     expiresIn: sevenDaysInSeconds,
     updateAge: oneDayInSeconds,
   },
-  plugins: [organization(gatekeeperOrganizationOptions)],
+  plugins: [
+    organization({
+      ...gatekeeperOrganizationOptions,
+      sendInvitationEmail: async ({ email, invitation, inviter, organization }) => {
+        const invitationLink = getInvitationLink(invitation.id);
+
+        await sendEmail({
+          to: [{ email }],
+          subject: `Join ${organization.name} on Gatekeeper`,
+          text: `${inviter.user.email} invited you to join ${organization.name} on Gatekeeper as ${invitation.role}. Open this link to continue: ${invitationLink}`,
+          tags: ['auth', 'invitation'],
+        });
+      },
+    }),
+  ],
 });

@@ -1,7 +1,14 @@
 import { and, asc, eq, gt, sql } from 'drizzle-orm';
 import { getOrgAdapter, type OrganizationOptions } from 'better-auth/plugins';
 import { db } from '../db/client';
-import { invitations, members, organizations, sessions, type User as AuthUser } from '../db/schema';
+import {
+  invitations,
+  members,
+  organizations,
+  sessions,
+  users,
+  type User as AuthUser,
+} from '../db/schema';
 
 type OrganizationAuthContext = Parameters<typeof getOrgAdapter>[0];
 
@@ -31,6 +38,41 @@ export type MembershipResolutionResponse = {
   canCreateOrganization: boolean;
 };
 
+export type InvitationEntryStatus =
+  | 'accepted'
+  | 'canceled'
+  | 'expired'
+  | 'invalid'
+  | 'pending'
+  | 'rejected';
+
+export type InvitationEntryAction =
+  | 'email-verification-required'
+  | 'ready-for-authentication'
+  | 'ready-to-accept'
+  | 'signed-in-as-different-user'
+  | 'unavailable';
+
+export type InvitationEntryResponse = {
+  status: InvitationEntryStatus;
+  action: InvitationEntryAction;
+  invitation: {
+    email: string;
+    expiresAt: string;
+    id: string;
+    inviterEmail: string;
+    organizationId: string;
+    organizationName: string;
+    organizationSlug: string;
+    role: string | null;
+  } | null;
+  viewer: {
+    email: string | null;
+    emailVerified: boolean | null;
+    isAuthenticated: boolean;
+  };
+};
+
 type MembershipOrganization = MembershipResolutionResponse['organizations'][number] & {
   membershipCreatedAt: Date;
 };
@@ -39,6 +81,11 @@ type PendingInvite = Omit<MembershipResolutionResponse['pendingInvites'][number]
   createdAt: Date;
   expiresAt: Date;
 };
+
+type InvitationEntryViewer = {
+  email: string;
+  emailVerified: boolean;
+} | null;
 
 const defaultOrganizationNameSuffix = ' Organization';
 const fallbackOrganizationName = 'Workspace';
@@ -194,6 +241,63 @@ export async function resolveMembershipResolution({
   };
 }
 
+export async function resolveInvitationEntryState(
+  invitationId: string,
+  viewer: InvitationEntryViewer,
+): Promise<InvitationEntryResponse> {
+  const invitation = await db
+    .select({
+      email: invitations.email,
+      expiresAt: invitations.expiresAt,
+      id: invitations.id,
+      inviterEmail: users.email,
+      organizationId: invitations.organizationId,
+      organizationName: organizations.name,
+      organizationSlug: organizations.slug,
+      role: invitations.role,
+      status: invitations.status,
+    })
+    .from(invitations)
+    .innerJoin(organizations, eq(invitations.organizationId, organizations.id))
+    .innerJoin(users, eq(invitations.inviterId, users.id))
+    .where(eq(invitations.id, invitationId))
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  const viewerState = {
+    email: viewer?.email ?? null,
+    emailVerified: viewer?.emailVerified ?? null,
+    isAuthenticated: viewer !== null,
+  };
+
+  if (!invitation) {
+    return {
+      action: 'unavailable',
+      invitation: null,
+      status: 'invalid',
+      viewer: viewerState,
+    };
+  }
+
+  const status = getInvitationEntryStatus(invitation.expiresAt, invitation.status);
+
+  return {
+    action: getInvitationEntryAction(status, invitation.email, viewer),
+    invitation: {
+      email: invitation.email,
+      expiresAt: invitation.expiresAt.toISOString(),
+      id: invitation.id,
+      inviterEmail: invitation.inviterEmail,
+      organizationId: invitation.organizationId,
+      organizationName: invitation.organizationName,
+      organizationSlug: invitation.organizationSlug,
+      role: invitation.role,
+    },
+    status,
+    viewer: viewerState,
+  };
+}
+
 export async function shouldCreateDefaultOrganization(
   authContext: OrganizationAuthContext,
   email: string,
@@ -340,4 +444,44 @@ function orderMembershipOrganizations(
     activeOrganization,
     ...membershipOrganizations.filter(({ id }) => id !== activeOrganizationId),
   ];
+}
+
+function getInvitationEntryStatus(expiresAt: Date, status: string): InvitationEntryStatus {
+  if (status === 'pending' && expiresAt <= new Date()) {
+    return 'expired';
+  }
+
+  switch (status) {
+    case 'accepted':
+    case 'canceled':
+    case 'pending':
+    case 'rejected':
+      return status;
+    default:
+      return 'invalid';
+  }
+}
+
+function getInvitationEntryAction(
+  status: InvitationEntryStatus,
+  invitationEmail: string,
+  viewer: InvitationEntryViewer,
+): InvitationEntryAction {
+  if (status !== 'pending') {
+    return 'unavailable';
+  }
+
+  if (!viewer) {
+    return 'ready-for-authentication';
+  }
+
+  if (viewer.email.toLowerCase() !== invitationEmail.toLowerCase()) {
+    return 'signed-in-as-different-user';
+  }
+
+  if (!viewer.emailVerified) {
+    return 'email-verification-required';
+  }
+
+  return 'ready-to-accept';
 }
