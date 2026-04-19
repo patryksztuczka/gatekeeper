@@ -1,0 +1,53 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "oxc", "react", "node", "promise", "vitest"],
+  "env": {
+    "es2024": true
+  },
+  "settings": {
+    "react": {
+      "version": "19.2.0"
+    }
+  },
+  "rules": {
+    "no-alert": "error",
+    "no-debugger": "error"
+  },
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/.turbo/**",
+    "**/node_modules/**",
+    "apps/backend-hono/worker-configuration.d.ts"
+  ],
+  "overrides": [
+    {
+      "files": ["apps/web/**/*.{ts,tsx,mts,cts}"],
+      "env": {
+        "browser": true,
+        "es2024": true
+      },
+      "rules": {
+        "no-unused-vars": "off",
+        "typescript/no-unused-vars": "error"
+      }
+    },
+    {
+      "files": ["apps/backend-hono/**/*.{ts,tsx,mts,cts}"],
+      "env": {
+        "node": true,
+        "es2024": true
+      },
+      "rules": {
+        "no-unused-vars": "off",
+        "typescript/no-unused-vars": "error"
+      }
+    },
+    {
+      "files": ["apps/backend-hono/test/**/*.{ts,tsx}", "apps/backend-hono/vitest.config.mts"],
+      "env": {
+        "vitest": true,
+        "node": true
+      }
+    }
+  ]
+}

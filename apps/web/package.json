@@ -7,16 +7,16 @@
     "dev": "vite",
     "build": "pnpm run check-types && vite build",
     "check-types": "tsc -b",
-    "lint": "NODE_OPTIONS=--experimental-strip-types pnpm -w exec oxlint . --deny-warnings",
-    "lint:fix": "NODE_OPTIONS=--experimental-strip-types pnpm -w exec oxlint . --fix",
-    "format": "NODE_OPTIONS=--experimental-strip-types oxfmt .",
-    "format:check": "NODE_OPTIONS=--experimental-strip-types oxfmt --check .",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
     "test": "vitest run --passWithNoTests",
     "preview": "vite preview"
   },
   "dependencies": {
+    "better-auth": "^1.6.5",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.4",
+    "react-router": "^7.13.2"
   },
   "devDependencies": {
     "@babel/core": "^7.29.0",
@@ -31,7 +31,6 @@
     "tailwindcss": "^4.1.14",
     "typescript": "~6.0.2",
     "vite": "^8.0.4",
-    "vite-plugin-oxlint": "^2.0.1",
     "vitest": "~3.2.0"
   }
 }

@@ -3,12 +3,24 @@
   "name": "backend-hono",
   "main": "src/index.ts",
   "compatibility_date": "2026-04-18",
-  // "compatibility_flags": [
-  //   "nodejs_compat"
-  // ],
-  // "vars": {
-  //   "MY_VAR": "my-variable"
-  // },
+  "compatibility_flags": ["nodejs_als"],
+  "vars": {
+    "BETTER_AUTH_SECRET": "change-me-in-dev-vars",
+    "BETTER_AUTH_URL": "http://localhost:8787",
+    "TRUSTED_ORIGINS": "http://localhost:5173",
+    "CORS_ORIGIN": "http://localhost:5173",
+    "MAIL_FROM_EMAIL": "no-reply@gatekeeper.local",
+    "MAIL_FROM_NAME": "Gatekeeper",
+    "MAILPIT_URL": "http://127.0.0.1:8025",
+  },
+  "d1_databases": [
+    {
+      "binding": "DATABASE",
+      "database_name": "gatekeeper",
+      "database_id": "21db0886-b90a-470b-8d57-acc6927b10af",
+      "migrations_dir": "drizzle/migrations",
+    },
+  ],
   // "kv_namespaces": [
   //   {
   //     "binding": "MY_KV_NAMESPACE",
@@ -19,13 +31,6 @@
   //   {
   //     "binding": "MY_BUCKET",
   //     "bucket_name": "my-bucket"
-  //   }
-  // ],
-  // "d1_databases": [
-  //   {
-  //     "binding": "MY_DB",
-  //     "database_name": "my-database",
-  //     "database_id": ""
   //   }
   // ],
   // "ai": {

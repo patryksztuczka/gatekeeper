@@ -4,9 +4,10 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
-    "lint": "turbo run lint",
-    "format": "NODE_OPTIONS=--experimental-strip-types oxfmt .",
-    "format:check": "NODE_OPTIONS=--experimental-strip-types oxfmt --check .",
+    "lint": "oxlint . --deny-warnings",
+    "lint:fix": "oxlint . --fix",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
     "check-types": "turbo run check-types",
     "test": "turbo run test"
   },
