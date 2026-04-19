@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
+import { Eye, EyeOff, ShieldCheck } from 'lucide-react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { getAuthErrorMessage } from '../../features/auth/auth-errors';
 import { signUp } from '../../features/auth/auth-client';
@@ -8,6 +9,10 @@ import {
   buildSignInLink,
   buildVerifyEmailLink,
 } from '../../features/auth/auth-routing';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 export function SignUpPage() {
   const navigate = useNavigate();
@@ -18,6 +23,7 @@ export function SignUpPage() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState(invitedEmail);
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -56,69 +62,89 @@ export function SignUpPage() {
   };
 
   return (
-    <div>
-      <p className="text-xs uppercase">Sign up</p>
-      <h2 className="mt-2 text-2xl font-bold">Create a new account</h2>
+    <div className="w-full max-w-sm space-y-8">
+      <div className="space-y-3 text-center">
+        <div className="flex justify-center lg:hidden">
+          <div className="flex size-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <ShieldCheck className="size-5" />
+          </div>
+        </div>
+        <h1 className="text-2xl font-semibold tracking-tight">Create your account</h1>
+        <p className="text-sm text-muted-foreground">
+          {isInviteJourney
+            ? 'Create the invited account. Verify your email, then accept the invite.'
+            : 'Verify your email after signing up to unlock product access.'}
+        </p>
+      </div>
 
-      <p className="mt-4 text-sm">
-        {isInviteJourney
-          ? 'Create the invited account first. After email verification you can sign in and accept the invite.'
-          : 'Direct sign-up creates your account first. Email verification is still required before product access.'}
-      </p>
-
-      <form className="mt-5 space-y-4" onSubmit={handleSubmit}>
-        <label className="block text-sm">
-          <span className="font-bold">Full name</span>
-          <input
+      <form className="space-y-5" onSubmit={handleSubmit}>
+        <div className="space-y-2">
+          <Label htmlFor="name">Full name</Label>
+          <Input
+            id="name"
             type="text"
             value={name}
             onChange={(event) => setName(event.target.value)}
-            className="mt-1 block w-full border border-black px-3 py-2"
             autoComplete="name"
             required
           />
-        </label>
+        </div>
 
-        <label className="block text-sm">
-          <span className="font-bold">Email</span>
-          <input
+        <div className="space-y-2">
+          <Label htmlFor="email">Email</Label>
+          <Input
+            id="email"
             type="email"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            className="mt-1 block w-full border border-black px-3 py-2"
             autoComplete="email"
             readOnly={Boolean(invitedEmail)}
             required
           />
-        </label>
+        </div>
 
-        <label className="block text-sm">
-          <span className="font-bold">Password</span>
-          <input
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            className="mt-1 block w-full border border-black px-3 py-2"
-            autoComplete="new-password"
-            minLength={8}
-            required
-          />
-        </label>
+        <div className="space-y-2">
+          <Label htmlFor="password">Password</Label>
+          <div className="relative">
+            <Input
+              id="password"
+              type={showPassword ? 'text' : 'password'}
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              autoComplete="new-password"
+              minLength={8}
+              className="pr-9"
+              required
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((value) => !value)}
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+              aria-pressed={showPassword}
+              className="absolute inset-y-0 right-0 flex w-9 items-center justify-center rounded-r-lg text-muted-foreground outline-none hover:text-foreground focus-visible:text-foreground"
+            >
+              {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+            </button>
+          </div>
+        </div>
 
-        {error ? <p className="border border-red-700 bg-red-100 p-3 text-sm">{error}</p> : null}
+        {error ? (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : null}
 
-        <button
-          type="submit"
-          className="border border-black bg-black px-4 py-2 text-sm font-bold text-white disabled:opacity-60"
-          disabled={isSubmitting}
-        >
+        <Button type="submit" size="lg" disabled={isSubmitting} className="w-full">
           {isSubmitting ? 'Creating account...' : 'Create account'}
-        </button>
+        </Button>
       </form>
 
-      <p className="mt-5 text-sm">
+      <p className="text-center text-sm text-muted-foreground">
         Already have an account?{' '}
-        <Link to={buildSignInLink(redirectTo, invitedEmail || undefined)} className="underline">
+        <Link
+          to={buildSignInLink(redirectTo, invitedEmail || undefined)}
+          className="font-medium text-foreground underline-offset-4 hover:underline"
+        >
           Sign in
         </Link>
       </p>

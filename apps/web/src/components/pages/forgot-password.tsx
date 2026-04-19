@@ -1,8 +1,13 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
+import { ShieldCheck } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router';
 import { requestPasswordReset } from '../../features/auth/auth-api';
 import { buildPasswordResetCallbackUrl } from '../../features/auth/auth-routing';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 export function ForgotPasswordPage() {
   const [searchParams] = useSearchParams();
@@ -34,38 +39,51 @@ export function ForgotPasswordPage() {
   };
 
   return (
-    <div>
-      <p className="text-xs uppercase">Password reset</p>
-      <h2 className="mt-2 text-2xl font-bold">Forgot your password?</h2>
-      <p className="mt-4 text-sm">Enter your email and we will send a reset link.</p>
+    <div className="w-full max-w-sm space-y-8">
+      <div className="space-y-3 text-center">
+        <div className="flex justify-center lg:hidden">
+          <div className="flex size-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <ShieldCheck className="size-5" />
+          </div>
+        </div>
+        <h1 className="text-2xl font-semibold tracking-tight">Forgot your password?</h1>
+        <p className="text-sm text-muted-foreground">
+          Enter your email and we will send you a reset link.
+        </p>
+      </div>
 
-      <form className="mt-5 space-y-4" onSubmit={handleSubmit}>
-        <label className="block text-sm">
-          <span className="font-bold">Email</span>
-          <input
+      <form className="space-y-5" onSubmit={handleSubmit}>
+        <div className="space-y-2">
+          <Label htmlFor="email">Email</Label>
+          <Input
+            id="email"
             type="email"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            className="mt-1 block w-full border border-black px-3 py-2"
             autoComplete="email"
             required
           />
-        </label>
+        </div>
 
-        {error ? <p className="border border-red-700 bg-red-100 p-3 text-sm">{error}</p> : null}
-        {status ? <p className="border border-green-700 bg-green-100 p-3 text-sm">{status}</p> : null}
+        {error ? (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : null}
 
-        <button
-          type="submit"
-          className="border border-black bg-black px-4 py-2 text-sm font-bold text-white disabled:opacity-60"
-          disabled={isSubmitting}
-        >
+        {status ? (
+          <Alert>
+            <AlertDescription>{status}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        <Button type="submit" size="lg" disabled={isSubmitting} className="w-full">
           {isSubmitting ? 'Sending...' : 'Send reset link'}
-        </button>
+        </Button>
       </form>
 
-      <p className="mt-5 text-sm">
-        <Link to="/sign-in" className="underline">
+      <p className="text-center text-sm text-muted-foreground">
+        <Link to="/sign-in" className="font-medium text-foreground underline-offset-4 hover:underline">
           Back to sign in
         </Link>
       </p>
