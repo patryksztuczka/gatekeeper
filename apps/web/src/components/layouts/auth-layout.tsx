@@ -12,20 +12,23 @@ export function AuthLayout() {
             Simple sign in and sign up flows for the first release.
           </h1>
           <p className="mt-4 max-w-2xl text-base leading-7 text-slate-300 sm:text-lg">
-            Email and password only, with email verification and password recovery prepared in the backend.
+            Email and password only, with email verification and password recovery prepared in the
+            backend.
           </p>
 
           <div className="mt-8 grid gap-4 sm:grid-cols-2">
             <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-5">
               <p className="text-sm font-medium text-white">Sign in</p>
               <p className="mt-2 text-sm leading-6 text-slate-400">
-                Existing users authenticate with email and password and continue into their active organization.
+                Existing users authenticate with email and password and continue into their active
+                organization.
               </p>
             </div>
             <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-5">
               <p className="text-sm font-medium text-white">Sign up</p>
               <p className="mt-2 text-sm leading-6 text-slate-400">
-                New users create an account and verify their email before they can access Gatekeeper.
+                New users create an account and verify their email before they can access
+                Gatekeeper.
               </p>
             </div>
           </div>

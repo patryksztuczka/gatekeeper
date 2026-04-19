@@ -4,25 +4,25 @@ on:
   pull_request:
     paths:
       - 'apps/web/**'
-      - 'packages/oxlint-config/**'
       - '.github/workflows/web.yml'
+      - '.oxlintrc.json'
+      - '.oxfmtrc.json'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - 'turbo.json'
-      - 'oxfmt.config.ts'
   push:
     branches:
       - master
     paths:
       - 'apps/web/**'
-      - 'packages/oxlint-config/**'
       - '.github/workflows/web.yml'
+      - '.oxlintrc.json'
+      - '.oxfmtrc.json'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - 'turbo.json'
-      - 'oxfmt.config.ts'
 
 jobs:
   web:
@@ -51,7 +51,7 @@ jobs:
         run: pnpm --filter web format:check
 
       - name: Lint web
-        run: pnpm --filter web lint
+        run: pnpm lint
 
       - name: Check web types
         run: pnpm --filter web check-types

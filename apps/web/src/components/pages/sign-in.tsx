@@ -15,7 +15,12 @@ const getAuthErrorMessage = (result: unknown, fallback: string): string | null =
     return error;
   }
 
-  if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') {
+  if (
+    error &&
+    typeof error === 'object' &&
+    'message' in error &&
+    typeof error.message === 'string'
+  ) {
     return error.message;
   }
 
@@ -68,7 +73,7 @@ export function SignInPage() {
     >
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-sm font-medium uppercase tracking-[0.2em] text-slate-400">Sign in</p>
+          <p className="text-sm font-medium tracking-[0.2em] text-slate-400 uppercase">Sign in</p>
           <h2 className="mt-2 text-2xl font-semibold text-white">Welcome back</h2>
         </div>
         <span className="rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-1 text-xs font-medium text-sky-200">

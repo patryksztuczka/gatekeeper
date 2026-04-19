@@ -4,25 +4,25 @@ on:
   pull_request:
     paths:
       - 'apps/backend-hono/**'
-      - 'packages/oxlint-config/**'
       - '.github/workflows/backend.yml'
+      - '.oxlintrc.json'
+      - '.oxfmtrc.json'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - 'turbo.json'
-      - 'oxfmt.config.ts'
   push:
     branches:
       - master
     paths:
       - 'apps/backend-hono/**'
-      - 'packages/oxlint-config/**'
       - '.github/workflows/backend.yml'
+      - '.oxlintrc.json'
+      - '.oxfmtrc.json'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - 'turbo.json'
-      - 'oxfmt.config.ts'
 
 jobs:
   backend:
@@ -54,7 +54,7 @@ jobs:
         run: pnpm --filter backend-hono format:check
 
       - name: Lint backend
-        run: pnpm --filter backend-hono lint
+        run: pnpm lint
 
       - name: Check backend types
         run: pnpm --filter backend-hono check-types

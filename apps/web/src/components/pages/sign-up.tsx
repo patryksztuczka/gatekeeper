@@ -14,7 +14,12 @@ const getAuthErrorMessage = (result: unknown, fallback: string): string | null =
     return error;
   }
 
-  if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') {
+  if (
+    error &&
+    typeof error === 'object' &&
+    'message' in error &&
+    typeof error.message === 'string'
+  ) {
     return error.message;
   }
 
@@ -52,7 +57,8 @@ export function SignUpPage() {
 
       setStatus('Account created. Check your inbox for the verification email before signing in.');
     } catch (caughtError) {
-      const message = caughtError instanceof Error ? caughtError.message : 'Unable to create account.';
+      const message =
+        caughtError instanceof Error ? caughtError.message : 'Unable to create account.';
       setError(message);
     } finally {
       setIsSubmitting(false);
@@ -64,7 +70,7 @@ export function SignUpPage() {
       className="rounded-3xl border border-white/10 bg-white p-6 text-slate-900 shadow-xl shadow-slate-950/20 sm:p-7"
       onSubmit={handleSubmit}
     >
-      <p className="text-sm font-medium uppercase tracking-[0.2em] text-slate-500">Sign up</p>
+      <p className="text-sm font-medium tracking-[0.2em] text-slate-500 uppercase">Sign up</p>
       <h2 className="mt-2 text-2xl font-semibold">Create your Gatekeeper account</h2>
 
       <div className="mt-6 space-y-4">
@@ -135,7 +141,10 @@ export function SignUpPage() {
 
       <p className="mt-5 text-center text-sm text-slate-500">
         Already have an account?{' '}
-        <Link to="/sign-in" className="font-medium text-emerald-700 transition hover:text-emerald-600">
+        <Link
+          to="/sign-in"
+          className="font-medium text-emerald-700 transition hover:text-emerald-600"
+        >
           Sign in
         </Link>
       </p>

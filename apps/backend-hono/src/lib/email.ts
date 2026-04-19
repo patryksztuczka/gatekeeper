@@ -29,7 +29,9 @@ export const sendEmail = async (input: SendEmailInput): Promise<void> => {
   const mailpitUrl = env.MAILPIT_URL?.trim();
 
   if (!mailpitUrl) {
-    console.log(`[email] ${input.subject} -> ${input.to.map((recipient) => recipient.email).join(', ')}`);
+    console.log(
+      `[email] ${input.subject} -> ${input.to.map((recipient) => recipient.email).join(', ')}`,
+    );
     console.log(input.text);
     return;
   }

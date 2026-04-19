@@ -11,8 +11,6 @@
     "db:migrate:remote": "wrangler d1 migrations apply DATABASE --remote",
     "db:studio": "drizzle-kit studio",
     "check-types": "tsc --noEmit",
-    "lint": "NODE_OPTIONS=--experimental-strip-types pnpm -w exec oxlint . --deny-warnings",
-    "lint:fix": "NODE_OPTIONS=--experimental-strip-types pnpm -w exec oxlint . --fix",
     "format": "NODE_OPTIONS=--experimental-strip-types oxfmt .",
     "format:check": "NODE_OPTIONS=--experimental-strip-types oxfmt --check .",
     "test": "vitest run",

@@ -3,6 +3,6 @@ services:
     image: axllent/mailpit:latest
     container_name: gatekeeper-mailpit
     ports:
-      - "1025:1025"
-      - "8025:8025"
+      - '1025:1025'
+      - '8025:8025'
     restart: unless-stopped
