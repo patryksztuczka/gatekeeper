@@ -1,8 +1,12 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import { getAuthErrorMessage } from '../../features/auth/auth-errors';
+import { getAuthErrorCode, getAuthErrorMessage } from '../../features/auth/auth-errors';
 import { signIn } from '../../features/auth/auth-client';
+import {
+  buildSignUpLink,
+  buildVerifyEmailLink,
+} from '../../features/auth/auth-routing';
 
 export function SignInPage() {
   const navigate = useNavigate();
@@ -12,14 +16,14 @@ export function SignInPage() {
   const isInviteJourney = redirectTo.startsWith('/invite/');
   const [email, setEmail] = useState(invitedEmail);
   const [password, setPassword] = useState('');
-  const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const verifyEmailLink = buildVerifyEmailLink(email, redirectTo);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
-    setStatus(null);
     setIsSubmitting(true);
 
     try {
@@ -30,17 +34,28 @@ export function SignInPage() {
         callbackURL: `${window.location.origin}${redirectTo}`,
       });
 
+      const code = getAuthErrorCode(result);
       const message = getAuthErrorMessage(result, 'Unable to sign in.');
+
+      if (code === 'EMAIL_NOT_VERIFIED' || message === 'Email not verified') {
+        navigate(verifyEmailLink);
+        return;
+      }
 
       if (message) {
         setError(message);
         return;
       }
 
-      setStatus('Signed in successfully. Redirecting...');
       navigate(redirectTo);
     } catch (caughtError) {
       const message = caughtError instanceof Error ? caughtError.message : 'Unable to sign in.';
+
+      if (message === 'Email not verified') {
+        navigate(verifyEmailLink);
+        return;
+      }
+
       setError(message);
     } finally {
       setIsSubmitting(false);
@@ -48,89 +63,65 @@ export function SignInPage() {
   };
 
   return (
-    <form
-      className="rounded-3xl border border-white/10 bg-slate-900/80 p-6 shadow-xl shadow-slate-950/20 sm:p-7"
-      onSubmit={handleSubmit}
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-sm font-medium tracking-[0.2em] text-slate-400 uppercase">Sign in</p>
-          <h2 className="mt-2 text-2xl font-semibold text-white">Welcome back</h2>
-        </div>
-        <span className="rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-1 text-xs font-medium text-sky-200">
-          v1
-        </span>
-      </div>
+    <div>
+      <p className="text-xs uppercase">Sign in</p>
+      <h2 className="mt-2 text-2xl font-bold">Use an existing account</h2>
 
-      <div className="mt-6 space-y-4">
-        {isInviteJourney ? (
-          <p className="rounded-xl border border-sky-400/25 bg-sky-400/10 px-4 py-3 text-sm text-sky-100">
-            Sign in with the invited account to accept this organization invite.
-          </p>
-        ) : null}
+      {isInviteJourney ? (
+        <p className="mt-4 border border-black bg-yellow-100 p-3 text-sm">
+          Sign in with the invited email address to continue with this organization invite.
+        </p>
+      ) : null}
 
-        <label className="block text-sm font-medium text-slate-200">
-          Email
+      <form className="mt-5 space-y-4" onSubmit={handleSubmit}>
+        <label className="block text-sm">
+          <span className="font-bold">Email</span>
           <input
             type="email"
-            placeholder="you@company.com"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-sky-400 focus:outline-none"
+            className="mt-1 block w-full border border-black px-3 py-2"
             autoComplete="email"
             required
           />
         </label>
 
-        <label className="block text-sm font-medium text-slate-200">
-          Password
+        <label className="block text-sm">
+          <span className="font-bold">Password</span>
           <input
             type="password"
-            placeholder="Enter your password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
-            className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-sky-400 focus:outline-none"
+            className="mt-1 block w-full border border-black px-3 py-2"
             autoComplete="current-password"
             required
           />
         </label>
-      </div>
 
-      <div className="mt-4 flex items-center justify-end gap-4 text-sm text-slate-400">
-        <a href="#" className="text-sky-300 transition hover:text-sky-200">
-          Forgot password?
-        </a>
-      </div>
+        {error ? <p className="border border-red-700 bg-red-100 p-3 text-sm">{error}</p> : null}
 
-      {error ? (
-        <p className="mt-4 rounded-xl border border-rose-400/25 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">
-          {error}
-        </p>
-      ) : null}
-
-      {status ? (
-        <p className="mt-4 rounded-xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-200">
-          {status}
-        </p>
-      ) : null}
-
-      <button
-        type="submit"
-        className="mt-6 w-full rounded-xl bg-sky-500 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-400"
-        disabled={isSubmitting}
-      >
-        {isSubmitting ? 'Signing in...' : 'Sign in'}
-      </button>
-
-      <p className="mt-5 text-center text-sm text-slate-400">
-        New to Gatekeeper?{' '}
-        <Link
-          to={`/sign-up?redirectTo=${encodeURIComponent(redirectTo)}${invitedEmail ? `&email=${encodeURIComponent(invitedEmail)}` : ''}`}
-          className="font-medium text-sky-300 transition hover:text-sky-200"
+        <button
+          type="submit"
+          className="border border-black bg-black px-4 py-2 text-sm font-bold text-white disabled:opacity-60"
+          disabled={isSubmitting}
         >
-          Create an account
-        </Link>
-      </p>
-    </form>
+          {isSubmitting ? 'Signing in...' : 'Sign in'}
+        </button>
+      </form>
+
+      <div className="mt-5 space-y-2 text-sm">
+        <p>
+          <Link to={`/forgot-password?email=${encodeURIComponent(email)}`} className="underline">
+            Forgot password?
+          </Link>
+        </p>
+        <p>
+          Need an account?{' '}
+          <Link to={buildSignUpLink(redirectTo, invitedEmail || undefined)} className="underline">
+            Sign up
+          </Link>
+        </p>
+      </div>
+    </div>
   );
 }

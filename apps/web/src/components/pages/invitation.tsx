@@ -6,6 +6,11 @@ import {
   type InvitationEntryResponse,
 } from '../../features/auth/auth-api';
 import { signOut } from '../../features/auth/auth-client';
+import {
+  buildSignInLink,
+  buildSignUpLink,
+  buildVerifyEmailLink,
+} from '../../features/auth/auth-routing';
 
 const statusMessages: Record<
   InvitationEntryResponse['status'],
@@ -15,15 +20,15 @@ const statusMessages: Record<
   }
 > = {
   accepted: {
-    description: 'This invite has already been accepted. Sign in if you need to access the organization.',
+    description: 'This invite has already been accepted.',
     title: 'Invitation already used',
   },
   canceled: {
-    description: 'This invite was cancelled by an administrator. Ask them to send a new one if you still need access.',
-    title: 'Invitation cancelled',
+    description: 'This invite was canceled by an administrator.',
+    title: 'Invitation canceled',
   },
   expired: {
-    description: 'This invite has expired. Ask an administrator to send a fresh invite link.',
+    description: 'This invite expired. Ask for a new one.',
     title: 'Invitation expired',
   },
   invalid: {
@@ -35,17 +40,13 @@ const statusMessages: Record<
     title: 'Organization invitation',
   },
   rejected: {
-    description: 'This invite was already rejected. Ask an administrator to send a new invite if needed.',
+    description: 'This invite was already rejected.',
     title: 'Invitation unavailable',
   },
 };
 
 function getInviteRoleLabel(role: string | null) {
-  if (!role) {
-    return 'member';
-  }
-
-  return role;
+  return role || 'member';
 }
 
 export function InvitationPage() {
@@ -89,7 +90,7 @@ export function InvitationPage() {
       }
     }
 
-    loadInvitation();
+    void loadInvitation();
 
     return () => {
       isCancelled = true;
@@ -98,8 +99,10 @@ export function InvitationPage() {
 
   const inviteTarget = invitationId ? `/invite/${invitationId}` : '/sign-in';
   const inviteEmail = invitationEntry?.invitation?.email;
-  const signInLink = `/sign-in?redirectTo=${encodeURIComponent(inviteTarget)}${inviteEmail ? `&email=${encodeURIComponent(inviteEmail)}` : ''}`;
-  const signUpLink = `/sign-up?redirectTo=${encodeURIComponent(inviteTarget)}${inviteEmail ? `&email=${encodeURIComponent(inviteEmail)}` : ''}`;
+  const signInLink = buildSignInLink(inviteTarget, inviteEmail || undefined);
+  const signUpLink = buildSignUpLink(inviteTarget, inviteEmail || undefined);
+  const verifyEmailLink =
+    inviteEmail && invitationId ? buildVerifyEmailLink(inviteEmail, inviteTarget) : '/verify-email';
 
   const handleAccept = async () => {
     if (!invitationEntry?.invitation) {
@@ -112,12 +115,10 @@ export function InvitationPage() {
 
     try {
       await acceptOrganizationInvitation(invitationEntry.invitation.id);
-      setStatus('Invitation accepted. Redirecting to the invited organization...');
+      setStatus('Invitation accepted. Redirecting to the app...');
       navigate('/');
     } catch (caughtError) {
-      const message =
-        caughtError instanceof Error ? caughtError.message : 'Unable to accept invitation.';
-      setError(message);
+      setError(caughtError instanceof Error ? caughtError.message : 'Unable to accept invitation.');
     } finally {
       setIsAccepting(false);
     }
@@ -129,19 +130,18 @@ export function InvitationPage() {
   };
 
   if (isLoading) {
-    return (
-      <section className="rounded-3xl border border-white/10 bg-slate-900/80 p-6 shadow-xl shadow-slate-950/20 sm:p-7">
-        <p className="text-sm text-slate-300">Loading invitation...</p>
-      </section>
-    );
+    return <p className="text-sm">Loading invitation...</p>;
   }
 
   if (error || !invitationEntry) {
     return (
-      <section className="rounded-3xl border border-rose-400/25 bg-rose-400/10 p-6 text-rose-100 shadow-xl shadow-slate-950/20 sm:p-7">
-        <h2 className="text-2xl font-semibold">Invitation unavailable</h2>
-        <p className="mt-3 text-sm leading-6 text-rose-100/90">{error || 'Unable to load invitation.'}</p>
-      </section>
+      <div>
+        <p className="text-xs uppercase">Invite link</p>
+        <h2 className="mt-2 text-2xl font-bold">Invitation unavailable</h2>
+        <p className="mt-4 border border-red-700 bg-red-100 p-3 text-sm">
+          {error || 'Unable to load invitation.'}
+        </p>
+      </div>
     );
   }
 
@@ -149,74 +149,68 @@ export function InvitationPage() {
 
   if (invitationEntry.status !== 'pending' || !invitationEntry.invitation) {
     return (
-      <section className="rounded-3xl border border-white/10 bg-slate-900/80 p-6 shadow-xl shadow-slate-950/20 sm:p-7">
-        <p className="text-sm font-medium tracking-[0.2em] text-slate-400 uppercase">Invite link</p>
-        <h2 className="mt-2 text-2xl font-semibold text-white">{statusMessage.title}</h2>
-        <p className="mt-4 text-sm leading-6 text-slate-300">{statusMessage.description}</p>
-        <div className="mt-6 flex flex-wrap gap-3">
-          <Link
-            to="/sign-in"
-            className="rounded-xl bg-sky-500 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-400"
-          >
-            Sign in
-          </Link>
-          <Link
-            to="/"
-            className="rounded-xl border border-white/15 bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:border-white/25 hover:bg-slate-800"
-          >
-            Open app
-          </Link>
+      <div>
+        <p className="text-xs uppercase">Invite link</p>
+        <h2 className="mt-2 text-2xl font-bold">{statusMessage.title}</h2>
+        <p className="mt-4 text-sm">{statusMessage.description}</p>
+
+        <div className="mt-5 space-y-2 text-sm">
+          <p>
+            <Link to="/sign-in" className="underline">
+              Sign in
+            </Link>
+          </p>
+          <p>
+            <Link to="/" className="underline">
+              Open app
+            </Link>
+          </p>
         </div>
-      </section>
+      </div>
     );
   }
 
   return (
-    <section className="rounded-3xl border border-white/10 bg-slate-900/80 p-6 shadow-xl shadow-slate-950/20 sm:p-7">
-      <p className="text-sm font-medium tracking-[0.2em] text-slate-400 uppercase">Invite link</p>
-      <h2 className="mt-2 text-2xl font-semibold text-white">
-        Join {invitationEntry.invitation.organizationName}
-      </h2>
-      <p className="mt-4 text-sm leading-6 text-slate-300">
-        {invitationEntry.invitation.inviterEmail} invited <span className="font-medium text-white">{invitationEntry.invitation.email}</span> to join as{' '}
-        <span className="font-medium text-white">{getInviteRoleLabel(invitationEntry.invitation.role)}</span>.
+    <div>
+      <p className="text-xs uppercase">Invite link</p>
+      <h2 className="mt-2 text-2xl font-bold">Join {invitationEntry.invitation.organizationName}</h2>
+      <p className="mt-4 text-sm leading-6">
+        {invitationEntry.invitation.inviterEmail} invited {invitationEntry.invitation.email} to join as{' '}
+        {getInviteRoleLabel(invitationEntry.invitation.role)}.
       </p>
-      <p className="mt-2 text-sm text-slate-400">
-        This link expires on {new Date(invitationEntry.invitation.expiresAt).toLocaleString()}.
+      <p className="mt-2 text-sm">
+        Expires {new Date(invitationEntry.invitation.expiresAt).toLocaleString()}.
       </p>
 
       {invitationEntry.action === 'ready-for-authentication' ? (
-        <div className="mt-6 space-y-4">
-          <p className="rounded-xl border border-sky-400/25 bg-sky-400/10 px-4 py-3 text-sm text-sky-100">
-            Sign in with the invited account, or create it first if you have not joined Gatekeeper yet.
+        <div className="mt-5 space-y-2 text-sm">
+          <p className="border border-black bg-stone-100 p-3">
+            Sign in with the invited account, or create it first if it does not exist yet.
           </p>
-          <div className="flex flex-wrap gap-3">
-            <Link
-              to={signInLink}
-              className="rounded-xl bg-sky-500 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-400"
-            >
+          <p>
+            <Link to={signInLink} className="underline">
               Sign in to continue
             </Link>
-            <Link
-              to={signUpLink}
-              className="rounded-xl border border-white/15 bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:border-white/25 hover:bg-slate-800"
-            >
+          </p>
+          <p>
+            <Link to={signUpLink} className="underline">
               Create account
             </Link>
-          </div>
+          </p>
         </div>
       ) : null}
 
       {invitationEntry.action === 'ready-to-accept' ? (
-        <div className="mt-6 space-y-4">
-          <p className="rounded-xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100">
-            You are signed in as the invited user. Accept the invite to switch into this organization now.
+        <div className="mt-5 space-y-3">
+          <p className="border border-black bg-stone-100 p-3 text-sm">
+            You are signed in as the invited user. Accept the invitation to switch into this
+            organization now.
           </p>
           <button
             type="button"
             onClick={handleAccept}
             disabled={isAccepting}
-            className="rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-400"
+            className="border border-black bg-black px-4 py-2 text-sm font-bold text-white disabled:opacity-60"
           >
             {isAccepting ? 'Accepting invitation...' : 'Accept invitation'}
           </button>
@@ -224,37 +218,36 @@ export function InvitationPage() {
       ) : null}
 
       {invitationEntry.action === 'email-verification-required' ? (
-        <p className="mt-6 rounded-xl border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
-          Verify this account's email address before accepting the invitation.
-        </p>
+        <div className="mt-5 space-y-2 text-sm">
+          <p className="border border-black bg-yellow-100 p-3">
+            Verify this email address before you can accept the invitation.
+          </p>
+          <p>
+            <Link to={verifyEmailLink} className="underline">
+              Verify email
+            </Link>
+          </p>
+        </div>
       ) : null}
 
       {invitationEntry.action === 'signed-in-as-different-user' ? (
-        <div className="mt-6 space-y-4">
-          <p className="rounded-xl border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
-            You are signed in as {invitationEntry.viewer.email}. Switch to {invitationEntry.invitation.email} to accept this invite.
+        <div className="mt-5 space-y-3">
+          <p className="border border-black bg-yellow-100 p-3 text-sm">
+            You are signed in as {invitationEntry.viewer.email}. Switch to{' '}
+            {invitationEntry.invitation.email} to accept this invite.
           </p>
           <button
             type="button"
             onClick={handleSwitchAccount}
-            className="rounded-xl bg-amber-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-amber-300"
+            className="border border-black bg-black px-4 py-2 text-sm font-bold text-white"
           >
             Sign out and continue
           </button>
         </div>
       ) : null}
 
-      {error ? (
-        <p className="mt-4 rounded-xl border border-rose-400/25 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">
-          {error}
-        </p>
-      ) : null}
-
-      {status ? (
-        <p className="mt-4 rounded-xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-200">
-          {status}
-        </p>
-      ) : null}
-    </section>
+      {error ? <p className="mt-4 border border-red-700 bg-red-100 p-3 text-sm">{error}</p> : null}
+      {status ? <p className="mt-4 border border-green-700 bg-green-100 p-3 text-sm">{status}</p> : null}
+    </div>
   );
 }

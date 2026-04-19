@@ -2,39 +2,30 @@ import { Outlet } from 'react-router';
 
 export function AuthLayout() {
   return (
-    <main className="min-h-screen bg-slate-950 px-6 py-12 text-slate-100 sm:px-8 lg:px-12">
-      <div className="mx-auto grid max-w-6xl gap-8 lg:grid-cols-[1.1fr_1fr] lg:items-start">
-        <section className="rounded-3xl border border-white/10 bg-white/5 p-8 shadow-2xl shadow-slate-950/30 backdrop-blur sm:p-10">
-          <div className="inline-flex rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-sm font-medium text-emerald-200">
-            Gatekeeper authentication
-          </div>
-          <h1 className="mt-6 text-4xl font-semibold tracking-tight text-white sm:text-5xl">
-            Authentication and organization invites for the first release.
-          </h1>
-          <p className="mt-4 max-w-2xl text-base leading-7 text-slate-300 sm:text-lg">
-            Email and password only, with verification, password recovery, and invite-based access
-            handled in the backend.
+    <main className="min-h-screen bg-stone-200 px-4 py-6 text-black sm:px-6">
+      <div className="mx-auto grid max-w-5xl gap-4 lg:grid-cols-[320px_1fr]">
+        <section className="border-2 border-black bg-white p-5">
+          <p className="text-xs uppercase">Gatekeeper v1</p>
+          <h1 className="mt-3 text-3xl font-bold">Auth screens</h1>
+          <p className="mt-3 text-sm leading-6">
+            Plain email and password auth, organization invites, email verification, and password
+            reset.
           </p>
 
-          <div className="mt-8 grid gap-4 sm:grid-cols-2">
-            <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-5">
-              <p className="text-sm font-medium text-white">Sign in</p>
-              <p className="mt-2 text-sm leading-6 text-slate-400">
-                Existing users authenticate with email and password and continue into their active
-                organization.
-              </p>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-5">
-              <p className="text-sm font-medium text-white">Sign up</p>
-              <p className="mt-2 text-sm leading-6 text-slate-400">
-                New users create an account and verify their email before they can access
-                Gatekeeper.
-              </p>
-            </div>
-          </div>
+          <hr className="my-4 border-black" />
+
+          <p className="text-sm font-bold">Included</p>
+          <ul className="mt-2 list-disc pl-5 text-sm leading-6">
+            <li>sign in</li>
+            <li>sign up</li>
+            <li>verify email</li>
+            <li>reset password</li>
+            <li>invite acceptance</li>
+            <li>organization switching</li>
+          </ul>
         </section>
 
-        <section>
+        <section className="border-2 border-black bg-white p-5">
           <Outlet />
         </section>
       </div>

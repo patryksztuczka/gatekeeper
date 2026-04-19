@@ -26,6 +26,13 @@ const router = createBrowserRouter([
                   return { Component: SignUpPage };
                 },
               },
+              {
+                path: '/forgot-password',
+                lazy: async () => {
+                  const { ForgotPasswordPage } = await import('../components/pages/forgot-password');
+                  return { Component: ForgotPasswordPage };
+                },
+              },
             ],
           },
         ],
@@ -38,6 +45,29 @@ const router = createBrowserRouter([
             lazy: async () => {
               const { InvitationPage } = await import('../components/pages/invitation');
               return { Component: InvitationPage };
+            },
+          },
+          {
+            path: '/verify-email',
+            lazy: async () => {
+              const { VerifyEmailPage } = await import('../components/pages/verify-email');
+              return { Component: VerifyEmailPage };
+            },
+          },
+          {
+            path: '/verify-email/callback',
+            lazy: async () => {
+              const { VerifyEmailCallbackPage } = await import(
+                '../components/pages/verify-email-callback'
+              );
+              return { Component: VerifyEmailCallbackPage };
+            },
+          },
+          {
+            path: '/reset-password',
+            lazy: async () => {
+              const { ResetPasswordPage } = await import('../components/pages/reset-password');
+              return { Component: ResetPasswordPage };
             },
           },
         ],
