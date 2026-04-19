@@ -8,6 +8,13 @@
       "when": 1760000000000,
       "tag": "0000_better_auth_foundation",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1776583468335,
+      "tag": "0001_swift_war_machine",
+      "breakpoints": true
     }
   ]
 }
