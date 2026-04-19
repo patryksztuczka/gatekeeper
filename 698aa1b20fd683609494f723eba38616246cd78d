@@ -1,0 +1,47 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.0",
+  "base_commit_sha": "698aa1b20fd683609494f723eba38616246cd78d",
+  "prompts": {
+    "05b30795d1880d48": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_25f3bd939ffesh9WXfjlk1hZg7",
+        "model": "openai/gpt-5.4"
+      },
+      "human_author": "Patryk Sztuczka",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 5,
+      "overriden_lines": 0
+    },
+    "4e796efe0a29ad1f": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_25edce5a9ffebEo9z26s1Mluq6",
+        "model": "openai/gpt-5.4"
+      },
+      "human_author": "Patryk Sztuczka",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 17,
+      "overriden_lines": 0
+    },
+    "6f622a2e11df8ba2": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_25e055a58ffelKHrXlbGdw2qgx",
+        "model": "openai/gpt-5.4"
+      },
+      "human_author": "Patryk Sztuczka",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 52,
+      "accepted_lines": 794,
+      "overriden_lines": 0
+    }
+  }
+}
