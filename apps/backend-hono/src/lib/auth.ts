@@ -67,10 +67,7 @@ export const auth = betterAuth({
             return;
           }
 
-          const activeOrganizationId = await getInitialActiveOrganizationId(
-            context.context,
-            session.userId,
-          );
+          const activeOrganizationId = await getInitialActiveOrganizationId(session.userId);
 
           if (!activeOrganizationId) {
             return;

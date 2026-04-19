@@ -1,9 +1,44 @@
+import { and, asc, eq, gt, sql } from 'drizzle-orm';
 import { getOrgAdapter, type OrganizationOptions } from 'better-auth/plugins';
-import type { User as AuthUser } from '../db/schema';
+import { db } from '../db/client';
+import { invitations, members, organizations, sessions, type User as AuthUser } from '../db/schema';
 
 type OrganizationAuthContext = Parameters<typeof getOrgAdapter>[0];
 
 export type SignUpOrganizationMode = 'direct-signup' | 'invite-signup';
+
+export type MembershipResolutionStatus =
+  | 'active-organization'
+  | 'needs-organization-choice'
+  | 'needs-organization-creation';
+
+export type MembershipResolutionResponse = {
+  status: MembershipResolutionStatus;
+  activeOrganizationId: string | null;
+  organizations: Array<{
+    id: string;
+    name: string;
+    slug: string;
+    role: string;
+  }>;
+  pendingInvites: Array<{
+    id: string;
+    organizationId: string;
+    organizationName: string;
+    role: string | null;
+    expiresAt: string;
+  }>;
+  canCreateOrganization: boolean;
+};
+
+type MembershipOrganization = MembershipResolutionResponse['organizations'][number] & {
+  membershipCreatedAt: Date;
+};
+
+type PendingInvite = Omit<MembershipResolutionResponse['pendingInvites'][number], 'expiresAt'> & {
+  createdAt: Date;
+  expiresAt: Date;
+};
 
 const defaultOrganizationNameSuffix = ' Organization';
 const fallbackOrganizationName = 'Workspace';
@@ -108,16 +143,55 @@ export async function ensureDefaultOrganizationForUser(
   }
 }
 
-export async function getInitialActiveOrganizationId(
-  authContext: OrganizationAuthContext,
-  userId: string,
-): Promise<string | null> {
-  const organizations = await getOrgAdapter(
-    authContext,
-    gatekeeperOrganizationOptions,
-  ).listOrganizations(userId);
+export async function getInitialActiveOrganizationId(userId: string): Promise<string | null> {
+  return (await listMembershipOrganizations(userId))[0]?.id ?? null;
+}
 
-  return organizations[0]?.id ?? null;
+export async function resolveMembershipResolution({
+  currentActiveOrganizationId,
+  sessionId,
+  userEmail,
+  userId,
+}: {
+  currentActiveOrganizationId: string | null;
+  sessionId: string;
+  userEmail: string;
+  userId: string;
+}): Promise<MembershipResolutionResponse> {
+  const [membershipOrganizations, pendingInvites] = await Promise.all([
+    listMembershipOrganizations(userId),
+    listPendingInvites(userEmail),
+  ]);
+  const resolvedActiveOrganizationId = resolveActiveOrganizationId(
+    currentActiveOrganizationId,
+    membershipOrganizations,
+  );
+
+  if (resolvedActiveOrganizationId !== currentActiveOrganizationId) {
+    await db
+      .update(sessions)
+      .set({ activeOrganizationId: resolvedActiveOrganizationId })
+      .where(eq(sessions.id, sessionId));
+  }
+
+  return {
+    status: getMembershipResolutionStatus(resolvedActiveOrganizationId, pendingInvites),
+    activeOrganizationId: resolvedActiveOrganizationId,
+    organizations: orderMembershipOrganizations(
+      membershipOrganizations,
+      resolvedActiveOrganizationId,
+    ).map(({ id, membershipCreatedAt: _membershipCreatedAt, name, role, slug }) => ({
+      id,
+      name,
+      role,
+      slug,
+    })),
+    pendingInvites: pendingInvites.map(({ createdAt: _createdAt, expiresAt, ...invite }) => ({
+      ...invite,
+      expiresAt: expiresAt.toISOString(),
+    })),
+    canCreateOrganization: true,
+  };
 }
 
 export async function shouldCreateDefaultOrganization(
@@ -132,13 +206,13 @@ export function isEmailPasswordSignUp(context: { path?: string } | null): boolea
 }
 
 async function getPendingInvitations(authContext: OrganizationAuthContext, email: string) {
-  const invitations = await getOrgAdapter(
+  const pendingInvitations = await getOrgAdapter(
     authContext,
     gatekeeperOrganizationOptions,
   ).listUserInvitations(email.toLowerCase());
   const now = new Date();
 
-  return invitations.filter(
+  return pendingInvitations.filter(
     (invitation) => invitation.status === 'pending' && invitation.expiresAt > now,
   );
 }
@@ -178,4 +252,92 @@ function slugify(value: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 48);
+}
+
+async function listMembershipOrganizations(userId: string): Promise<MembershipOrganization[]> {
+  return db
+    .select({
+      id: organizations.id,
+      membershipCreatedAt: members.createdAt,
+      name: organizations.name,
+      role: members.role,
+      slug: organizations.slug,
+    })
+    .from(members)
+    .innerJoin(organizations, eq(members.organizationId, organizations.id))
+    .where(eq(members.userId, userId))
+    .orderBy(asc(members.createdAt), asc(members.organizationId));
+}
+
+async function listPendingInvites(userEmail: string): Promise<PendingInvite[]> {
+  const normalizedEmail = userEmail.toLowerCase();
+
+  return db
+    .select({
+      createdAt: invitations.createdAt,
+      expiresAt: invitations.expiresAt,
+      id: invitations.id,
+      organizationId: invitations.organizationId,
+      organizationName: organizations.name,
+      role: invitations.role,
+    })
+    .from(invitations)
+    .innerJoin(organizations, eq(invitations.organizationId, organizations.id))
+    .where(
+      and(
+        eq(sql<string>`lower(${invitations.email})`, normalizedEmail),
+        eq(invitations.status, 'pending'),
+        gt(invitations.expiresAt, new Date()),
+      ),
+    )
+    .orderBy(asc(invitations.expiresAt), asc(invitations.createdAt));
+}
+
+function resolveActiveOrganizationId(
+  currentActiveOrganizationId: string | null,
+  membershipOrganizations: MembershipOrganization[],
+): string | null {
+  if (
+    currentActiveOrganizationId &&
+    membershipOrganizations.some(({ id }) => id === currentActiveOrganizationId)
+  ) {
+    return currentActiveOrganizationId;
+  }
+
+  return membershipOrganizations[0]?.id ?? null;
+}
+
+function getMembershipResolutionStatus(
+  activeOrganizationId: string | null,
+  pendingInvites: PendingInvite[],
+): MembershipResolutionStatus {
+  if (activeOrganizationId) {
+    return 'active-organization';
+  }
+
+  if (pendingInvites.length > 0) {
+    return 'needs-organization-choice';
+  }
+
+  return 'needs-organization-creation';
+}
+
+function orderMembershipOrganizations(
+  membershipOrganizations: MembershipOrganization[],
+  activeOrganizationId: string | null,
+): MembershipOrganization[] {
+  if (!activeOrganizationId) {
+    return membershipOrganizations;
+  }
+
+  const activeOrganization = membershipOrganizations.find(({ id }) => id === activeOrganizationId);
+
+  if (!activeOrganization) {
+    return membershipOrganizations;
+  }
+
+  return [
+    activeOrganization,
+    ...membershipOrganizations.filter(({ id }) => id !== activeOrganizationId),
+  ];
 }
