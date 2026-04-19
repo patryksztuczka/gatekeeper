@@ -16,6 +16,8 @@ export const users = sqliteTable('users', {
     .notNull(),
 });
 
+export type User = typeof users.$inferSelect;
+
 export const organizations = sqliteTable(
   'organizations',
   {

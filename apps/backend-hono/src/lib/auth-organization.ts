@@ -1,16 +1,7 @@
 import { getOrgAdapter, type OrganizationOptions } from 'better-auth/plugins';
+import type { User as AuthUser } from '../db/schema';
 
 type OrganizationAuthContext = Parameters<typeof getOrgAdapter>[0];
-
-type AuthUser = {
-  id: string;
-  email: string;
-  name: string;
-  emailVerified: boolean;
-  createdAt: Date;
-  updatedAt: Date;
-  image?: string | null;
-};
 
 export type SignUpOrganizationMode = 'direct-signup' | 'invite-signup';
 

@@ -53,7 +53,10 @@ export const auth = betterAuth({
             return;
           }
 
-          await ensureDefaultOrganizationForUser(context.context, user);
+          await ensureDefaultOrganizationForUser(context.context, {
+            ...user,
+            image: user.image ?? null,
+          });
         },
       },
     },
