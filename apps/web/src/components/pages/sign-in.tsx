@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import { useNavigate } from 'react-router';
 import { Link } from 'react-router';
-import { signIn } from '../../lib/auth-client';
+import { useNavigate } from 'react-router';
+import { signIn } from '../../features/auth/auth-client';
 
 const getAuthErrorMessage = (result: unknown, fallback: string): string | null => {
   if (!result || typeof result !== 'object' || !('error' in result)) {

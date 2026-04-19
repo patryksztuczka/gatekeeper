@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link } from 'react-router';
-import { signUp } from '../../lib/auth-client';
+import { signUp } from '../../features/auth/auth-client';
 
 const getAuthErrorMessage = (result: unknown, fallback: string): string | null => {
   if (!result || typeof result !== 'object' || !('error' in result)) {

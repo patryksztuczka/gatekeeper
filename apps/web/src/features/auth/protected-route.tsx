@@ -1,5 +1,5 @@
 import { Navigate, Outlet } from 'react-router';
-import { useSession } from '../../lib/auth-client';
+import { useSession } from './auth-client';
 import { AuthGuardSkeleton } from './auth-guard-skeleton';
 
 export function ProtectedRoute() {

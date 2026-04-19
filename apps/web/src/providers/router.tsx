@@ -1,7 +1,7 @@
 import { createBrowserRouter, RouterProvider } from 'react-router';
-import { GuestOnlyRoute } from '../components/auth/guest-only-route';
-import { ProtectedRoute } from '../components/auth/protected-route';
 import { AuthLayout } from '../components/layouts/auth-layout';
+import { GuestOnlyRoute } from '../features/auth/guest-only-route';
+import { ProtectedRoute } from '../features/auth/protected-route';
 
 const router = createBrowserRouter([
   {

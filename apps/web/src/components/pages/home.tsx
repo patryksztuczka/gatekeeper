@@ -1,4 +1,4 @@
-import { signOut, useSession } from '../../lib/auth-client';
+import { signOut, useSession } from '../../features/auth/auth-client';
 
 export function HomePage() {
   const { data: session } = useSession();
