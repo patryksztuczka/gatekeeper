@@ -1,0 +1,27 @@
+apps/backend-hono/src/lib/auth-organization.ts
+  eb107f1a65a3db0c 2
+apps/backend-hono/src/lib/auth.ts
+  eb107f1a65a3db0c 56-59
+apps/backend-hono/src/db/schema.ts
+  eb107f1a65a3db0c 19-20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.0",
+  "base_commit_sha": "4913a91985f8f8708c3ce8d53a041cb2177468b4",
+  "prompts": {
+    "eb107f1a65a3db0c": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_25b69b671ffeEsuAZstRd7kDqO",
+        "model": "openai/gpt-5.4"
+      },
+      "human_author": "Patryk Sztuczka",
+      "messages": [],
+      "total_additions": 7,
+      "total_deletions": 11,
+      "accepted_lines": 7,
+      "overriden_lines": 0
+    }
+  }
+}
