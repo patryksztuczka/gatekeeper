@@ -15,4 +15,10 @@ describe('Hello Hono worker', () => {
 
     expect(await response.text()).toBe('Hello Hono!');
   });
+
+  it('mounts Better Auth routes', async () => {
+    const response = await SELF.fetch('https://example.com/api/auth/get-session');
+
+    expect(response.status).toBe(200);
+  });
 });
