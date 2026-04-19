@@ -1,0 +1,55 @@
+apps/web/src/features/auth/auth-routing.test.ts
+  c118a9d3c6e89a15 1-70
+apps/web/src/features/auth/protected-route.tsx
+  c118a9d3c6e89a15 1,4,7,9,16-20
+apps/web/src/index.css
+  c118a9d3c6e89a15 5-8,18
+apps/web/src/components/pages/forgot-password.tsx
+  c118a9d3c6e89a15 1-74
+apps/web/src/components/pages/home.tsx
+  c118a9d3c6e89a15 5-6,9,13-21,29-36,44-46,48-59,61-62,70-144,158,161,163-165,171-173,175-194,196,198-201,204-207,209,211-220,224-231,234-235,237-243,245-258,260-269,271-280,282-287,289,292-310,315-353,356-486
+apps/web/src/features/auth/auth-api.ts
+  c118a9d3c6e89a15 89-109,124-142
+apps/web/src/components/pages/verify-email-callback.tsx
+  c118a9d3c6e89a15 1-59
+apps/web/src/components/layouts/auth-layout.tsx
+  c118a9d3c6e89a15 5-12,15-25,28
+apps/web/src/components/pages/verify-email.tsx
+  c118a9d3c6e89a15 1-93
+apps/web/src/components/pages/reset-password.tsx
+  c118a9d3c6e89a15 1-101
+apps/web/src/features/auth/auth-guard-skeleton.tsx
+  c118a9d3c6e89a15 3
+apps/web/src/features/auth/auth-routing.ts
+  c118a9d3c6e89a15 1-80
+apps/web/src/components/pages/sign-up.tsx
+  c118a9d3c6e89a15 3,6-10,13,34-38,48,59-67,69-71,76,82-83,88,95-96,101,108,110-117,119,121,125
+apps/web/src/features/auth/auth-errors.ts
+  c118a9d3c6e89a15 23-44
+apps/web/src/components/pages/sign-in.tsx
+  c118a9d3c6e89a15 4,6-9,22-23,37,40-44,53-58,66-68,70-74,76-78,83,89-90,95,101,103-110,112-116,118-125
+apps/web/src/components/pages/invitation.tsx
+  c118a9d3c6e89a15 9-13,23,27-28,31,43,49,93,102-105,118,121,133,138-144,152-167,169,174-179,181-182,186-188,190-191,194-196,199,204-207,213,221-230,234-237,242,249-251
+apps/web/src/providers/router.tsx
+  c118a9d3c6e89a15 29-35,50-70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.0",
+  "base_commit_sha": "89ad20ead30fd92391bb268493ecceb9227ccab8",
+  "prompts": {
+    "c118a9d3c6e89a15": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_25a524010ffeOm4ywmuEv2l2k8",
+        "model": "openai/gpt-5.4"
+      },
+      "human_author": "Patryk Sztuczka",
+      "messages": [],
+      "total_additions": 1202,
+      "total_deletions": 447,
+      "accepted_lines": 1202,
+      "overriden_lines": 0
+    }
+  }
+}
