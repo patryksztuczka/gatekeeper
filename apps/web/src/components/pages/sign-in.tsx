@@ -1,14 +1,18 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import { Eye, EyeOff, ShieldCheck } from 'lucide-react';
+import { AlertCircle, Eye, EyeOff, ShieldCheck } from 'lucide-react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import { getAuthErrorCode, getAuthErrorMessage } from '../../features/auth/auth-errors';
+import {
+  getAuthErrorCode,
+  getAuthErrorMessage,
+  humanizeAuthError,
+} from '../../features/auth/auth-errors';
 import { signIn } from '../../features/auth/auth-client';
 import {
   buildSignUpLink,
   buildVerifyEmailLink,
 } from '../../features/auth/auth-routing';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -41,28 +45,29 @@ export function SignInPage() {
       });
 
       const code = getAuthErrorCode(result);
-      const message = getAuthErrorMessage(result, 'Unable to sign in.');
+      const rawMessage = getAuthErrorMessage(result, 'Unable to sign in.');
 
-      if (code === 'EMAIL_NOT_VERIFIED' || message === 'Email not verified') {
+      if (code === 'EMAIL_NOT_VERIFIED' || rawMessage === 'Email not verified') {
         navigate(verifyEmailLink);
         return;
       }
 
-      if (message) {
-        setError(message);
+      if (rawMessage) {
+        setError(humanizeAuthError(code, rawMessage, 'Unable to sign in.'));
         return;
       }
 
       navigate(redirectTo);
     } catch (caughtError) {
-      const message = caughtError instanceof Error ? caughtError.message : 'Unable to sign in.';
+      const rawMessage =
+        caughtError instanceof Error ? caughtError.message : 'Unable to sign in.';
 
-      if (message === 'Email not verified') {
+      if (rawMessage === 'Email not verified') {
         navigate(verifyEmailLink);
         return;
       }
 
-      setError(message);
+      setError(humanizeAuthError(null, rawMessage, 'Unable to sign in.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -135,6 +140,8 @@ export function SignInPage() {
 
         {error ? (
           <Alert variant="destructive">
+            <AlertCircle />
+            <AlertTitle>Sign in failed</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         ) : null}

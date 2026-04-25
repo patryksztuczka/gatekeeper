@@ -1,16 +1,23 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Link } from 'react-router';
+import { AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Link, Navigate, useParams } from 'react-router';
 import {
   acceptOrganizationInvitation,
   createOrganization,
-  createOrganizationInvitation,
   getMembershipResolution,
-  setActiveOrganization,
   type MembershipResolutionResponse,
 } from '../../features/auth/auth-api';
-import { signOut, useSession } from '../../features/auth/auth-client';
-import { getPostLoginView, slugifyOrganizationName } from '../../features/auth/auth-routing';
+import { humanizeAuthError } from '../../features/auth/auth-errors';
+import {
+  buildOrganizationPath,
+  getPostLoginView,
+  slugifyOrganizationName,
+} from '../../features/auth/auth-routing';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 function getInviteRoleLabel(role: string | null) {
   return role || 'member';
@@ -21,471 +28,273 @@ function formatDateTime(value: string) {
 }
 
 export function HomePage() {
-  const { data: session } = useSession();
-  const [membershipResolution, setMembershipResolution] =
-    useState<MembershipResolutionResponse | null>(null);
+  const { organizationSlug } = useParams();
+  const [resolution, setResolution] = useState<MembershipResolutionResponse | null>(null);
   const [resolutionError, setResolutionError] = useState<string | null>(null);
-  const [isLoadingResolution, setIsLoadingResolution] = useState(true);
-  const [selectedOrganizationId, setSelectedOrganizationId] = useState('');
-  const [organizationName, setOrganizationName] = useState('');
-  const [organizationSlug, setOrganizationSlug] = useState('');
-  const [organizationError, setOrganizationError] = useState<string | null>(null);
-  const [organizationStatus, setOrganizationStatus] = useState<string | null>(null);
-  const [isSubmittingOrganization, setIsSubmittingOrganization] = useState(false);
-  const [switchingOrganizationId, setSwitchingOrganizationId] = useState(false);
-  const [acceptingInvitationId, setAcceptingInvitationId] = useState<string | null>(null);
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState('member');
-  const [inviteError, setInviteError] = useState<string | null>(null);
-  const [inviteStatus, setInviteStatus] = useState<string | null>(null);
-  const [inviteLink, setInviteLink] = useState<string | null>(null);
-  const [isSubmittingInvite, setIsSubmittingInvite] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
-  async function refreshMembershipResolution() {
-    setIsLoadingResolution(true);
+  const [orgName, setOrgName] = useState('');
+  const [orgSlug, setOrgSlug] = useState('');
+  const [orgError, setOrgError] = useState<string | null>(null);
+  const [orgStatus, setOrgStatus] = useState<string | null>(null);
+  const [isCreatingOrg, setIsCreatingOrg] = useState(false);
+
+  const [acceptingId, setAcceptingId] = useState<string | null>(null);
+
+  const refresh = async () => {
+    setIsLoading(true);
     setResolutionError(null);
-
     try {
-      const nextMembershipResolution = await getMembershipResolution();
-      setMembershipResolution(nextMembershipResolution);
-      setSelectedOrganizationId(nextMembershipResolution.activeOrganizationId || '');
+      const next = await getMembershipResolution();
+      setResolution(next);
     } catch (caughtError) {
+      const rawMessage =
+        caughtError instanceof Error ? caughtError.message : 'Unable to load organization context.';
       setResolutionError(
-        caughtError instanceof Error ? caughtError.message : 'Unable to load organization context.',
+        humanizeAuthError(null, rawMessage, 'Unable to load organization context.'),
       );
     } finally {
-      setIsLoadingResolution(false);
-    }
-  }
-
-  useEffect(() => {
-    void refreshMembershipResolution();
-  }, []);
-
-  const activeOrganization =
-    membershipResolution?.organizations.find(
-      ({ id }) => id === membershipResolution.activeOrganizationId,
-    ) ?? null;
-
-  const handleCreateOrganization = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    if (!organizationSlug) {
-      setOrganizationError('Organization slug is required.');
-      return;
-    }
-
-    setOrganizationError(null);
-    setOrganizationStatus(null);
-    setIsSubmittingOrganization(true);
-
-    try {
-      await createOrganization({
-        keepCurrentActiveOrganization: false,
-        name: organizationName,
-        slug: organizationSlug,
-      });
-
-      setOrganizationStatus('Organization created.');
-      setOrganizationName('');
-      setOrganizationSlug('');
-      await refreshMembershipResolution();
-    } catch (caughtError) {
-      setOrganizationError(
-        caughtError instanceof Error ? caughtError.message : 'Unable to create organization.',
-      );
-    } finally {
-      setIsSubmittingOrganization(false);
+      setIsLoading(false);
     }
   };
 
-  const handleSwitchOrganization = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  useEffect(() => {
+    void refresh();
+  }, []);
 
-    if (!selectedOrganizationId) {
-      setOrganizationError('Choose an organization first.');
+  const handleCreateOrganization = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!orgSlug) {
+      setOrgError('Organization slug is required.');
       return;
     }
-
-    setOrganizationError(null);
-    setOrganizationStatus(null);
-    setSwitchingOrganizationId(true);
-
+    setOrgError(null);
+    setOrgStatus(null);
+    setIsCreatingOrg(true);
     try {
-      await setActiveOrganization({ organizationId: selectedOrganizationId });
-      setOrganizationStatus('Active organization updated.');
-      await refreshMembershipResolution();
+      await createOrganization({
+        keepCurrentActiveOrganization: false,
+        name: orgName,
+        slug: orgSlug,
+      });
+      setOrgStatus('Organization created.');
+      setOrgName('');
+      setOrgSlug('');
+      await refresh();
     } catch (caughtError) {
-      setOrganizationError(
-        caughtError instanceof Error ? caughtError.message : 'Unable to switch organization.',
-      );
+      const rawMessage =
+        caughtError instanceof Error ? caughtError.message : 'Unable to create organization.';
+      setOrgError(humanizeAuthError(null, rawMessage, 'Unable to create organization.'));
     } finally {
-      setSwitchingOrganizationId(false);
+      setIsCreatingOrg(false);
     }
   };
 
   const handleAcceptInvitation = async (invitationId: string) => {
-    setOrganizationError(null);
-    setOrganizationStatus(null);
-    setAcceptingInvitationId(invitationId);
-
+    setOrgError(null);
+    setOrgStatus(null);
+    setAcceptingId(invitationId);
     try {
       await acceptOrganizationInvitation(invitationId);
-      setOrganizationStatus('Invitation accepted.');
-      await refreshMembershipResolution();
+      setOrgStatus('Invitation accepted.');
+      await refresh();
     } catch (caughtError) {
-      setOrganizationError(
-        caughtError instanceof Error ? caughtError.message : 'Unable to accept invitation.',
-      );
+      const rawMessage =
+        caughtError instanceof Error ? caughtError.message : 'Unable to accept invitation.';
+      setOrgError(humanizeAuthError(null, rawMessage, 'Unable to accept invitation.'));
     } finally {
-      setAcceptingInvitationId(null);
+      setAcceptingId(null);
     }
   };
 
-  const handleInviteSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setInviteError(null);
-    setInviteStatus(null);
-    setInviteLink(null);
-    setIsSubmittingInvite(true);
-
-    try {
-      const invitation = await createOrganizationInvitation({
-        email: inviteEmail,
-        role: inviteRole,
-      });
-
-      setInviteStatus('Invitation created.');
-      setInviteLink(`${window.location.origin}/invite/${invitation.id}`);
-      setInviteEmail('');
-      await refreshMembershipResolution();
-    } catch (caughtError) {
-      setInviteError(
-        caughtError instanceof Error ? caughtError.message : 'Unable to create invitation.',
-      );
-    } finally {
-      setIsSubmittingInvite(false);
-    }
-  };
-
-  if (isLoadingResolution && !membershipResolution) {
-    return <p className="text-sm">Loading account state...</p>;
+  if (isLoading && !resolution) {
+    return <p className="text-sm text-muted-foreground">Loading...</p>;
   }
 
-  if (!membershipResolution) {
+  if (!resolution) {
     return (
-      <div>
-        <p className="text-xs uppercase">Post-login routing</p>
-        <h1 className="mt-2 text-2xl font-bold">Unable to load your organization state</h1>
-        <p className="mt-4 border border-red-700 bg-red-100 p-3 text-sm">
-          {resolutionError || 'Unknown error.'}
-        </p>
-        <button
-          type="button"
-          onClick={() => {
-            void refreshMembershipResolution();
-          }}
-          className="mt-4 border border-black bg-black px-4 py-2 text-sm font-bold text-white"
-        >
-          Try again
-        </button>
+      <div className="mx-auto w-full max-w-xl space-y-4">
+        <Alert variant="destructive">
+          <AlertCircle />
+          <AlertTitle>Couldn’t load your account</AlertTitle>
+          <AlertDescription>{resolutionError || 'Unknown error.'}</AlertDescription>
+        </Alert>
+        <Button onClick={() => void refresh()}>Try again</Button>
       </div>
     );
   }
 
-  const postLoginView = getPostLoginView(membershipResolution);
+  const view = getPostLoginView(resolution);
+  const activeOrg =
+    resolution.organizations.find((org) => org.id === resolution.activeOrganizationId) ?? null;
 
-  return (
-    <main className="min-h-screen bg-stone-200 px-4 py-6 text-black sm:px-6">
-      <div className="mx-auto max-w-5xl space-y-4">
-        <section className="border-2 border-black bg-white p-5">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <p className="text-xs uppercase">Protected app</p>
-              <h1 className="mt-2 text-3xl font-bold">Gatekeeper</h1>
-              <p className="mt-3 text-sm leading-6">
-                Signed in as {session?.user.name || session?.user.email || 'unknown user'}.
-              </p>
-              <p className="text-sm">{session?.user.email}</p>
-            </div>
+  if (!organizationSlug && view === 'app' && activeOrg) {
+    return <Navigate to={buildOrganizationPath(activeOrg.slug)} replace />;
+  }
 
-            <button
-              type="button"
-              onClick={async () => {
-                await signOut();
-              }}
-              className="border border-black bg-black px-4 py-2 text-sm font-bold text-white"
-            >
-              Sign out
-            </button>
+  const feedback = (
+    <>
+      {orgError ? (
+        <Alert variant="destructive">
+          <AlertCircle />
+          <AlertTitle>Something went wrong</AlertTitle>
+          <AlertDescription>{orgError}</AlertDescription>
+        </Alert>
+      ) : null}
+      {orgStatus ? (
+        <Alert>
+          <CheckCircle2 />
+          <AlertTitle>Done</AlertTitle>
+          <AlertDescription>{orgStatus}</AlertDescription>
+        </Alert>
+      ) : null}
+    </>
+  );
+
+  const createOrganizationForm = (
+    <form className="space-y-5" onSubmit={handleCreateOrganization}>
+      <div className="space-y-2">
+        <Label htmlFor="org-name">Organization name</Label>
+        <Input
+          id="org-name"
+          type="text"
+          value={orgName}
+          onChange={(event) => {
+            setOrgName(event.target.value);
+            setOrgSlug(slugifyOrganizationName(event.target.value));
+          }}
+          required
+        />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="org-slug">Slug</Label>
+        <Input
+          id="org-slug"
+          type="text"
+          value={orgSlug}
+          onChange={(event) => setOrgSlug(slugifyOrganizationName(event.target.value))}
+          required
+        />
+      </div>
+      <Button type="submit" disabled={isCreatingOrg}>
+        {isCreatingOrg ? 'Creating...' : 'Create organization'}
+      </Button>
+    </form>
+  );
+
+  if (view === 'organization-creation') {
+    return (
+      <div className="mx-auto w-full max-w-xl space-y-8">
+        <header className="space-y-1">
+          <h1 className="text-2xl font-semibold tracking-tight">Create your organization</h1>
+          <p className="text-sm text-muted-foreground">
+            You don’t belong to any organization yet. Create one to start using Gatekeeper.
+          </p>
+        </header>
+        {feedback}
+        {createOrganizationForm}
+      </div>
+    );
+  }
+
+  if (view === 'organization-choice') {
+    return (
+      <div className="mx-auto w-full max-w-xl space-y-8">
+        <header className="space-y-1">
+          <h1 className="text-2xl font-semibold tracking-tight">Choose how to continue</h1>
+          <p className="text-sm text-muted-foreground">
+            Accept one of your pending invites, or create a new organization.
+          </p>
+        </header>
+
+        {feedback}
+
+        <section className="space-y-3">
+          <h2 className="text-sm font-medium text-muted-foreground">Pending invites</h2>
+          <div className="space-y-3">
+            {resolution.pendingInvites.map((invite) => (
+              <div
+                key={invite.id}
+                className="flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">{invite.organizationName}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {getInviteRoleLabel(invite.role)} · expires {formatDateTime(invite.expiresAt)}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    onClick={() => void handleAcceptInvitation(invite.id)}
+                    disabled={acceptingId === invite.id}
+                  >
+                    {acceptingId === invite.id ? 'Accepting...' : 'Accept'}
+                  </Button>
+                  <Button asChild variant="outline">
+                    <Link to={`/invite/${invite.id}`}>Review</Link>
+                  </Button>
+                </div>
+              </div>
+            ))}
           </div>
-
-          {resolutionError ? (
-            <p className="mt-4 border border-red-700 bg-red-100 p-3 text-sm">{resolutionError}</p>
-          ) : null}
-          {organizationError ? (
-            <p className="mt-4 border border-red-700 bg-red-100 p-3 text-sm">{organizationError}</p>
-          ) : null}
-          {organizationStatus ? (
-            <p className="mt-4 border border-green-700 bg-green-100 p-3 text-sm">
-              {organizationStatus}
-            </p>
-          ) : null}
-          {isLoadingResolution ? <p className="mt-4 text-sm">Refreshing organization data...</p> : null}
         </section>
 
-        {postLoginView === 'organization-creation' ? (
-          <section className="border-2 border-black bg-white p-5">
-            <p className="text-xs uppercase">Create organization</p>
-            <h2 className="mt-2 text-2xl font-bold">You do not have an organization yet</h2>
-            <p className="mt-4 text-sm leading-6">
-              Create one to enter the product. There are no pending invites for this account.
-            </p>
-
-            <form className="mt-5 space-y-4" onSubmit={handleCreateOrganization}>
-              <label className="block text-sm">
-                <span className="font-bold">Organization name</span>
-                <input
-                  type="text"
-                  value={organizationName}
-                  onChange={(event) => {
-                    setOrganizationName(event.target.value);
-                    setOrganizationSlug(slugifyOrganizationName(event.target.value));
-                  }}
-                  className="mt-1 block w-full border border-black px-3 py-2"
-                  required
-                />
-              </label>
-
-              <label className="block text-sm">
-                <span className="font-bold">Slug</span>
-                <input
-                  type="text"
-                  value={organizationSlug}
-                  onChange={(event) => setOrganizationSlug(slugifyOrganizationName(event.target.value))}
-                  className="mt-1 block w-full border border-black px-3 py-2"
-                  required
-                />
-              </label>
-
-              <button
-                type="submit"
-                className="border border-black bg-black px-4 py-2 text-sm font-bold text-white disabled:opacity-60"
-                disabled={isSubmittingOrganization}
-              >
-                {isSubmittingOrganization ? 'Creating...' : 'Create organization'}
-              </button>
-            </form>
+        {resolution.canCreateOrganization ? (
+          <section className="space-y-4">
+            <h2 className="text-sm font-medium text-muted-foreground">
+              Or create a new organization
+            </h2>
+            {createOrganizationForm}
           </section>
-        ) : null}
-
-        {postLoginView === 'organization-choice' ? (
-          <section className="border-2 border-black bg-white p-5">
-            <p className="text-xs uppercase">Choose next step</p>
-            <h2 className="mt-2 text-2xl font-bold">No active organization yet</h2>
-            <p className="mt-4 text-sm leading-6">
-              You can accept one of your pending invites or create a new organization.
-            </p>
-
-            <div className="mt-5 space-y-3">
-              {membershipResolution.pendingInvites.map((invite) => (
-                <div key={invite.id} className="border border-black p-4">
-                  <p className="text-sm font-bold">{invite.organizationName}</p>
-                  <p className="mt-1 text-sm">
-                    Role: {getInviteRoleLabel(invite.role)}. Expires {formatDateTime(invite.expiresAt)}.
-                  </p>
-                  <div className="mt-3 flex flex-wrap gap-3 text-sm">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void handleAcceptInvitation(invite.id);
-                      }}
-                      disabled={acceptingInvitationId === invite.id}
-                      className="border border-black bg-black px-3 py-2 font-bold text-white disabled:opacity-60"
-                    >
-                      {acceptingInvitationId === invite.id ? 'Accepting...' : 'Accept pending invite'}
-                    </button>
-                    <Link to={`/invite/${invite.id}`} className="border border-black px-3 py-2">
-                      Open invite screen
-                    </Link>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {membershipResolution.canCreateOrganization ? (
-              <form className="mt-6 space-y-4 border-t-2 border-black pt-5" onSubmit={handleCreateOrganization}>
-                <p className="text-sm font-bold">Create organization</p>
-
-                <label className="block text-sm">
-                  <span className="font-bold">Organization name</span>
-                  <input
-                    type="text"
-                    value={organizationName}
-                    onChange={(event) => {
-                      setOrganizationName(event.target.value);
-                      setOrganizationSlug(slugifyOrganizationName(event.target.value));
-                    }}
-                    className="mt-1 block w-full border border-black px-3 py-2"
-                    required
-                  />
-                </label>
-
-                <label className="block text-sm">
-                  <span className="font-bold">Slug</span>
-                  <input
-                    type="text"
-                    value={organizationSlug}
-                    onChange={(event) => setOrganizationSlug(slugifyOrganizationName(event.target.value))}
-                    className="mt-1 block w-full border border-black px-3 py-2"
-                    required
-                  />
-                </label>
-
-                <button
-                  type="submit"
-                  className="border border-black bg-black px-4 py-2 text-sm font-bold text-white disabled:opacity-60"
-                  disabled={isSubmittingOrganization}
-                >
-                  {isSubmittingOrganization ? 'Creating...' : 'Create organization'}
-                </button>
-              </form>
-            ) : null}
-          </section>
-        ) : null}
-
-        {postLoginView === 'app' ? (
-          <>
-            <section className="border-2 border-black bg-white p-5">
-              <p className="text-xs uppercase">Current access</p>
-              <h2 className="mt-2 text-2xl font-bold">
-                {activeOrganization?.name || 'No active organization'}
-              </h2>
-              <p className="mt-4 text-sm">
-                Status: {membershipResolution.status}. Organizations: {membershipResolution.organizations.length}. Pending invites: {membershipResolution.pendingInvites.length}.
-              </p>
-              <p className="text-sm">Role: {activeOrganization?.role || 'none'}.</p>
-            </section>
-
-            <section className="border-2 border-black bg-white p-5">
-              <p className="text-xs uppercase">Organization picker</p>
-              <h2 className="mt-2 text-2xl font-bold">Switch active organization</h2>
-
-              <form className="mt-5 space-y-4" onSubmit={handleSwitchOrganization}>
-                <label className="block text-sm">
-                  <span className="font-bold">Organization</span>
-                  <select
-                    value={selectedOrganizationId}
-                    onChange={(event) => setSelectedOrganizationId(event.target.value)}
-                    className="mt-1 block w-full border border-black px-3 py-2"
-                  >
-                    {membershipResolution.organizations.map((organization) => (
-                      <option key={organization.id} value={organization.id}>
-                        {organization.name} ({organization.role})
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <button
-                  type="submit"
-                  className="border border-black bg-black px-4 py-2 text-sm font-bold text-white disabled:opacity-60"
-                  disabled={switchingOrganizationId}
-                >
-                  {switchingOrganizationId ? 'Switching...' : 'Set active organization'}
-                </button>
-              </form>
-            </section>
-
-            <section className="border-2 border-black bg-white p-5">
-              <p className="text-xs uppercase">Admin invite</p>
-              <h2 className="mt-2 text-2xl font-bold">Invite a user</h2>
-              <p className="mt-4 text-sm leading-6">
-                Invitations are created in the current active organization context.
-              </p>
-
-              <form className="mt-5 space-y-4" onSubmit={handleInviteSubmit}>
-                <label className="block text-sm">
-                  <span className="font-bold">Email</span>
-                  <input
-                    type="email"
-                    value={inviteEmail}
-                    onChange={(event) => setInviteEmail(event.target.value)}
-                    className="mt-1 block w-full border border-black px-3 py-2"
-                    autoComplete="email"
-                    disabled={!activeOrganization || isSubmittingInvite}
-                    required
-                  />
-                </label>
-
-                <label className="block text-sm">
-                  <span className="font-bold">Role</span>
-                  <select
-                    value={inviteRole}
-                    onChange={(event) => setInviteRole(event.target.value)}
-                    className="mt-1 block w-full border border-black px-3 py-2"
-                    disabled={!activeOrganization || isSubmittingInvite}
-                  >
-                    <option value="member">member</option>
-                    <option value="admin">admin</option>
-                  </select>
-                </label>
-
-                <button
-                  type="submit"
-                  className="border border-black bg-black px-4 py-2 text-sm font-bold text-white disabled:opacity-60"
-                  disabled={!activeOrganization || isSubmittingInvite}
-                >
-                  {isSubmittingInvite ? 'Sending invite...' : 'Send invite'}
-                </button>
-              </form>
-
-              {inviteError ? (
-                <p className="mt-4 border border-red-700 bg-red-100 p-3 text-sm">{inviteError}</p>
-              ) : null}
-              {inviteStatus ? (
-                <div className="mt-4 border border-green-700 bg-green-100 p-3 text-sm">
-                  <p>{inviteStatus}</p>
-                  {inviteLink ? <p className="mt-2 break-all">Invite link: {inviteLink}</p> : null}
-                </div>
-              ) : null}
-            </section>
-
-            {membershipResolution.pendingInvites.length ? (
-              <section className="border-2 border-black bg-white p-5">
-                <p className="text-xs uppercase">Pending invites</p>
-                <h2 className="mt-2 text-2xl font-bold">Invites for this account</h2>
-
-                <div className="mt-5 space-y-3">
-                  {membershipResolution.pendingInvites.map((invite) => (
-                    <div key={invite.id} className="border border-black p-4">
-                      <p className="text-sm font-bold">{invite.organizationName}</p>
-                      <p className="mt-1 text-sm">
-                        Role: {getInviteRoleLabel(invite.role)}. Expires {formatDateTime(invite.expiresAt)}.
-                      </p>
-                      <div className="mt-3 flex flex-wrap gap-3 text-sm">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            void handleAcceptInvitation(invite.id);
-                          }}
-                          disabled={acceptingInvitationId === invite.id}
-                          className="border border-black bg-black px-3 py-2 font-bold text-white disabled:opacity-60"
-                        >
-                          {acceptingInvitationId === invite.id ? 'Accepting...' : 'Accept now'}
-                        </button>
-                        <Link to={`/invite/${invite.id}`} className="border border-black px-3 py-2">
-                          Review invite
-                        </Link>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            ) : null}
-          </>
         ) : null}
       </div>
-    </main>
+    );
+  }
+
+  return (
+    <div className="mx-auto w-full max-w-5xl space-y-8">
+      <header className="space-y-1">
+        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+        <p className="text-sm text-muted-foreground">
+          {activeOrg ? `You’re working in ${activeOrg.name}.` : 'Welcome back.'}
+        </p>
+      </header>
+
+      {feedback}
+
+      {resolution.pendingInvites.length ? (
+        <section className="space-y-3">
+          <h2 className="text-sm font-medium text-muted-foreground">Pending invites</h2>
+          <div className="space-y-3">
+            {resolution.pendingInvites.map((invite) => (
+              <div
+                key={invite.id}
+                className="flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">{invite.organizationName}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {getInviteRoleLabel(invite.role)} · expires {formatDateTime(invite.expiresAt)}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    onClick={() => void handleAcceptInvitation(invite.id)}
+                    disabled={acceptingId === invite.id}
+                  >
+                    {acceptingId === invite.id ? 'Accepting...' : 'Accept'}
+                  </Button>
+                  <Button asChild variant="outline">
+                    <Link to={`/invite/${invite.id}`}>Review</Link>
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+    </div>
   );
 }

@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import { ShieldCheck } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router';
 import { requestPasswordReset } from '../../features/auth/auth-api';
+import { humanizeAuthError } from '../../features/auth/auth-errors';
 import { buildPasswordResetCallbackUrl } from '../../features/auth/auth-routing';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -30,9 +31,9 @@ export function ForgotPasswordPage() {
 
       setStatus(response.message);
     } catch (caughtError) {
-      setError(
-        caughtError instanceof Error ? caughtError.message : 'Unable to request password reset.',
-      );
+      const rawMessage =
+        caughtError instanceof Error ? caughtError.message : 'Unable to request password reset.';
+      setError(humanizeAuthError(null, rawMessage, 'Unable to request password reset.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -67,12 +68,16 @@ export function ForgotPasswordPage() {
 
         {error ? (
           <Alert variant="destructive">
+            <AlertCircle />
+            <AlertTitle>Couldn’t send reset link</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         ) : null}
 
         {status ? (
           <Alert>
+            <CheckCircle2 />
+            <AlertTitle>Check your inbox</AlertTitle>
             <AlertDescription>{status}</AlertDescription>
           </Alert>
         ) : null}

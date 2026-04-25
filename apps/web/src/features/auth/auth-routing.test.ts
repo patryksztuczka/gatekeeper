@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildEmailVerificationCallbackUrl,
+  buildOrganizationPath,
   buildPasswordResetCallbackUrl,
   getPostLoginView,
   getVerificationCallbackState,
@@ -50,6 +51,12 @@ describe('auth routing helpers', () => {
     expect(slugifyOrganizationName('My Workspace')).toBe('my-workspace');
     expect(slugifyOrganizationName('Zolc Team ++')).toBe('zolc-team');
     expect(slugifyOrganizationName('')).toBe('');
+  });
+
+  it('builds organization-scoped app paths', () => {
+    expect(buildOrganizationPath('acme')).toBe('/acme');
+    expect(buildOrganizationPath('acme', '/settings')).toBe('/acme/settings');
+    expect(buildOrganizationPath('acme', 'projects')).toBe('/acme/projects');
   });
 
   it('builds callback urls for verification and password reset', () => {

@@ -1,15 +1,19 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import { Eye, EyeOff, ShieldCheck } from 'lucide-react';
+import { AlertCircle, Eye, EyeOff, ShieldCheck } from 'lucide-react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import { getAuthErrorMessage } from '../../features/auth/auth-errors';
+import {
+  getAuthErrorCode,
+  getAuthErrorMessage,
+  humanizeAuthError,
+} from '../../features/auth/auth-errors';
 import { signUp } from '../../features/auth/auth-client';
 import {
   buildEmailVerificationCallbackUrl,
   buildSignInLink,
   buildVerifyEmailLink,
 } from '../../features/auth/auth-routing';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -44,18 +48,19 @@ export function SignUpPage() {
         }),
       });
 
-      const message = getAuthErrorMessage(result, 'Unable to create account.');
+      const code = getAuthErrorCode(result);
+      const rawMessage = getAuthErrorMessage(result, 'Unable to create account.');
 
-      if (message) {
-        setError(message);
+      if (rawMessage) {
+        setError(humanizeAuthError(code, rawMessage, 'Unable to create account.'));
         return;
       }
 
       navigate(buildVerifyEmailLink(email, redirectTo));
     } catch (caughtError) {
-      const message =
+      const rawMessage =
         caughtError instanceof Error ? caughtError.message : 'Unable to create account.';
-      setError(message);
+      setError(humanizeAuthError(null, rawMessage, 'Unable to create account.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -130,6 +135,8 @@ export function SignUpPage() {
 
         {error ? (
           <Alert variant="destructive">
+            <AlertCircle />
+            <AlertTitle>Sign up failed</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         ) : null}

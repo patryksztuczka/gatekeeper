@@ -39,6 +39,12 @@ export function slugifyOrganizationName(value: string): string {
     .slice(0, 48);
 }
 
+export function buildOrganizationPath(organizationSlug: string, path = '/'): string {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+
+  return `/${organizationSlug}${normalizedPath === '/' ? '' : normalizedPath}`;
+}
+
 export function buildEmailVerificationCallbackUrl(input: {
   email: string;
   origin: string;

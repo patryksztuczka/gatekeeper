@@ -1,6 +1,8 @@
 import { createBrowserRouter, RouterProvider } from 'react-router';
 import { AuthLayout } from '../components/layouts/auth-layout';
+import { DashboardLayout } from '../components/layouts/dashboard-layout';
 import { GuestOnlyRoute } from '../features/auth/guest-only-route';
+import { OrganizationRoute } from '../features/auth/organization-route';
 import { ProtectedRoute } from '../features/auth/protected-route';
 
 const router = createBrowserRouter([
@@ -29,7 +31,8 @@ const router = createBrowserRouter([
               {
                 path: '/forgot-password',
                 lazy: async () => {
-                  const { ForgotPasswordPage } = await import('../components/pages/forgot-password');
+                  const { ForgotPasswordPage } =
+                    await import('../components/pages/forgot-password');
                   return { Component: ForgotPasswordPage };
                 },
               },
@@ -57,9 +60,8 @@ const router = createBrowserRouter([
           {
             path: '/verify-email/callback',
             lazy: async () => {
-              const { VerifyEmailCallbackPage } = await import(
-                '../components/pages/verify-email-callback'
-              );
+              const { VerifyEmailCallbackPage } =
+                await import('../components/pages/verify-email-callback');
               return { Component: VerifyEmailCallbackPage };
             },
           },
@@ -81,6 +83,38 @@ const router = createBrowserRouter([
               const { HomePage } = await import('../components/pages/home');
               return { Component: HomePage };
             },
+          },
+          {
+            element: <OrganizationRoute />,
+            children: [
+              {
+                path: '/:organizationSlug',
+                element: <DashboardLayout />,
+                children: [
+                  {
+                    index: true,
+                    lazy: async () => {
+                      const { HomePage } = await import('../components/pages/home');
+                      return { Component: HomePage };
+                    },
+                  },
+                  {
+                    path: 'settings',
+                    lazy: async () => {
+                      const { SettingsPage } = await import('../components/pages/settings');
+                      return { Component: SettingsPage };
+                    },
+                  },
+                  ...['projects', 'checklists', 'controls', 'exceptions', 'audit'].map((path) => ({
+                    path,
+                    lazy: async () => {
+                      const { StaticAppPage } = await import('../components/pages/static-app-page');
+                      return { Component: StaticAppPage };
+                    },
+                  })),
+                ],
+              },
+            ],
           },
         ],
       },
