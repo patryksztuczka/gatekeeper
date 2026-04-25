@@ -141,7 +141,8 @@ beforeEach(() => {
   const originalFetch = globalThis.fetch;
 
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    const url =
+      typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
 
     if (url === mailpitSendUrl) {
       if (typeof init?.body !== 'string') {
@@ -243,7 +244,11 @@ describe('organization membership resolution', () => {
       await signUpUser(owner);
 
       const ownerSessionHeaders = await signInUser(owner);
-      const secondOrganization = await createOrganization(ownerSessionHeaders, 'invite-target', false);
+      const secondOrganization = await createOrganization(
+        ownerSessionHeaders,
+        'invite-target',
+        false,
+      );
 
       expect(secondOrganization.id).toBeTruthy();
 
@@ -278,7 +283,9 @@ describe('organization membership resolution', () => {
       await signUpUser(user);
 
       const sessionHeaders = await signInUser(user);
-      const defaultOrganization = (await auth.api.listOrganizations({ headers: sessionHeaders }))[0];
+      const defaultOrganization = (
+        await auth.api.listOrganizations({ headers: sessionHeaders })
+      )[0];
       const secondOrganization = await createOrganization(sessionHeaders, 'second-membership');
       const session = await auth.api.getSession({ headers: sessionHeaders });
 
@@ -430,7 +437,9 @@ describe('organization membership resolution', () => {
       await signUpUser(owner);
 
       const ownerSessionHeaders = await signInUser(owner);
-      const ownerOrganization = (await auth.api.listOrganizations({ headers: ownerSessionHeaders }))[0];
+      const ownerOrganization = (
+        await auth.api.listOrganizations({ headers: ownerSessionHeaders })
+      )[0];
 
       expect(ownerOrganization?.id).toBeTruthy();
 
@@ -475,7 +484,9 @@ describe('organization membership resolution', () => {
       await signUpUser(owner);
 
       const ownerSessionHeaders = await signInUser(owner);
-      const ownerOrganization = (await auth.api.listOrganizations({ headers: ownerSessionHeaders }))[0];
+      const ownerOrganization = (
+        await auth.api.listOrganizations({ headers: ownerSessionHeaders })
+      )[0];
 
       expect(ownerOrganization?.id).toBeTruthy();
 
@@ -516,7 +527,9 @@ describe('organization membership resolution', () => {
       await signUpUser(owner);
 
       const ownerSessionHeaders = await signInUser(owner);
-      const ownerOrganization = (await auth.api.listOrganizations({ headers: ownerSessionHeaders }))[0];
+      const ownerOrganization = (
+        await auth.api.listOrganizations({ headers: ownerSessionHeaders })
+      )[0];
 
       expect(ownerOrganization?.id).toBeTruthy();
 
@@ -553,7 +566,9 @@ describe('organization membership resolution', () => {
       await signUpUser(owner);
 
       const ownerSessionHeaders = await signInUser(owner);
-      const ownerOrganization = (await auth.api.listOrganizations({ headers: ownerSessionHeaders }))[0];
+      const ownerOrganization = (
+        await auth.api.listOrganizations({ headers: ownerSessionHeaders })
+      )[0];
 
       expect(ownerOrganization?.id).toBeTruthy();
 
@@ -596,7 +611,9 @@ describe('organization membership resolution', () => {
       await signUpUser(owner);
 
       const ownerSessionHeaders = await signInUser(owner);
-      const ownerOrganization = (await auth.api.listOrganizations({ headers: ownerSessionHeaders }))[0];
+      const ownerOrganization = (
+        await auth.api.listOrganizations({ headers: ownerSessionHeaders })
+      )[0];
 
       expect(ownerOrganization?.id).toBeTruthy();
 

@@ -1,10 +1,25 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import { Link, useSearchParams } from 'react-router';
-import { getAuthErrorMessage } from '../../features/auth/auth-errors';
+import { AlertCircle, Eye, EyeOff, ShieldCheck } from 'lucide-react';
+import { Link, useNavigate, useSearchParams } from 'react-router';
+import {
+  getAuthErrorCode,
+  getAuthErrorMessage,
+  humanizeAuthError,
+} from '../../features/auth/auth-errors';
 import { signUp } from '../../features/auth/auth-client';
+import {
+  buildEmailVerificationCallbackUrl,
+  buildSignInLink,
+  buildVerifyEmailLink,
+} from '../../features/auth/auth-routing';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 export function SignUpPage() {
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get('redirectTo') || '/';
   const invitedEmail = searchParams.get('email') || '';
@@ -12,138 +27,134 @@ export function SignUpPage() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState(invitedEmail);
   const [password, setPassword] = useState('');
-  const [status, setStatus] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
-    setStatus(null);
     setIsSubmitting(true);
 
     try {
-      const callbackURL = new URL('/sign-in', window.location.origin);
-      callbackURL.searchParams.set('redirectTo', redirectTo);
-
       const result = await signUp.email({
         name,
         email,
         password,
-        callbackURL: callbackURL.toString(),
+        callbackURL: buildEmailVerificationCallbackUrl({
+          email,
+          origin: window.location.origin,
+          redirectTo,
+        }),
       });
 
-      const message = getAuthErrorMessage(result, 'Unable to create account.');
+      const code = getAuthErrorCode(result);
+      const rawMessage = getAuthErrorMessage(result, 'Unable to create account.');
 
-      if (message) {
-        setError(message);
+      if (rawMessage) {
+        setError(humanizeAuthError(code, rawMessage, 'Unable to create account.'));
         return;
       }
 
-      setStatus(
-        isInviteJourney
-          ? 'Account created. Verify your email, then sign in to accept the invitation.'
-          : 'Account created. Check your inbox for the verification email before signing in.',
-      );
+      navigate(buildVerifyEmailLink(email, redirectTo));
     } catch (caughtError) {
-      const message =
+      const rawMessage =
         caughtError instanceof Error ? caughtError.message : 'Unable to create account.';
-      setError(message);
+      setError(humanizeAuthError(null, rawMessage, 'Unable to create account.'));
     } finally {
       setIsSubmitting(false);
     }
   };
 
   return (
-    <form
-      className="rounded-3xl border border-white/10 bg-white p-6 text-slate-900 shadow-xl shadow-slate-950/20 sm:p-7"
-      onSubmit={handleSubmit}
-    >
-      <p className="text-sm font-medium tracking-[0.2em] text-slate-500 uppercase">Sign up</p>
-      <h2 className="mt-2 text-2xl font-semibold">Create your Gatekeeper account</h2>
+    <div className="w-full max-w-sm space-y-8">
+      <div className="space-y-3 text-center">
+        <div className="flex justify-center lg:hidden">
+          <div className="flex size-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <ShieldCheck className="size-5" />
+          </div>
+        </div>
+        <h1 className="text-2xl font-semibold tracking-tight">Create your account</h1>
+        <p className="text-sm text-muted-foreground">
+          {isInviteJourney
+            ? 'Create the invited account. Verify your email, then accept the invite.'
+            : 'Verify your email after signing up to unlock product access.'}
+        </p>
+      </div>
 
-      <div className="mt-6 space-y-4">
-        {isInviteJourney ? (
-          <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-            Create the account with the invited email so you can accept the organization invite.
-          </p>
-        ) : null}
-
-        <label className="block text-sm font-medium text-slate-700">
-          Full name
-          <input
+      <form className="space-y-5" onSubmit={handleSubmit}>
+        <div className="space-y-2">
+          <Label htmlFor="name">Full name</Label>
+          <Input
+            id="name"
             type="text"
-            placeholder="Patryk Sztuczka"
             value={name}
             onChange={(event) => setName(event.target.value)}
-            className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white focus:outline-none"
             autoComplete="name"
             required
           />
-        </label>
+        </div>
 
-        <label className="block text-sm font-medium text-slate-700">
-          Email
-          <input
+        <div className="space-y-2">
+          <Label htmlFor="email">Email</Label>
+          <Input
+            id="email"
             type="email"
-            placeholder="you@company.com"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white focus:outline-none"
             autoComplete="email"
             readOnly={Boolean(invitedEmail)}
             required
           />
-        </label>
+        </div>
 
-        <label className="block text-sm font-medium text-slate-700">
-          Password
-          <input
-            type="password"
-            placeholder="Create a secure password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white focus:outline-none"
-            autoComplete="new-password"
-            minLength={8}
-            required
-          />
-        </label>
-      </div>
+        <div className="space-y-2">
+          <Label htmlFor="password">Password</Label>
+          <div className="relative">
+            <Input
+              id="password"
+              type={showPassword ? 'text' : 'password'}
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              autoComplete="new-password"
+              minLength={8}
+              className="pr-9"
+              required
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((value) => !value)}
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+              aria-pressed={showPassword}
+              className="absolute inset-y-0 right-0 flex w-9 items-center justify-center rounded-r-lg text-muted-foreground outline-none hover:text-foreground focus-visible:text-foreground"
+            >
+              {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+            </button>
+          </div>
+        </div>
 
-      <p className="mt-4 text-sm leading-6 text-slate-500">
-        You will need to verify your email before you can access the product.
-      </p>
+        {error ? (
+          <Alert variant="destructive">
+            <AlertCircle />
+            <AlertTitle>Sign up failed</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : null}
 
-      {error ? (
-        <p className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          {error}
-        </p>
-      ) : null}
+        <Button type="submit" size="lg" disabled={isSubmitting} className="w-full">
+          {isSubmitting ? 'Creating account...' : 'Create account'}
+        </Button>
+      </form>
 
-      {status ? (
-        <p className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-          {status}
-        </p>
-      ) : null}
-
-      <button
-        type="submit"
-        className="mt-6 w-full rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-400"
-        disabled={isSubmitting}
-      >
-        {isSubmitting ? 'Creating account...' : 'Create account'}
-      </button>
-
-      <p className="mt-5 text-center text-sm text-slate-500">
+      <p className="text-center text-sm text-muted-foreground">
         Already have an account?{' '}
         <Link
-          to={`/sign-in?redirectTo=${encodeURIComponent(redirectTo)}${invitedEmail ? `&email=${encodeURIComponent(invitedEmail)}` : ''}`}
-          className="font-medium text-emerald-700 transition hover:text-emerald-600"
+          to={buildSignInLink(redirectTo, invitedEmail || undefined)}
+          className="font-medium text-foreground underline-offset-4 hover:underline"
         >
           Sign in
         </Link>
       </p>
-    </form>
+    </div>
   );
 }

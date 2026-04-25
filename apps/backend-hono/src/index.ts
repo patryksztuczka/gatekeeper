@@ -42,7 +42,8 @@ app.get('/api/auth/invitations/:invitationId', async (c) => {
     headers: c.req.raw.headers,
   });
 
-  const invitation = await resolveInvitationEntryState(c.req.param('invitationId'),
+  const invitation = await resolveInvitationEntryState(
+    c.req.param('invitationId'),
     session
       ? {
           email: session.user.email,

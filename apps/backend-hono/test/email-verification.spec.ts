@@ -134,7 +134,8 @@ beforeEach(() => {
   const originalFetch = globalThis.fetch;
 
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    const url =
+      typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
 
     if (url === mailpitSendUrl) {
       if (typeof init?.body !== 'string') {
@@ -212,7 +213,9 @@ describe('email verification', () => {
       );
 
       expect(response.status).toBe(302);
-      expect(response.headers.get('location')).toBe(`${verificationCallbackURL}?error=INVALID_TOKEN`);
+      expect(response.headers.get('location')).toBe(
+        `${verificationCallbackURL}?error=INVALID_TOKEN`,
+      );
     });
   });
 
@@ -223,7 +226,9 @@ describe('email verification', () => {
       await signUpVerifiedUser(owner);
 
       const ownerSessionHeaders = await signInUser(owner);
-      const ownerOrganization = (await auth.api.listOrganizations({ headers: ownerSessionHeaders }))[0];
+      const ownerOrganization = (
+        await auth.api.listOrganizations({ headers: ownerSessionHeaders })
+      )[0];
 
       expect(ownerOrganization?.id).toBeTruthy();
 

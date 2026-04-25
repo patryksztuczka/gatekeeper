@@ -1,264 +1,300 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Link } from 'react-router';
+import { AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Link, Navigate, useParams } from 'react-router';
 import {
-  createOrganizationInvitation,
+  acceptOrganizationInvitation,
+  createOrganization,
   getMembershipResolution,
   type MembershipResolutionResponse,
 } from '../../features/auth/auth-api';
-import { signOut, useSession } from '../../features/auth/auth-client';
+import { humanizeAuthError } from '../../features/auth/auth-errors';
+import {
+  buildOrganizationPath,
+  getPostLoginView,
+  slugifyOrganizationName,
+} from '../../features/auth/auth-routing';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+
+function getInviteRoleLabel(role: string | null) {
+  return role || 'member';
+}
+
+function formatDateTime(value: string) {
+  return new Date(value).toLocaleString();
+}
 
 export function HomePage() {
-  const { data: session } = useSession();
-  const [membershipResolution, setMembershipResolution] =
-    useState<MembershipResolutionResponse | null>(null);
+  const { organizationSlug } = useParams();
+  const [resolution, setResolution] = useState<MembershipResolutionResponse | null>(null);
   const [resolutionError, setResolutionError] = useState<string | null>(null);
-  const [isLoadingResolution, setIsLoadingResolution] = useState(true);
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState('member');
-  const [inviteError, setInviteError] = useState<string | null>(null);
-  const [inviteStatus, setInviteStatus] = useState<string | null>(null);
-  const [inviteLink, setInviteLink] = useState<string | null>(null);
-  const [isSubmittingInvite, setIsSubmittingInvite] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    let isCancelled = false;
+  const [orgName, setOrgName] = useState('');
+  const [orgSlug, setOrgSlug] = useState('');
+  const [orgError, setOrgError] = useState<string | null>(null);
+  const [orgStatus, setOrgStatus] = useState<string | null>(null);
+  const [isCreatingOrg, setIsCreatingOrg] = useState(false);
 
-    async function loadMembershipResolution() {
-      setIsLoadingResolution(true);
-      setResolutionError(null);
+  const [acceptingId, setAcceptingId] = useState<string | null>(null);
 
-      try {
-        const nextMembershipResolution = await getMembershipResolution();
-
-        if (!isCancelled) {
-          setMembershipResolution(nextMembershipResolution);
-        }
-      } catch (caughtError) {
-        if (!isCancelled) {
-          setResolutionError(
-            caughtError instanceof Error
-              ? caughtError.message
-              : 'Unable to load organization context.',
-          );
-        }
-      } finally {
-        if (!isCancelled) {
-          setIsLoadingResolution(false);
-        }
-      }
-    }
-
-    loadMembershipResolution();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, []);
-
-  const activeOrganization =
-    membershipResolution?.organizations.find(
-      ({ id }) => id === membershipResolution.activeOrganizationId,
-    ) ?? null;
-
-  const handleInviteSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setInviteError(null);
-    setInviteStatus(null);
-    setInviteLink(null);
-    setIsSubmittingInvite(true);
-
+  const refresh = async () => {
+    setIsLoading(true);
+    setResolutionError(null);
     try {
-      const invitation = await createOrganizationInvitation({
-        email: inviteEmail,
-        role: inviteRole,
-      });
-
-      setInviteStatus('Invitation created and emailed successfully.');
-      setInviteLink(`${window.location.origin}/invite/${invitation.id}`);
-      setInviteEmail('');
+      const next = await getMembershipResolution();
+      setResolution(next);
     } catch (caughtError) {
-      const message =
-        caughtError instanceof Error ? caughtError.message : 'Unable to create invitation.';
-      setInviteError(message);
+      const rawMessage =
+        caughtError instanceof Error ? caughtError.message : 'Unable to load organization context.';
+      setResolutionError(
+        humanizeAuthError(null, rawMessage, 'Unable to load organization context.'),
+      );
     } finally {
-      setIsSubmittingInvite(false);
+      setIsLoading(false);
     }
   };
 
-  return (
-    <main className="min-h-screen bg-slate-950 px-6 py-12 text-slate-100 sm:px-8 lg:px-12">
-      <div className="mx-auto max-w-5xl rounded-3xl border border-white/10 bg-white/5 p-8 shadow-2xl shadow-slate-950/30 backdrop-blur sm:p-10">
-        <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <p className="text-sm font-medium tracking-[0.2em] text-emerald-300 uppercase">
-              Protected route
-            </p>
-            <h1 className="mt-3 text-4xl font-semibold tracking-tight text-white sm:text-5xl">
-              Welcome to Gatekeeper
-            </h1>
-            <p className="mt-4 max-w-2xl text-base leading-7 text-slate-300 sm:text-lg">
-              This placeholder shell now includes organization invite creation and invite entry
-              links.
-            </p>
-          </div>
+  useEffect(() => {
+    void refresh();
+  }, []);
 
-          <button
-            type="button"
-            className="rounded-xl border border-white/15 bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:border-white/25 hover:bg-slate-800"
-            onClick={async () => {
-              await signOut();
-            }}
-          >
-            Sign out
-          </button>
-        </div>
+  const handleCreateOrganization = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!orgSlug) {
+      setOrgError('Organization slug is required.');
+      return;
+    }
+    setOrgError(null);
+    setOrgStatus(null);
+    setIsCreatingOrg(true);
+    try {
+      await createOrganization({
+        keepCurrentActiveOrganization: false,
+        name: orgName,
+        slug: orgSlug,
+      });
+      setOrgStatus('Organization created.');
+      setOrgName('');
+      setOrgSlug('');
+      await refresh();
+    } catch (caughtError) {
+      const rawMessage =
+        caughtError instanceof Error ? caughtError.message : 'Unable to create organization.';
+      setOrgError(humanizeAuthError(null, rawMessage, 'Unable to create organization.'));
+    } finally {
+      setIsCreatingOrg(false);
+    }
+  };
 
-        <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-5">
-            <p className="text-sm font-medium text-slate-400">Signed in user</p>
-            <p className="mt-2 text-lg font-semibold text-white">
-              {session?.user.name ?? 'Unknown user'}
-            </p>
-            <p className="mt-1 text-sm text-slate-400">{session?.user.email}</p>
-          </div>
+  const handleAcceptInvitation = async (invitationId: string) => {
+    setOrgError(null);
+    setOrgStatus(null);
+    setAcceptingId(invitationId);
+    try {
+      await acceptOrganizationInvitation(invitationId);
+      setOrgStatus('Invitation accepted.');
+      await refresh();
+    } catch (caughtError) {
+      const rawMessage =
+        caughtError instanceof Error ? caughtError.message : 'Unable to accept invitation.';
+      setOrgError(humanizeAuthError(null, rawMessage, 'Unable to accept invitation.'));
+    } finally {
+      setAcceptingId(null);
+    }
+  };
 
-          <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-5">
-            <p className="text-sm font-medium text-slate-400">Active organization</p>
-            <p className="mt-2 text-lg font-semibold text-white">
-              {activeOrganization?.name || 'No active organization'}
-            </p>
-            <p className="mt-1 text-sm text-slate-400">
-              {activeOrganization ? `${activeOrganization.role} access` : 'Load an invite to join one.'}
-            </p>
-          </div>
+  if (isLoading && !resolution) {
+    return <p className="text-sm text-muted-foreground">Loading...</p>;
+  }
 
-          <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-5">
-            <p className="text-sm font-medium text-slate-400">Membership state</p>
-            <p className="mt-2 text-lg font-semibold text-white">
-              {membershipResolution?.status || 'Loading'}
-            </p>
-            <p className="mt-1 text-sm text-slate-400">
-              {membershipResolution
-                ? `${membershipResolution.organizations.length} organizations, ${membershipResolution.pendingInvites.length} pending invites`
-                : 'Resolving access...' }
-            </p>
-          </div>
-        </div>
+  if (!resolution) {
+    return (
+      <div className="mx-auto w-full max-w-xl space-y-4">
+        <Alert variant="destructive">
+          <AlertCircle />
+          <AlertTitle>Couldn’t load your account</AlertTitle>
+          <AlertDescription>{resolutionError || 'Unknown error.'}</AlertDescription>
+        </Alert>
+        <Button onClick={() => void refresh()}>Try again</Button>
+      </div>
+    );
+  }
 
-        <section className="mt-8 rounded-3xl border border-white/10 bg-slate-900/70 p-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <p className="text-sm font-medium tracking-[0.2em] text-slate-400 uppercase">
-                Admin invite
-              </p>
-              <h2 className="mt-2 text-2xl font-semibold text-white">Invite a user</h2>
-              <p className="mt-2 text-sm leading-6 text-slate-300">
-                Invitations are created in the current active organization context.
-              </p>
-            </div>
-            {activeOrganization ? (
-              <span className="rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-1 text-xs font-medium text-sky-200">
-                {activeOrganization.name}
-              </span>
-            ) : null}
-          </div>
+  const view = getPostLoginView(resolution);
+  const activeOrg =
+    resolution.organizations.find((org) => org.id === resolution.activeOrganizationId) ?? null;
 
-          {resolutionError ? (
-            <p className="mt-4 rounded-xl border border-rose-400/25 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">
-              {resolutionError}
-            </p>
-          ) : null}
+  if (!organizationSlug && view === 'app' && activeOrg) {
+    return <Navigate to={buildOrganizationPath(activeOrg.slug)} replace />;
+  }
 
-          {isLoadingResolution ? (
-            <p className="mt-4 text-sm text-slate-400">Loading organization context...</p>
-          ) : null}
+  const feedback = (
+    <>
+      {orgError ? (
+        <Alert variant="destructive">
+          <AlertCircle />
+          <AlertTitle>Something went wrong</AlertTitle>
+          <AlertDescription>{orgError}</AlertDescription>
+        </Alert>
+      ) : null}
+      {orgStatus ? (
+        <Alert>
+          <CheckCircle2 />
+          <AlertTitle>Done</AlertTitle>
+          <AlertDescription>{orgStatus}</AlertDescription>
+        </Alert>
+      ) : null}
+    </>
+  );
 
-          <form className="mt-6 grid gap-4 sm:grid-cols-[1fr_180px_auto]" onSubmit={handleInviteSubmit}>
-            <label className="block text-sm font-medium text-slate-200">
-              Email
-              <input
-                type="email"
-                placeholder="you@company.com"
-                value={inviteEmail}
-                onChange={(event) => setInviteEmail(event.target.value)}
-                className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-sky-400 focus:outline-none"
-                autoComplete="email"
-                disabled={!activeOrganization || isSubmittingInvite}
-                required
-              />
-            </label>
+  const createOrganizationForm = (
+    <form className="space-y-5" onSubmit={handleCreateOrganization}>
+      <div className="space-y-2">
+        <Label htmlFor="org-name">Organization name</Label>
+        <Input
+          id="org-name"
+          type="text"
+          value={orgName}
+          onChange={(event) => {
+            setOrgName(event.target.value);
+            setOrgSlug(slugifyOrganizationName(event.target.value));
+          }}
+          required
+        />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="org-slug">Slug</Label>
+        <Input
+          id="org-slug"
+          type="text"
+          value={orgSlug}
+          onChange={(event) => setOrgSlug(slugifyOrganizationName(event.target.value))}
+          required
+        />
+      </div>
+      <Button type="submit" disabled={isCreatingOrg}>
+        {isCreatingOrg ? 'Creating...' : 'Create organization'}
+      </Button>
+    </form>
+  );
 
-            <label className="block text-sm font-medium text-slate-200">
-              Role
-              <select
-                value={inviteRole}
-                onChange={(event) => setInviteRole(event.target.value)}
-                className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white focus:border-sky-400 focus:outline-none"
-                disabled={!activeOrganization || isSubmittingInvite}
+  if (view === 'organization-creation') {
+    return (
+      <div className="mx-auto w-full max-w-xl space-y-8">
+        <header className="space-y-1">
+          <h1 className="text-2xl font-semibold tracking-tight">Create your organization</h1>
+          <p className="text-sm text-muted-foreground">
+            You don’t belong to any organization yet. Create one to start using Gatekeeper.
+          </p>
+        </header>
+        {feedback}
+        {createOrganizationForm}
+      </div>
+    );
+  }
+
+  if (view === 'organization-choice') {
+    return (
+      <div className="mx-auto w-full max-w-xl space-y-8">
+        <header className="space-y-1">
+          <h1 className="text-2xl font-semibold tracking-tight">Choose how to continue</h1>
+          <p className="text-sm text-muted-foreground">
+            Accept one of your pending invites, or create a new organization.
+          </p>
+        </header>
+
+        {feedback}
+
+        <section className="space-y-3">
+          <h2 className="text-sm font-medium text-muted-foreground">Pending invites</h2>
+          <div className="space-y-3">
+            {resolution.pendingInvites.map((invite) => (
+              <div
+                key={invite.id}
+                className="flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between"
               >
-                <option value="member">member</option>
-                <option value="admin">admin</option>
-              </select>
-            </label>
-
-            <button
-              type="submit"
-              className="mt-7 rounded-xl bg-sky-500 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-300"
-              disabled={!activeOrganization || isSubmittingInvite}
-            >
-              {isSubmittingInvite ? 'Sending invite...' : 'Send invite'}
-            </button>
-          </form>
-
-          {inviteError ? (
-            <p className="mt-4 rounded-xl border border-rose-400/25 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">
-              {inviteError}
-            </p>
-          ) : null}
-
-          {inviteStatus ? (
-            <div className="mt-4 rounded-xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-200">
-              <p>{inviteStatus}</p>
-              {inviteLink ? (
-                <p className="mt-2 break-all text-emerald-100">
-                  Invite link: <span className="font-medium">{inviteLink}</span>
-                </p>
-              ) : null}
-            </div>
-          ) : null}
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">{invite.organizationName}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {getInviteRoleLabel(invite.role)} · expires {formatDateTime(invite.expiresAt)}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    onClick={() => void handleAcceptInvitation(invite.id)}
+                    disabled={acceptingId === invite.id}
+                  >
+                    {acceptingId === invite.id ? 'Accepting...' : 'Accept'}
+                  </Button>
+                  <Button asChild variant="outline">
+                    <Link to={`/invite/${invite.id}`}>Review</Link>
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
         </section>
 
-        {membershipResolution?.pendingInvites.length ? (
-          <section className="mt-8 rounded-3xl border border-white/10 bg-slate-900/70 p-6">
-            <p className="text-sm font-medium tracking-[0.2em] text-slate-400 uppercase">
-              Pending invites
-            </p>
-            <h2 className="mt-2 text-2xl font-semibold text-white">Invites for this account</h2>
-            <div className="mt-5 space-y-3">
-              {membershipResolution.pendingInvites.map((invite) => (
-                <div
-                  key={invite.id}
-                  className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-slate-950/80 p-4 sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <div>
-                    <p className="text-sm font-medium text-white">{invite.organizationName}</p>
-                    <p className="mt-1 text-sm text-slate-400">
-                      Role: {invite.role || 'member'} · Expires {new Date(invite.expiresAt).toLocaleString()}
-                    </p>
-                  </div>
-                  <Link
-                    to={`/invite/${invite.id}`}
-                    className="rounded-xl border border-white/15 bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:border-white/25 hover:bg-slate-800"
-                  >
-                    Review invite
-                  </Link>
-                </div>
-              ))}
-            </div>
+        {resolution.canCreateOrganization ? (
+          <section className="space-y-4">
+            <h2 className="text-sm font-medium text-muted-foreground">
+              Or create a new organization
+            </h2>
+            {createOrganizationForm}
           </section>
         ) : null}
       </div>
-    </main>
+    );
+  }
+
+  return (
+    <div className="mx-auto w-full max-w-5xl space-y-8">
+      <header className="space-y-1">
+        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+        <p className="text-sm text-muted-foreground">
+          {activeOrg ? `You’re working in ${activeOrg.name}.` : 'Welcome back.'}
+        </p>
+      </header>
+
+      {feedback}
+
+      {resolution.pendingInvites.length ? (
+        <section className="space-y-3">
+          <h2 className="text-sm font-medium text-muted-foreground">Pending invites</h2>
+          <div className="space-y-3">
+            {resolution.pendingInvites.map((invite) => (
+              <div
+                key={invite.id}
+                className="flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">{invite.organizationName}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {getInviteRoleLabel(invite.role)} · expires {formatDateTime(invite.expiresAt)}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    onClick={() => void handleAcceptInvitation(invite.id)}
+                    disabled={acceptingId === invite.id}
+                  >
+                    {acceptingId === invite.id ? 'Accepting...' : 'Accept'}
+                  </Button>
+                  <Button asChild variant="outline">
+                    <Link to={`/invite/${invite.id}`}>Review</Link>
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+    </div>
   );
 }
