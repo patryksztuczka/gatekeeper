@@ -1,0 +1,46 @@
+apps/web/src/components/pages/controls.tsx
+  1b189954d7c1a7ab 4,32-35,38,49-61,71-82,100-128,177-179,264-330
+apps/backend-hono/src/lib/controls.ts
+  c8eec76b5943757a 37,41-52,86-92,151,176-186,329-346,385-455,514
+  1b189954d7c1a7ab 115-117,326-328
+apps/backend-hono/src/index.ts
+  c8eec76b5943757a 14-15,147,152,173,178
+  1b189954d7c1a7ab 148-151,174-177
+apps/web/src/features/auth/auth-api.ts
+  1b189954d7c1a7ab 94,98-105,254-270,272,279-287,289
+apps/backend-hono/test/draft-controls.spec.ts
+  1b189954d7c1a7ab 129-147,149,188-192,194,456-564
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "3a6aa4067a157c7491dc4e1101c24739750f35d5",
+  "prompts": {
+    "1b189954d7c1a7ab": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_23966b536ffeOSW3x25ZE4izBX",
+        "model": "openai/gpt-5.5"
+      },
+      "human_author": "Patryk Sztuczka",
+      "messages": [],
+      "total_additions": 329,
+      "total_deletions": 26,
+      "accepted_lines": 323,
+      "overriden_lines": 0
+    },
+    "c8eec76b5943757a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_23a07b5a3ffeT4WUfj0mfrpyQU",
+        "model": "openai/gpt-5.5"
+      },
+      "human_author": "Patryk Sztuczka",
+      "messages": [],
+      "total_additions": 133,
+      "total_deletions": 13,
+      "accepted_lines": 129,
+      "overriden_lines": 0
+    }
+  }
+}
