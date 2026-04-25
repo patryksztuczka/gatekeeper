@@ -24,7 +24,9 @@ import {
   listControls,
   listDraftControls,
   normalizeControlArchiveBody,
+  normalizeControlListFilters,
   normalizeControlProposedUpdateBody,
+  normalizeDraftControlListFilters,
   normalizeDraftControlCreateBody,
   normalizeDraftControlPublishBody,
   publishControlProposedUpdate,
@@ -220,7 +222,12 @@ app.get('/api/organizations/:organizationSlug/controls/drafts', async (c) => {
     return c.json({ error: 'Organization not found' }, 404);
   }
 
-  return c.json({ draftControls: await listDraftControls(membership) });
+  return c.json({
+    draftControls: await listDraftControls(
+      membership,
+      normalizeDraftControlListFilters(c.req.query()),
+    ),
+  });
 });
 
 app.get('/api/organizations/:organizationSlug/controls', async (c) => {
@@ -241,16 +248,18 @@ app.get('/api/organizations/:organizationSlug/controls', async (c) => {
     return c.json({ error: 'Organization not found' }, 404);
   }
 
-  const status = c.req.query('status') === 'archived' ? 'archived' : 'active';
+  const filters = normalizeControlListFilters(c.req.query());
 
-  if (status === 'archived' && !canArchiveControls(membership.role)) {
+  if (filters.status === 'archived' && !canArchiveControls(membership.role)) {
     return c.json(
       { error: 'Only Organization owners and admins can view archived Controls.' },
       403,
     );
   }
 
-  return c.json({ controls: await listControls(membership.organizationId, status) });
+  return c.json({
+    controls: await listControls(membership.organizationId, filters),
+  });
 });
 
 app.get('/api/organizations/:organizationSlug/controls/proposed-updates', async (c) => {

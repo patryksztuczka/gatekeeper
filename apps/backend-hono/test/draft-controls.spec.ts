@@ -126,9 +126,27 @@ async function createDraftControlRequest(
   };
 }
 
-async function listDraftControlsRequest(organizationSlug: string, headers: Headers) {
+function toQueryString(params: Record<string, string | undefined>) {
+  const query = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value) {
+      query.set(key, value);
+    }
+  }
+
+  const value = query.toString();
+
+  return value ? `?${value}` : '';
+}
+
+async function listDraftControlsRequest(
+  organizationSlug: string,
+  headers: Headers,
+  query: Record<string, string | undefined> = {},
+) {
   const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/controls/drafts`,
+    `http://example.com/api/organizations/${organizationSlug}/controls/drafts${toQueryString(query)}`,
     { headers },
   );
 
@@ -170,11 +188,10 @@ async function publishDraftControlRequest(
 async function listControlsRequest(
   organizationSlug: string,
   headers: Headers,
-  status: 'active' | 'archived' = 'active',
+  query: Record<string, string | undefined> = {},
 ) {
-  const query = status === 'archived' ? '?status=archived' : '';
   const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/controls${query}`,
+    `http://example.com/api/organizations/${organizationSlug}/controls${toQueryString(query)}`,
     {
       headers,
     },
@@ -548,6 +565,119 @@ describe('Draft Controls', () => {
     });
   });
 
+  it('searches and filters active Controls by current Control fields', async () => {
+    const { headers: ownerHeaders, organization } = await createSignedInOwner('control-search');
+    const member = await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'control-search-member',
+      role: 'member',
+    });
+
+    const firstDraftResponse = await createDraftControlRequest(organization.slug, ownerHeaders, {
+      controlCode: 'AUTH-008',
+      title: 'Require phishing-resistant MFA',
+    });
+    const secondDraftResponse = await createDraftControlRequest(organization.slug, ownerHeaders, {
+      controlCode: 'DATA-003',
+      title: 'Retain audit logs',
+    });
+    const firstDraft = firstDraftResponse.body.draftControl as { id: string };
+    const secondDraft = secondDraftResponse.body.draftControl as { id: string };
+
+    await publishDraftControlRequest(organization.slug, firstDraft.id, ownerHeaders, {
+      ...completePublishBody,
+      externalStandardsMappings: [
+        { description: 'Logical access controls', framework: 'SOC 2', reference: 'CC6.1' },
+      ],
+    });
+    await publishDraftControlRequest(organization.slug, secondDraft.id, ownerHeaders, {
+      acceptedEvidenceTypes: ['scanner result'],
+      applicabilityConditions: 'Applies to audit log pipelines.',
+      businessMeaning: 'Release teams must preserve audit events for investigation.',
+      externalStandardsMappings: [{ framework: 'ISO 27001', reference: 'A.8.15' }],
+      releaseImpact: 'advisory',
+      verificationMethod: 'Review scanner retention output.',
+    });
+
+    await expect(
+      listControlsRequest(organization.slug, member.headers, { q: 'CC6.1' }),
+    ).resolves.toMatchObject({
+      body: { controls: [{ controlCode: 'AUTH-008' }] },
+      status: 200,
+    });
+    await expect(
+      listControlsRequest(organization.slug, member.headers, { q: 'investigation' }),
+    ).resolves.toMatchObject({
+      body: { controls: [{ controlCode: 'DATA-003' }] },
+      status: 200,
+    });
+    await expect(
+      listControlsRequest(organization.slug, member.headers, { releaseImpact: 'advisory' }),
+    ).resolves.toMatchObject({
+      body: { controls: [{ controlCode: 'DATA-003' }] },
+      status: 200,
+    });
+    await expect(
+      listControlsRequest(organization.slug, member.headers, {
+        acceptedEvidenceType: 'scanner result',
+      }),
+    ).resolves.toMatchObject({
+      body: { controls: [{ controlCode: 'DATA-003' }] },
+      status: 200,
+    });
+    await expect(
+      listControlsRequest(organization.slug, member.headers, { standardsFramework: 'SOC 2' }),
+    ).resolves.toMatchObject({
+      body: { controls: [{ controlCode: 'AUTH-008' }] },
+      status: 200,
+    });
+    await expect(
+      listControlsRequest(organization.slug, ownerHeaders, { status: 'archived' }),
+    ).resolves.toMatchObject({
+      body: { controls: [] },
+      status: 200,
+    });
+  });
+
+  it('searches Draft Controls without weakening draft visibility rules', async () => {
+    const { headers: ownerHeaders, organization } = await createSignedInOwner('draft-search-owner');
+    const firstMember = await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'draft-search-first-member',
+      role: 'member',
+    });
+    const secondMember = await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'draft-search-second-member',
+      role: 'member',
+    });
+
+    await createDraftControlRequest(organization.slug, firstMember.headers, {
+      controlCode: 'AUTH-009',
+      title: 'Review session timeout',
+    });
+    await createDraftControlRequest(organization.slug, secondMember.headers, {
+      controlCode: 'DATA-004',
+      title: 'Classify analytics exports',
+    });
+
+    await expect(
+      listDraftControlsRequest(organization.slug, firstMember.headers, { q: 'DATA' }),
+    ).resolves.toMatchObject({
+      body: { draftControls: [] },
+      status: 200,
+    });
+    await expect(
+      listDraftControlsRequest(organization.slug, ownerHeaders, { q: 'DATA' }),
+    ).resolves.toMatchObject({
+      body: { draftControls: [{ controlCode: 'DATA-004' }] },
+      status: 200,
+    });
+  });
+
   it('limits Draft Control publishing to Organization owners and admins', async () => {
     const { headers: ownerHeaders, organization } = await createSignedInOwner('publish-role-owner');
     const member = await createSignedInMember({
@@ -647,7 +777,7 @@ describe('Draft Controls', () => {
       status: 200,
     });
     await expect(
-      listControlsRequest(organization.slug, ownerHeaders, 'archived'),
+      listControlsRequest(organization.slug, ownerHeaders, { status: 'archived' }),
     ).resolves.toMatchObject({
       body: { controls: [{ controlCode: 'AUTH-008' }] },
       status: 200,
@@ -761,7 +891,7 @@ describe('Draft Controls', () => {
     await archiveControlRequest(organization.slug, control.id, admin.headers);
 
     await expect(
-      listControlsRequest(organization.slug, member.headers, 'archived'),
+      listControlsRequest(organization.slug, member.headers, { status: 'archived' }),
     ).resolves.toMatchObject({
       body: { error: 'Only Organization owners and admins can view archived Controls.' },
       status: 403,

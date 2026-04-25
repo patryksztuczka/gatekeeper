@@ -43,6 +43,7 @@ export type ControlListItem = {
   createdAt: string;
   currentVersion: ControlVersionResponse;
   id: string;
+  status: 'active';
   title: string;
   versions: ControlVersionResponse[];
 };
@@ -54,6 +55,18 @@ export type ControlProposedUpdateListItem = ControlVersionResponse & {
     name: string;
   };
   controlId: string;
+};
+
+export type ControlListFilters = {
+  acceptedEvidenceType: string;
+  releaseImpact: ReleaseImpact | '';
+  search: string;
+  standardsFramework: string;
+  status: 'active' | 'archived';
+};
+
+export type DraftControlListFilters = {
+  search: string;
 };
 
 type CreateDraftControlInput = {
@@ -106,7 +119,7 @@ export function canArchiveControls(role: string): boolean {
 
 export async function listControls(
   organizationId: string,
-  status: 'active' | 'archived' = 'active',
+  filters: ControlListFilters = defaultControlListFilters,
 ): Promise<ControlListItem[]> {
   const rows = await db
     .select({
@@ -131,12 +144,16 @@ export async function listControls(
     .where(
       and(
         eq(controls.organizationId, organizationId),
-        status === 'archived' ? isNotNull(controls.archivedAt) : isNull(controls.archivedAt),
+        filters.status === 'archived'
+          ? isNotNull(controls.archivedAt)
+          : isNull(controls.archivedAt),
       ),
     )
     .orderBy(asc(controlVersions.controlCode), asc(controlVersions.title));
 
-  return Promise.all(rows.map((row) => toControlListItem(row)));
+  return (await Promise.all(rows.map((row) => toControlListItem(row)))).filter((control) =>
+    matchesControlFilters(control, filters),
+  );
 }
 
 export async function getControlDetail(
@@ -220,6 +237,7 @@ export async function listControlProposedUpdates(
 
 export async function listDraftControls(
   membership: OrganizationMembership,
+  filters: DraftControlListFilters = defaultDraftControlListFilters,
 ): Promise<DraftControlListItem[]> {
   const rows = await db
     .select({
@@ -244,15 +262,17 @@ export async function listDraftControls(
     )
     .orderBy(asc(draftControls.createdAt), asc(draftControls.controlCode));
 
-  return rows.map(({ authorEmail, authorId, authorName, createdAt, ...draft }) => ({
-    ...draft,
-    author: {
-      email: authorEmail,
-      id: authorId,
-      name: authorName,
-    },
-    createdAt: createdAt.toISOString(),
-  }));
+  return rows
+    .map(({ authorEmail, authorId, authorName, createdAt, ...draft }) => ({
+      ...draft,
+      author: {
+        email: authorEmail,
+        id: authorId,
+        name: authorName,
+      },
+      createdAt: createdAt.toISOString(),
+    }))
+    .filter((draftControl) => matchesDraftControlFilters(draftControl, filters));
 }
 
 export async function createDraftControl(
@@ -655,6 +675,27 @@ export function normalizeDraftControlPublishBody(body: unknown): PublishDraftCon
   };
 }
 
+export function normalizeControlListFilters(
+  query: Record<string, string | string[] | undefined>,
+): ControlListFilters {
+  const releaseImpact = firstQueryValue(query.releaseImpact);
+  const status = firstQueryValue(query.status);
+
+  return {
+    acceptedEvidenceType: firstQueryValue(query.acceptedEvidenceType).trim(),
+    releaseImpact: releaseImpacts.has(releaseImpact) ? (releaseImpact as ReleaseImpact) : '',
+    search: firstQueryValue(query.q).trim(),
+    standardsFramework: firstQueryValue(query.standardsFramework).trim(),
+    status: status === 'archived' ? 'archived' : 'active',
+  };
+}
+
+export function normalizeDraftControlListFilters(
+  query: Record<string, string | string[] | undefined>,
+): DraftControlListFilters {
+  return { search: firstQueryValue(query.q).trim() };
+}
+
 export function normalizeControlArchiveBody(body: unknown): ArchiveControlInput {
   const value = typeof body === 'object' && body !== null ? body : {};
   const record = value as Record<string, unknown>;
@@ -721,6 +762,77 @@ function toStringArray(value: unknown): string[] {
     : [];
 }
 
+function firstQueryValue(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? (value[0] ?? '') : (value ?? '');
+}
+
+const defaultControlListFilters: ControlListFilters = {
+  acceptedEvidenceType: '',
+  releaseImpact: '',
+  search: '',
+  standardsFramework: '',
+  status: 'active',
+};
+
+const defaultDraftControlListFilters: DraftControlListFilters = { search: '' };
+
+function matchesControlFilters(control: ControlListItem, filters: ControlListFilters): boolean {
+  const version = control.currentVersion;
+  const search = filters.search.toLowerCase();
+
+  if (
+    search &&
+    ![
+      version.controlCode,
+      version.title,
+      version.businessMeaning,
+      ...version.externalStandardsMappings.flatMap((mapping) => [
+        mapping.framework,
+        mapping.reference,
+      ]),
+    ].some((value) => value.toLowerCase().includes(search))
+  ) {
+    return false;
+  }
+
+  if (filters.releaseImpact && version.releaseImpact !== filters.releaseImpact) {
+    return false;
+  }
+
+  if (
+    filters.acceptedEvidenceType &&
+    !version.acceptedEvidenceTypes.some(
+      (value) => value.toLowerCase() === filters.acceptedEvidenceType.toLowerCase(),
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    filters.standardsFramework &&
+    !version.externalStandardsMappings.some(
+      (mapping) => mapping.framework.toLowerCase() === filters.standardsFramework.toLowerCase(),
+    )
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function matchesDraftControlFilters(
+  draftControl: DraftControlListItem,
+  filters: DraftControlListFilters,
+): boolean {
+  const search = filters.search.toLowerCase();
+
+  return search
+    ? [draftControl.controlCode, draftControl.title].some((value) =>
+        value.toLowerCase().includes(search),
+      )
+    : true;
+}
+
 function toExternalStandardsMappings(value: unknown): ExternalStandardsMapping[] {
   if (!Array.isArray(value)) {
     return [];
@@ -783,6 +895,7 @@ async function toControlListItem(row: {
       versionNumber: row.versionNumber,
     }),
     id: row.controlId,
+    status: 'active',
     title: row.title,
     versions,
   };

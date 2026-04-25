@@ -36,8 +36,8 @@ function canPublishControls(role: string | null): boolean {
   return role === 'owner' || role === 'admin';
 }
 
-function isArchivedView(value: string | null): boolean {
-  return value === 'archived';
+function toStatusFilter(value: string | null) {
+  return value === 'active' || value === 'draft' || value === 'archived' ? value : 'all';
 }
 
 export function ControlsPage() {
@@ -58,7 +58,20 @@ export function ControlsPage() {
   const [title, setTitle] = useState('');
   const [archiveControlId, setArchiveControlId] = useState<string | null>(null);
   const [archiveReason, setArchiveReason] = useState('');
-  const archivedView = isArchivedView(searchParams.get('status'));
+  const search = searchParams.get('q') ?? '';
+  const statusFilter = toStatusFilter(searchParams.get('status'));
+  const archivedView = statusFilter === 'archived';
+  const releaseImpact = searchParams.get('releaseImpact') ?? '';
+  const acceptedEvidenceType = searchParams.get('acceptedEvidenceType') ?? '';
+  const standardsFramework = searchParams.get('standardsFramework') ?? '';
+  const canListDrafts =
+    (statusFilter === 'all' || statusFilter === 'draft') &&
+    !releaseImpact &&
+    !acceptedEvidenceType &&
+    !standardsFramework;
+  const hasActiveControlFilters = Boolean(
+    search || releaseImpact || acceptedEvidenceType || standardsFramework,
+  );
 
   useEffect(() => {
     const refresh = async () => {
@@ -68,9 +81,21 @@ export function ControlsPage() {
       setError(null);
       try {
         const [controlResponse, draftResponse, proposalResponse, resolution] = await Promise.all([
-          listControls(organizationSlug, archivedView ? 'archived' : 'active'),
-          listDraftControls(organizationSlug),
-          listControlProposedUpdates(organizationSlug),
+          statusFilter === 'draft'
+            ? Promise.resolve({ controls: [] })
+            : listControls(organizationSlug, {
+                acceptedEvidenceType,
+                releaseImpact,
+                search,
+                standardsFramework,
+                status: statusFilter === 'archived' ? 'archived' : 'active',
+              }),
+          canListDrafts
+            ? listDraftControls(organizationSlug, search)
+            : Promise.resolve({ draftControls: [] }),
+          archivedView
+            ? Promise.resolve({ proposedUpdates: [] })
+            : listControlProposedUpdates(organizationSlug),
           getMembershipResolution(),
         ]);
         const organization = resolution.organizations.find((org) => org.slug === organizationSlug);
@@ -89,7 +114,36 @@ export function ControlsPage() {
     };
 
     void refresh();
-  }, [archivedView, organizationSlug]);
+  }, [
+    acceptedEvidenceType,
+    archivedView,
+    canListDrafts,
+    organizationSlug,
+    releaseImpact,
+    search,
+    standardsFramework,
+    statusFilter,
+  ]);
+
+  const handleFilterControls = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const formData = new FormData(event.currentTarget);
+    const nextParams = new URLSearchParams();
+    const nextSearch = String(formData.get('q') ?? '').trim();
+    const nextStatus = String(formData.get('status') ?? 'all');
+    const nextReleaseImpact = String(formData.get('releaseImpact') ?? '');
+    const nextAcceptedEvidenceType = String(formData.get('acceptedEvidenceType') ?? '').trim();
+    const nextStandardsFramework = String(formData.get('standardsFramework') ?? '').trim();
+
+    if (nextSearch) nextParams.set('q', nextSearch);
+    if (nextStatus !== 'all') nextParams.set('status', nextStatus);
+    if (nextReleaseImpact) nextParams.set('releaseImpact', nextReleaseImpact);
+    if (nextAcceptedEvidenceType) nextParams.set('acceptedEvidenceType', nextAcceptedEvidenceType);
+    if (nextStandardsFramework) nextParams.set('standardsFramework', nextStandardsFramework);
+
+    setSearchParams(nextParams);
+  };
 
   const handleCreateDraftControl = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -138,7 +192,9 @@ export function ControlsPage() {
         verificationMethod: String(formData.get('verificationMethod') ?? ''),
       });
 
-      setControls((currentControls) => [...currentControls, response.control]);
+      if ((statusFilter === 'all' || statusFilter === 'active') && !hasActiveControlFilters) {
+        setControls((currentControls) => [...currentControls, response.control]);
+      }
       setDraftControls((currentDrafts) =>
         currentDrafts.filter((currentDraft) => currentDraft.id !== draftControl.id),
       );
@@ -370,6 +426,73 @@ export function ControlsPage() {
               : 'Published Controls are visible to every Organization member.'}
           </p>
         </div>
+        <form className="rounded-xl border bg-card p-4" onSubmit={handleFilterControls}>
+          <div className="grid gap-4 md:grid-cols-5">
+            <div className="space-y-2 md:col-span-2">
+              <Label htmlFor="control-search">Search Controls</Label>
+              <Input
+                id="control-search"
+                name="q"
+                defaultValue={search}
+                placeholder="Control Code, title, meaning, or standard"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="control-status-filter">Status</Label>
+              <select
+                id="control-status-filter"
+                name="status"
+                className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                defaultValue={statusFilter}
+              >
+                <option value="all">All current</option>
+                <option value="active">Active</option>
+                <option value="draft">Draft</option>
+                <option value="archived">Archived</option>
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="release-impact-filter">Release Impact</Label>
+              <select
+                id="release-impact-filter"
+                name="releaseImpact"
+                className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                defaultValue={releaseImpact}
+              >
+                <option value="">Any</option>
+                <option value="blocking">blocking</option>
+                <option value="needs review">needs review</option>
+                <option value="advisory">advisory</option>
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="evidence-type-filter">Accepted Evidence Type</Label>
+              <Input
+                id="evidence-type-filter"
+                name="acceptedEvidenceType"
+                defaultValue={acceptedEvidenceType}
+                placeholder="document"
+              />
+            </div>
+          </div>
+          <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-end">
+            <div className="flex-1 space-y-2">
+              <Label htmlFor="standards-framework-filter">Standards framework</Label>
+              <Input
+                id="standards-framework-filter"
+                name="standardsFramework"
+                defaultValue={standardsFramework}
+                placeholder="SOC 2"
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button type="submit">Apply filters</Button>
+              <Button type="button" variant="outline" onClick={() => setSearchParams({})}>
+                Clear
+              </Button>
+            </div>
+          </div>
+        </form>
         {isLoading ? (
           <p className="text-sm text-muted-foreground">Loading Controls...</p>
         ) : controls.length === 0 ? (
