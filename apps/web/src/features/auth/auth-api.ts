@@ -73,25 +73,37 @@ export type DraftControlListItem = {
 export type ControlListItem = {
   controlCode: string;
   createdAt: string;
-  currentVersion: {
-    acceptedEvidenceTypes: string[];
-    applicabilityConditions: string;
-    businessMeaning: string;
-    controlCode: string;
-    createdAt: string;
-    externalStandardsMappings: Array<{
-      description?: string;
-      framework: string;
-      reference: string;
-    }>;
-    id: string;
-    releaseImpact: 'advisory' | 'blocking' | 'needs review';
-    title: string;
-    verificationMethod: string;
-    versionNumber: number;
-  };
+  currentVersion: ControlVersionResponse;
   id: string;
   title: string;
+  versions: ControlVersionResponse[];
+};
+
+export type ControlVersionResponse = {
+  acceptedEvidenceTypes: string[];
+  applicabilityConditions: string;
+  businessMeaning: string;
+  controlCode: string;
+  createdAt: string;
+  externalStandardsMappings: Array<{
+    description?: string;
+    framework: string;
+    reference: string;
+  }>;
+  id: string;
+  releaseImpact: 'advisory' | 'blocking' | 'needs review';
+  title: string;
+  verificationMethod: string;
+  versionNumber: number;
+};
+
+export type ControlProposedUpdateListItem = ControlVersionResponse & {
+  author: {
+    email: string;
+    id: string;
+    name: string;
+  };
+  controlId: string;
 };
 
 export type OrganizationMemberListItem = {
@@ -260,6 +272,15 @@ export function listControls(organizationSlug: string) {
   );
 }
 
+export function listControlProposedUpdates(organizationSlug: string) {
+  return request<{ proposedUpdates: ControlProposedUpdateListItem[] }>(
+    `/api/organizations/${organizationSlug}/controls/proposed-updates`,
+    {
+      method: 'GET',
+    },
+  );
+}
+
 export function createDraftControl(
   organizationSlug: string,
   input: {
@@ -292,6 +313,41 @@ export function publishDraftControl(
     {
       method: 'POST',
       body: JSON.stringify(input),
+    },
+  );
+}
+
+export function createControlProposedUpdate(
+  organizationSlug: string,
+  controlId: string,
+  input: {
+    acceptedEvidenceTypes: string[];
+    applicabilityConditions: string;
+    businessMeaning: string;
+    controlCode: string;
+    releaseImpact: string;
+    title: string;
+    verificationMethod: string;
+  },
+) {
+  return request<{ proposedUpdate: ControlProposedUpdateListItem }>(
+    `/api/organizations/${organizationSlug}/controls/${controlId}/proposed-updates`,
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function publishControlProposedUpdate(
+  organizationSlug: string,
+  controlId: string,
+  proposedUpdateId: string,
+) {
+  return request<{ control: ControlListItem }>(
+    `/api/organizations/${organizationSlug}/controls/${controlId}/proposed-updates/${proposedUpdateId}/publish`,
+    {
+      method: 'POST',
     },
   );
 }
