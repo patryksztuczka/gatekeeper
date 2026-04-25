@@ -11,7 +11,9 @@ import {
   listActiveProjects,
   listOrganizationMembers,
   normalizeProjectCreateBody,
+  normalizeProjectUpdateBody,
   ProjectInputError,
+  updateProjectForMembership,
 } from './lib/projects';
 
 const app = new Hono();
@@ -165,6 +167,49 @@ app.get('/api/organizations/:organizationSlug/projects/:projectSlug', async (c) 
   }
 
   return c.json({ project });
+});
+
+app.patch('/api/organizations/:organizationSlug/projects/:projectSlug', async (c) => {
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const membership = await getOrganizationMembership(
+    c.req.param('organizationSlug'),
+    session.user.id,
+  );
+
+  if (!membership) {
+    return c.json({ error: 'Project unavailable' }, 404);
+  }
+
+  if (!canManageProjects(membership.role)) {
+    return c.json({ error: 'Only Organization owners and admins can edit Projects.' }, 403);
+  }
+
+  try {
+    const project = await updateProjectForMembership({
+      membership,
+      projectSlug: c.req.param('projectSlug'),
+      updates: normalizeProjectUpdateBody(await c.req.json().catch(() => null)),
+    });
+
+    if (!project) {
+      return c.json({ error: 'Project unavailable' }, 404);
+    }
+
+    return c.json({ project });
+  } catch (caughtError) {
+    if (caughtError instanceof ProjectInputError) {
+      return c.json({ error: caughtError.message }, 400);
+    }
+
+    throw caughtError;
+  }
 });
 
 app.on(['POST', 'GET'], '/api/auth/*', (c) => auth.handler(c.req.raw));

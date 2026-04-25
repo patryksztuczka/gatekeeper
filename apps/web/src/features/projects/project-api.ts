@@ -43,3 +43,39 @@ export async function getProjectDetail(input: {
   const body = (await response.json()) as { project: ProjectDetail };
   return { status: 'available', project: body.project };
 }
+
+export async function updateProjectSettings(input: {
+  description: string;
+  name: string;
+  organizationSlug: string;
+  projectOwnerMemberId: string | null;
+  projectSlug: string;
+}): Promise<ProjectDetail> {
+  const response = await fetch(
+    `${AUTH_BASE_URL}/api/organizations/${input.organizationSlug}/projects/${input.projectSlug}`,
+    {
+      body: JSON.stringify({
+        description: input.description,
+        name: input.name,
+        projectOwnerMemberId: input.projectOwnerMemberId,
+      }),
+      credentials: 'include',
+      headers: { 'content-type': 'application/json' },
+      method: 'PATCH',
+    },
+  );
+  const body = (await response.json().catch(() => null)) as {
+    error?: string;
+    project?: ProjectDetail;
+  } | null;
+
+  if (!response.ok) {
+    throw new Error(body?.error ?? 'Unable to update Project.');
+  }
+
+  if (!body?.project) {
+    throw new Error('Unable to update Project.');
+  }
+
+  return body.project;
+}

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { AlertCircle, CalendarDays, FolderKanban, UserRound } from 'lucide-react';
 import { getProjectDetail, type ProjectDetail } from '@/features/projects/project-api';
-import { buildProjectsPath } from '@/features/projects/project-routing';
+import { buildProjectSettingsPath, buildProjectsPath } from '@/features/projects/project-routing';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -79,6 +79,9 @@ export function ProjectDetailPage() {
   }
 
   const { project } = state;
+  const settingsPath = organizationSlug
+    ? buildProjectSettingsPath(organizationSlug, project.slug)
+    : projectsPath;
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6">
@@ -95,9 +98,14 @@ export function ProjectDetailPage() {
             </p>
           </div>
         </div>
-        <Button asChild variant="outline">
-          <Link to={projectsPath}>All Projects</Link>
-        </Button>
+        <div className="flex gap-2">
+          <Button asChild variant="outline">
+            <Link to={projectsPath}>All Projects</Link>
+          </Button>
+          <Button asChild>
+            <Link to={settingsPath}>Project settings</Link>
+          </Button>
+        </div>
       </header>
 
       <div className="grid gap-4 md:grid-cols-2">
