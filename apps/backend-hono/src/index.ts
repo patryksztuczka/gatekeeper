@@ -4,6 +4,13 @@ import { auth } from './lib/auth';
 import { env } from 'cloudflare:workers';
 import { resolveInvitationEntryState, resolveMembershipResolution } from './lib/auth-organization';
 import {
+  canManageControlApprovalPolicy,
+  ControlApprovalPolicyInputError,
+  getControlApprovalPolicy,
+  normalizeControlApprovalPolicyUpdateBody,
+  updateControlApprovalPolicy,
+} from './lib/control-approval-policy';
+import {
   canPublishControls,
   ControlProposedUpdateInputError,
   createControlProposedUpdate,
@@ -104,6 +111,68 @@ app.get('/api/organizations/:organizationSlug/members', async (c) => {
   }
 
   return c.json({ members: await listOrganizationMembers(membership.organizationId) });
+});
+
+app.get('/api/organizations/:organizationSlug/control-approval-policy', async (c) => {
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const membership = await getOrganizationMembership(
+    c.req.param('organizationSlug'),
+    session.user.id,
+  );
+
+  if (!membership) {
+    return c.json({ error: 'Organization not found' }, 404);
+  }
+
+  return c.json({ policy: await getControlApprovalPolicy(membership.organizationId) });
+});
+
+app.patch('/api/organizations/:organizationSlug/control-approval-policy', async (c) => {
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const membership = await getOrganizationMembership(
+    c.req.param('organizationSlug'),
+    session.user.id,
+  );
+
+  if (!membership) {
+    return c.json({ error: 'Organization not found' }, 404);
+  }
+
+  if (!canManageControlApprovalPolicy(membership.role)) {
+    return c.json(
+      { error: 'Only Organization owners and admins can edit Control Approval Policy.' },
+      403,
+    );
+  }
+
+  try {
+    const policy = await updateControlApprovalPolicy(
+      membership,
+      normalizeControlApprovalPolicyUpdateBody(await c.req.json().catch(() => null)),
+    );
+
+    return c.json({ policy });
+  } catch (caughtError) {
+    if (caughtError instanceof ControlApprovalPolicyInputError) {
+      return c.json({ error: caughtError.message }, 400);
+    }
+
+    throw caughtError;
+  }
 });
 
 app.get('/api/organizations/:organizationSlug/projects', async (c) => {

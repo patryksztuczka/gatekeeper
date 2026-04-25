@@ -113,6 +113,12 @@ export type OrganizationMemberListItem = {
   role: string;
 };
 
+export type ControlApprovalPolicy = {
+  enabled: boolean;
+  maxRequiredApprovals: number;
+  requiredApprovals: number;
+};
+
 type ApiErrorBody = {
   error?:
     | {
@@ -224,6 +230,28 @@ export function listOrganizationMembers(organizationSlug: string) {
     `/api/organizations/${organizationSlug}/members`,
     {
       method: 'GET',
+    },
+  );
+}
+
+export function getControlApprovalPolicy(organizationSlug: string) {
+  return request<{ policy: ControlApprovalPolicy }>(
+    `/api/organizations/${organizationSlug}/control-approval-policy`,
+    {
+      method: 'GET',
+    },
+  );
+}
+
+export function updateControlApprovalPolicy(
+  organizationSlug: string,
+  input: { enabled: boolean; requiredApprovals: number },
+) {
+  return request<{ policy: ControlApprovalPolicy }>(
+    `/api/organizations/${organizationSlug}/control-approval-policy`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(input),
     },
   );
 }
