@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildEmailVerificationCallbackUrl,
   buildOrganizationPath,
+  buildOrganizationSwitchPath,
   buildPasswordResetCallbackUrl,
   getPostLoginView,
   getVerificationCallbackState,
@@ -57,6 +58,82 @@ describe('auth routing helpers', () => {
     expect(buildOrganizationPath('acme')).toBe('/acme');
     expect(buildOrganizationPath('acme', '/settings')).toBe('/acme/settings');
     expect(buildOrganizationPath('acme', 'projects')).toBe('/acme/projects');
+  });
+
+  it('preserves static organization-scoped paths when switching organizations', () => {
+    expect(
+      buildOrganizationSwitchPath({
+        currentOrganizationSlug: 'acme',
+        currentPathname: '/acme',
+        nextOrganizationSlug: 'globex',
+      }),
+    ).toBe('/globex');
+    expect(
+      buildOrganizationSwitchPath({
+        currentOrganizationSlug: 'acme',
+        currentPathname: '/acme/settings',
+        nextOrganizationSlug: 'globex',
+      }),
+    ).toBe('/globex/settings');
+    expect(
+      buildOrganizationSwitchPath({
+        currentOrganizationSlug: 'acme',
+        currentPathname: '/acme/projects',
+        nextOrganizationSlug: 'globex',
+      }),
+    ).toBe('/globex/projects');
+    expect(
+      buildOrganizationSwitchPath({
+        currentOrganizationSlug: 'acme',
+        currentPathname: '/acme/controls',
+        nextOrganizationSlug: 'globex',
+      }),
+    ).toBe('/globex/controls');
+    expect(
+      buildOrganizationSwitchPath({
+        currentOrganizationSlug: 'acme',
+        currentPathname: '/acme/checklists',
+        nextOrganizationSlug: 'globex',
+      }),
+    ).toBe('/globex/checklists');
+    expect(
+      buildOrganizationSwitchPath({
+        currentOrganizationSlug: 'acme',
+        currentPathname: '/acme/exceptions',
+        nextOrganizationSlug: 'globex',
+      }),
+    ).toBe('/globex/exceptions');
+    expect(
+      buildOrganizationSwitchPath({
+        currentOrganizationSlug: 'acme',
+        currentPathname: '/acme/audit',
+        nextOrganizationSlug: 'globex',
+      }),
+    ).toBe('/globex/audit');
+  });
+
+  it('redirects dynamic or non-organization paths to the selected organization home', () => {
+    expect(
+      buildOrganizationSwitchPath({
+        currentOrganizationSlug: 'acme',
+        currentPathname: '/acme/p/my-project',
+        nextOrganizationSlug: 'globex',
+      }),
+    ).toBe('/globex');
+    expect(
+      buildOrganizationSwitchPath({
+        currentOrganizationSlug: 'acme',
+        currentPathname: '/settings',
+        nextOrganizationSlug: 'globex',
+      }),
+    ).toBe('/globex');
+    expect(
+      buildOrganizationSwitchPath({
+        currentOrganizationSlug: null,
+        currentPathname: '/',
+        nextOrganizationSlug: 'globex',
+      }),
+    ).toBe('/globex');
   });
 
   it('builds callback urls for verification and password reset', () => {

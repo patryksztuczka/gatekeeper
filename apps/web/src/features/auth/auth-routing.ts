@@ -45,6 +45,45 @@ export function buildOrganizationPath(organizationSlug: string, path = '/'): str
   return `/${organizationSlug}${normalizedPath === '/' ? '' : normalizedPath}`;
 }
 
+const STATIC_ORGANIZATION_PATHS = new Set([
+  '/',
+  '/settings',
+  '/projects',
+  '/controls',
+  '/checklists',
+  '/exceptions',
+  '/audit',
+]);
+
+export function buildOrganizationSwitchPath(input: {
+  currentPathname: string;
+  currentOrganizationSlug: string | null;
+  nextOrganizationSlug: string;
+}): string {
+  const { currentPathname, currentOrganizationSlug, nextOrganizationSlug } = input;
+
+  if (!currentOrganizationSlug) {
+    return buildOrganizationPath(nextOrganizationSlug);
+  }
+
+  const organizationPathPrefix = `/${currentOrganizationSlug}`;
+
+  if (
+    currentPathname !== organizationPathPrefix &&
+    !currentPathname.startsWith(`${organizationPathPrefix}/`)
+  ) {
+    return buildOrganizationPath(nextOrganizationSlug);
+  }
+
+  const pathWithinOrganization = currentPathname.slice(organizationPathPrefix.length) || '/';
+
+  if (!STATIC_ORGANIZATION_PATHS.has(pathWithinOrganization)) {
+    return buildOrganizationPath(nextOrganizationSlug);
+  }
+
+  return buildOrganizationPath(nextOrganizationSlug, pathWithinOrganization);
+}
+
 export function buildEmailVerificationCallbackUrl(input: {
   email: string;
   origin: string;
