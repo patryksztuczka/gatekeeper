@@ -152,7 +152,8 @@ beforeEach(() => {
   const originalFetch = globalThis.fetch;
 
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    const url =
+      typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
 
     if (url === mailpitSendUrl) {
       if (typeof init?.body !== 'string') {
