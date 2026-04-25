@@ -152,3 +152,32 @@ export const invitations = sqliteTable(
     index('invitation_inviter_id_idx').on(table.inviterId),
   ],
 );
+
+export const projects = sqliteTable(
+  'projects',
+  {
+    id: text('id').primaryKey(),
+    organizationId: text('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description').notNull(),
+    slug: text('slug').notNull(),
+    projectOwnerMemberId: text('project_owner_member_id').references(() => members.id, {
+      onDelete: 'set null',
+    }),
+    archivedAt: integer('archived_at', { mode: 'timestamp_ms' }),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index('project_organization_id_idx').on(table.organizationId),
+    index('project_owner_member_id_idx').on(table.projectOwnerMemberId),
+    uniqueIndex('project_organization_slug_unique').on(table.organizationId, table.slug),
+  ],
+);

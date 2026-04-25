@@ -3,6 +3,7 @@ import { cors } from 'hono/cors';
 import { auth } from './lib/auth';
 import { env } from 'cloudflare:workers';
 import { resolveInvitationEntryState, resolveMembershipResolution } from './lib/auth-organization';
+import { getProjectDetailForMember } from './lib/projects';
 
 const app = new Hono();
 
@@ -53,6 +54,28 @@ app.get('/api/auth/invitations/:invitationId', async (c) => {
   );
 
   return c.json(invitation, invitation.status === 'invalid' ? 404 : 200);
+});
+
+app.get('/api/organizations/:organizationSlug/projects/:projectSlug', async (c) => {
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const project = await getProjectDetailForMember({
+    organizationSlug: c.req.param('organizationSlug'),
+    projectSlug: c.req.param('projectSlug'),
+    userId: session.user.id,
+  });
+
+  if (!project) {
+    return c.json({ error: 'Project unavailable' }, 404);
+  }
+
+  return c.json({ project });
 });
 
 app.on(['POST', 'GET'], '/api/auth/*', (c) => auth.handler(c.req.raw));
