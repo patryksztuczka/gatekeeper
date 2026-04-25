@@ -5,14 +5,19 @@ import { env } from 'cloudflare:workers';
 import { resolveInvitationEntryState, resolveMembershipResolution } from './lib/auth-organization';
 import {
   canPublishControls,
+  ControlProposedUpdateInputError,
+  createControlProposedUpdate,
   ControlPublishInputError,
   createDraftControl,
   DraftControlInputError,
   getControlDetail,
+  listControlProposedUpdates,
   listControls,
   listDraftControls,
+  normalizeControlProposedUpdateBody,
   normalizeDraftControlCreateBody,
   normalizeDraftControlPublishBody,
+  publishControlProposedUpdate,
   publishDraftControl,
 } from './lib/controls';
 import {
@@ -166,6 +171,27 @@ app.get('/api/organizations/:organizationSlug/controls', async (c) => {
   return c.json({ controls: await listControls(membership.organizationId) });
 });
 
+app.get('/api/organizations/:organizationSlug/controls/proposed-updates', async (c) => {
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const membership = await getOrganizationMembership(
+    c.req.param('organizationSlug'),
+    session.user.id,
+  );
+
+  if (!membership) {
+    return c.json({ error: 'Organization not found' }, 404);
+  }
+
+  return c.json({ proposedUpdates: await listControlProposedUpdates(membership) });
+});
+
 app.get('/api/organizations/:organizationSlug/controls/:controlId', async (c) => {
   const session = await auth.api.getSession({
     headers: c.req.raw.headers,
@@ -227,6 +253,45 @@ app.post('/api/organizations/:organizationSlug/controls/drafts', async (c) => {
   }
 });
 
+app.post('/api/organizations/:organizationSlug/controls/:controlId/proposed-updates', async (c) => {
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const membership = await getOrganizationMembership(
+    c.req.param('organizationSlug'),
+    session.user.id,
+  );
+
+  if (!membership) {
+    return c.json({ error: 'Control unavailable' }, 404);
+  }
+
+  try {
+    const proposedUpdate = await createControlProposedUpdate(
+      membership,
+      c.req.param('controlId'),
+      normalizeControlProposedUpdateBody(await c.req.json().catch(() => null)),
+    );
+
+    if (!proposedUpdate) {
+      return c.json({ error: 'Control unavailable' }, 404);
+    }
+
+    return c.json({ proposedUpdate }, 201);
+  } catch (caughtError) {
+    if (caughtError instanceof ControlProposedUpdateInputError) {
+      return c.json({ error: caughtError.message }, 400);
+    }
+
+    throw caughtError;
+  }
+});
+
 app.post(
   '/api/organizations/:organizationSlug/controls/drafts/:draftControlId/publish',
   async (c) => {
@@ -265,6 +330,52 @@ app.post(
       return c.json({ control }, 201);
     } catch (caughtError) {
       if (caughtError instanceof ControlPublishInputError) {
+        return c.json({ error: caughtError.message }, 400);
+      }
+
+      throw caughtError;
+    }
+  },
+);
+
+app.post(
+  '/api/organizations/:organizationSlug/controls/:controlId/proposed-updates/:proposedUpdateId/publish',
+  async (c) => {
+    const session = await auth.api.getSession({
+      headers: c.req.raw.headers,
+    });
+
+    if (!session) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const membership = await getOrganizationMembership(
+      c.req.param('organizationSlug'),
+      session.user.id,
+    );
+
+    if (!membership) {
+      return c.json({ error: 'Proposed update unavailable' }, 404);
+    }
+
+    if (!canPublishControls(membership.role)) {
+      return c.json({ error: 'Only Organization owners and admins can publish Controls.' }, 403);
+    }
+
+    try {
+      const control = await publishControlProposedUpdate(
+        membership,
+        c.req.param('controlId'),
+        c.req.param('proposedUpdateId'),
+      );
+
+      if (!control) {
+        return c.json({ error: 'Proposed update unavailable' }, 404);
+      }
+
+      return c.json({ control }, 201);
+    } catch (caughtError) {
+      if (caughtError instanceof ControlProposedUpdateInputError) {
         return c.json({ error: caughtError.message }, 400);
       }
 

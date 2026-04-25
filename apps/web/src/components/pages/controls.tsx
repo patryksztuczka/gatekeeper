@@ -3,12 +3,16 @@ import type { FormEvent } from 'react';
 import { AlertCircle, CheckCircle2, Plus } from 'lucide-react';
 import { useParams } from 'react-router';
 import {
+  createControlProposedUpdate,
   createDraftControl,
   getMembershipResolution,
+  listControlProposedUpdates,
   listControls,
   listDraftControls,
+  publishControlProposedUpdate,
   publishDraftControl,
   type ControlListItem,
+  type ControlProposedUpdateListItem,
   type DraftControlListItem,
 } from '../../features/auth/auth-api';
 import { humanizeAuthError } from '../../features/auth/auth-errors';
@@ -33,10 +37,13 @@ export function ControlsPage() {
   const { organizationSlug } = useParams();
   const [controls, setControls] = useState<ControlListItem[]>([]);
   const [draftControls, setDraftControls] = useState<DraftControlListItem[]>([]);
+  const [proposedUpdates, setProposedUpdates] = useState<ControlProposedUpdateListItem[]>([]);
   const [currentRole, setCurrentRole] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [publishingDraftId, setPublishingDraftId] = useState<string | null>(null);
+  const [creatingProposalControlId, setCreatingProposalControlId] = useState<string | null>(null);
+  const [publishingProposalId, setPublishingProposalId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [controlCode, setControlCode] = useState('');
@@ -49,15 +56,17 @@ export function ControlsPage() {
       setIsLoading(true);
       setError(null);
       try {
-        const [controlResponse, draftResponse, resolution] = await Promise.all([
+        const [controlResponse, draftResponse, proposalResponse, resolution] = await Promise.all([
           listControls(organizationSlug),
           listDraftControls(organizationSlug),
+          listControlProposedUpdates(organizationSlug),
           getMembershipResolution(),
         ]);
         const organization = resolution.organizations.find((org) => org.slug === organizationSlug);
 
         setControls(controlResponse.controls);
         setDraftControls(draftResponse.draftControls);
+        setProposedUpdates(proposalResponse.proposedUpdates);
         setCurrentRole(organization?.role ?? null);
       } catch (caughtError) {
         const rawMessage =
@@ -129,6 +138,77 @@ export function ControlsPage() {
       setError(humanizeAuthError(null, rawMessage, 'Unable to publish Control.'));
     } finally {
       setPublishingDraftId(null);
+    }
+  };
+
+  const handleCreateControlProposedUpdate = async (
+    event: FormEvent<HTMLFormElement>,
+    control: ControlListItem,
+  ) => {
+    event.preventDefault();
+    if (!organizationSlug) return;
+
+    const formData = new FormData(event.currentTarget);
+    const acceptedEvidenceTypes = String(formData.get('acceptedEvidenceTypes') ?? '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    setCreatingProposalControlId(control.id);
+    setError(null);
+    setStatus(null);
+    try {
+      const response = await createControlProposedUpdate(organizationSlug, control.id, {
+        acceptedEvidenceTypes,
+        applicabilityConditions: String(formData.get('applicabilityConditions') ?? ''),
+        businessMeaning: String(formData.get('businessMeaning') ?? ''),
+        controlCode: String(formData.get('controlCode') ?? ''),
+        releaseImpact: String(formData.get('releaseImpact') ?? ''),
+        title: String(formData.get('title') ?? ''),
+        verificationMethod: String(formData.get('verificationMethod') ?? ''),
+      });
+
+      setProposedUpdates((currentUpdates) => [...currentUpdates, response.proposedUpdate]);
+      setStatus('Proposed update saved.');
+    } catch (caughtError) {
+      const rawMessage =
+        caughtError instanceof Error ? caughtError.message : 'Unable to save proposed update.';
+      setError(humanizeAuthError(null, rawMessage, 'Unable to save proposed update.'));
+    } finally {
+      setCreatingProposalControlId(null);
+    }
+  };
+
+  const handlePublishControlProposedUpdate = async (
+    proposedUpdate: ControlProposedUpdateListItem,
+  ) => {
+    if (!organizationSlug) return;
+
+    setPublishingProposalId(proposedUpdate.id);
+    setError(null);
+    setStatus(null);
+    try {
+      const response = await publishControlProposedUpdate(
+        organizationSlug,
+        proposedUpdate.controlId,
+        proposedUpdate.id,
+      );
+
+      setControls((currentControls) =>
+        currentControls.map((control) =>
+          control.id === response.control.id ? response.control : control,
+        ),
+      );
+      setProposedUpdates((currentUpdates) =>
+        currentUpdates.filter((currentUpdate) => currentUpdate.id !== proposedUpdate.id),
+      );
+      setStatus('Proposed update published.');
+    } catch (caughtError) {
+      const rawMessage =
+        caughtError instanceof Error ? caughtError.message : 'Unable to publish proposed update.';
+      setError(humanizeAuthError(null, rawMessage, 'Unable to publish proposed update.'));
+    } finally {
+      setPublishingProposalId(null);
     }
   };
 
@@ -214,25 +294,167 @@ export function ControlsPage() {
           </div>
         ) : (
           <div className="grid gap-3">
-            {controls.map((control) => (
-              <article key={control.id} className="rounded-xl border bg-card p-5">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="space-y-2">
-                    <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                      {control.controlCode} · v{control.currentVersion.versionNumber}
+            {controls.map((control) => {
+              const proposedUpdate = proposedUpdates.find(
+                (update) => update.controlId === control.id,
+              );
+
+              return (
+                <article key={control.id} className="rounded-xl border bg-card p-5">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                        {control.controlCode} · v{control.currentVersion.versionNumber}
+                      </p>
+                      <h3 className="text-base font-semibold">{control.title}</h3>
+                      <p className="text-sm text-muted-foreground">
+                        Release Impact: {control.currentVersion.releaseImpact}
+                      </p>
+                      <p className="text-sm">{control.currentVersion.businessMeaning}</p>
+                    </div>
+                    <p className="shrink-0 text-xs text-muted-foreground">
+                      Published {formatDate(control.createdAt)}
                     </p>
-                    <h3 className="text-base font-semibold">{control.title}</h3>
-                    <p className="text-sm text-muted-foreground">
-                      Release Impact: {control.currentVersion.releaseImpact}
-                    </p>
-                    <p className="text-sm">{control.currentVersion.businessMeaning}</p>
                   </div>
-                  <p className="shrink-0 text-xs text-muted-foreground">
-                    Published {formatDate(control.createdAt)}
-                  </p>
-                </div>
-              </article>
-            ))}
+                  {control.versions.length > 0 ? (
+                    <div className="mt-4 rounded-lg border bg-muted/30 p-3">
+                      <h4 className="text-sm font-medium">Version history</h4>
+                      <div className="mt-2 space-y-2">
+                        {control.versions.map((version) => (
+                          <div key={version.id} className="text-sm text-muted-foreground">
+                            v{version.versionNumber} · {version.controlCode} · {version.title} ·{' '}
+                            {formatDate(version.createdAt)}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {proposedUpdate ? (
+                    <div className="mt-4 rounded-lg border border-dashed p-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="space-y-1">
+                          <h4 className="text-sm font-medium">Open proposed update</h4>
+                          <p className="text-sm text-muted-foreground">
+                            {proposedUpdate.controlCode} · {proposedUpdate.title}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            Author: {proposedUpdate.author.name} ({proposedUpdate.author.email})
+                          </p>
+                        </div>
+                        {canPublish ? (
+                          <Button
+                            type="button"
+                            disabled={publishingProposalId === proposedUpdate.id}
+                            onClick={() => void handlePublishControlProposedUpdate(proposedUpdate)}
+                          >
+                            <CheckCircle2 />
+                            {publishingProposalId === proposedUpdate.id
+                              ? 'Publishing...'
+                              : 'Publish Proposed Update'}
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : (
+                    <form
+                      className="mt-4 grid gap-4 rounded-lg border p-4"
+                      onSubmit={(event) => handleCreateControlProposedUpdate(event, control)}
+                    >
+                      <h4 className="text-sm font-medium">Propose update</h4>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label htmlFor={`${control.id}-proposal-code`}>Control Code</Label>
+                          <Input
+                            id={`${control.id}-proposal-code`}
+                            name="controlCode"
+                            defaultValue={control.currentVersion.controlCode}
+                            required
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor={`${control.id}-proposal-title`}>Title</Label>
+                          <Input
+                            id={`${control.id}-proposal-title`}
+                            name="title"
+                            defaultValue={control.currentVersion.title}
+                            required
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor={`${control.id}-proposal-business-meaning`}>
+                            Business meaning
+                          </Label>
+                          <textarea
+                            id={`${control.id}-proposal-business-meaning`}
+                            name="businessMeaning"
+                            className="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                            defaultValue={control.currentVersion.businessMeaning}
+                            required
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor={`${control.id}-proposal-verification-method`}>
+                            Verification method
+                          </Label>
+                          <textarea
+                            id={`${control.id}-proposal-verification-method`}
+                            name="verificationMethod"
+                            className="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                            defaultValue={control.currentVersion.verificationMethod}
+                            required
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor={`${control.id}-proposal-evidence-types`}>
+                            Accepted Evidence Types
+                          </Label>
+                          <Input
+                            id={`${control.id}-proposal-evidence-types`}
+                            name="acceptedEvidenceTypes"
+                            defaultValue={control.currentVersion.acceptedEvidenceTypes.join(', ')}
+                            required
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor={`${control.id}-proposal-release-impact`}>
+                            Release Impact
+                          </Label>
+                          <select
+                            id={`${control.id}-proposal-release-impact`}
+                            name="releaseImpact"
+                            className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                            defaultValue={control.currentVersion.releaseImpact}
+                            required
+                          >
+                            <option value="blocking">blocking</option>
+                            <option value="needs review">needs review</option>
+                            <option value="advisory">advisory</option>
+                          </select>
+                        </div>
+                        <div className="space-y-2 sm:col-span-2">
+                          <Label htmlFor={`${control.id}-proposal-applicability`}>
+                            Applicability conditions
+                          </Label>
+                          <textarea
+                            id={`${control.id}-proposal-applicability`}
+                            name="applicabilityConditions"
+                            className="min-h-20 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                            defaultValue={control.currentVersion.applicabilityConditions}
+                            required
+                          />
+                        </div>
+                      </div>
+                      <Button type="submit" disabled={creatingProposalControlId === control.id}>
+                        <Plus />
+                        {creatingProposalControlId === control.id
+                          ? 'Saving...'
+                          : 'Save Proposed Update'}
+                      </Button>
+                    </form>
+                  )}
+                </article>
+              );
+            })}
           </div>
         )}
       </section>

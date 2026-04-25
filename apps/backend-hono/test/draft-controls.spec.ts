@@ -193,6 +193,59 @@ async function getControlRequest(organizationSlug: string, controlId: string, he
   };
 }
 
+async function createControlProposedUpdateRequest(
+  organizationSlug: string,
+  controlId: string,
+  headers: Headers,
+  body: Record<string, unknown>,
+) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/controls/${controlId}/proposed-updates`,
+    {
+      body: JSON.stringify(body),
+      headers,
+      method: 'POST',
+    },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+async function listControlProposedUpdatesRequest(organizationSlug: string, headers: Headers) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/controls/proposed-updates`,
+    { headers },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+async function publishControlProposedUpdateRequest(
+  organizationSlug: string,
+  controlId: string,
+  proposedUpdateId: string,
+  headers: Headers,
+) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/controls/${controlId}/proposed-updates/${proposedUpdateId}/publish`,
+    {
+      headers,
+      method: 'POST',
+    },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
 beforeEach(() => {
   const originalFetch = globalThis.fetch;
 
@@ -492,5 +545,116 @@ describe('Draft Controls', () => {
     expect(publishResponse.body).toMatchObject({
       error: 'At least one Accepted Evidence Type is required.',
     });
+  });
+
+  it('creates one proposed update for an active Control without changing the current version', async () => {
+    const { headers: ownerHeaders, organization } = await createSignedInOwner('proposal-create');
+    const createResponse = await createDraftControlRequest(organization.slug, ownerHeaders, {
+      controlCode: 'AUTH-008',
+      title: 'Require MFA',
+    });
+    const draftControl = createResponse.body.draftControl as { id: string };
+    const publishResponse = await publishDraftControlRequest(
+      organization.slug,
+      draftControl.id,
+      ownerHeaders,
+    );
+    const control = publishResponse.body.control as { id: string };
+
+    const proposedBody = {
+      ...completePublishBody,
+      businessMeaning: 'Release teams must verify phishing-resistant authentication factors.',
+      controlCode: 'AUTH-008',
+      title: 'Require phishing-resistant MFA',
+    };
+    const proposedResponse = await createControlProposedUpdateRequest(
+      organization.slug,
+      control.id,
+      ownerHeaders,
+      proposedBody,
+    );
+
+    expect(proposedResponse.status).toBe(201);
+    expect(proposedResponse.body.proposedUpdate).toMatchObject({
+      businessMeaning: proposedBody.businessMeaning,
+      controlCode: 'AUTH-008',
+      title: 'Require phishing-resistant MFA',
+    });
+
+    await expect(
+      getControlRequest(organization.slug, control.id, ownerHeaders),
+    ).resolves.toMatchObject({
+      body: {
+        control: {
+          currentVersion: {
+            businessMeaning: completePublishBody.businessMeaning,
+            versionNumber: 1,
+          },
+          versions: [{ versionNumber: 1 }],
+        },
+      },
+      status: 200,
+    });
+    await expect(
+      createControlProposedUpdateRequest(organization.slug, control.id, ownerHeaders, proposedBody),
+    ).resolves.toMatchObject({
+      body: { error: 'This Control already has an open proposed update.' },
+      status: 400,
+    });
+  });
+
+  it('publishes a proposed update as the next Control Version and clears the open proposal', async () => {
+    const { headers: ownerHeaders, organization } = await createSignedInOwner('proposal-publish');
+    const createResponse = await createDraftControlRequest(organization.slug, ownerHeaders, {
+      controlCode: 'AUTH-009',
+      title: 'Require MFA before update',
+    });
+    const draftControl = createResponse.body.draftControl as { id: string };
+    const publishResponse = await publishDraftControlRequest(
+      organization.slug,
+      draftControl.id,
+      ownerHeaders,
+    );
+    const control = publishResponse.body.control as { id: string };
+    const proposedResponse = await createControlProposedUpdateRequest(
+      organization.slug,
+      control.id,
+      ownerHeaders,
+      {
+        ...completePublishBody,
+        businessMeaning: 'Updated release assurance meaning.',
+        controlCode: 'AUTH-009A',
+        title: 'Require MFA after update',
+      },
+    );
+    const proposedUpdate = proposedResponse.body.proposedUpdate as { id: string };
+
+    const proposedPublishResponse = await publishControlProposedUpdateRequest(
+      organization.slug,
+      control.id,
+      proposedUpdate.id,
+      ownerHeaders,
+    );
+
+    expect(proposedPublishResponse.status).toBe(201);
+    expect(proposedPublishResponse.body.control).toMatchObject({
+      controlCode: 'AUTH-009A',
+      currentVersion: {
+        businessMeaning: 'Updated release assurance meaning.',
+        title: 'Require MFA after update',
+        versionNumber: 2,
+      },
+      versions: [{ versionNumber: 2 }, { versionNumber: 1 }],
+    });
+
+    const versions = await db
+      .select()
+      .from(controlVersions)
+      .where(eq(controlVersions.controlId, control.id));
+    expect(versions).toHaveLength(2);
+    expect(versions.map((version) => version.versionNumber).sort()).toEqual([1, 2]);
+    await expect(
+      listControlProposedUpdatesRequest(organization.slug, ownerHeaders),
+    ).resolves.toMatchObject({ body: { proposedUpdates: [] }, status: 200 });
   });
 });
