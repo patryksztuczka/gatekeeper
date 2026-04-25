@@ -309,3 +309,44 @@ export const controlProposedUpdates = sqliteTable(
     uniqueIndex('control_proposed_update_control_id_unique').on(table.controlId),
   ],
 );
+
+export const controlPublishRequests = sqliteTable(
+  'control_publish_requests',
+  {
+    id: text('id').primaryKey(),
+    organizationId: text('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    authorMemberId: text('author_member_id')
+      .notNull()
+      .references(() => members.id, { onDelete: 'cascade' }),
+    requestType: text('request_type').notNull(),
+    draftControlId: text('draft_control_id').references(() => draftControls.id, {
+      onDelete: 'cascade',
+    }),
+    controlId: text('control_id').references(() => controls.id, { onDelete: 'cascade' }),
+    proposedUpdateId: text('proposed_update_id').references(() => controlProposedUpdates.id, {
+      onDelete: 'cascade',
+    }),
+    controlCode: text('control_code').notNull(),
+    title: text('title').notNull(),
+    businessMeaning: text('business_meaning').notNull(),
+    verificationMethod: text('verification_method').notNull(),
+    acceptedEvidenceTypes: text('accepted_evidence_types').notNull(),
+    applicabilityConditions: text('applicability_conditions').notNull(),
+    releaseImpact: text('release_impact').notNull(),
+    externalStandardsMappings: text('external_standards_mappings').notNull(),
+    approvalCount: integer('approval_count').default(0).notNull(),
+    requiredApprovalCount: integer('required_approval_count').notNull(),
+    status: text('status').default('submitted').notNull(),
+    submittedAt: integer('submitted_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+  },
+  (table) => [
+    index('control_publish_request_organization_id_idx').on(table.organizationId),
+    index('control_publish_request_author_member_id_idx').on(table.authorMemberId),
+    uniqueIndex('control_publish_request_draft_unique').on(table.draftControlId),
+    uniqueIndex('control_publish_request_proposed_update_unique').on(table.proposedUpdateId),
+  ],
+);

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import app from '../src/index';
 import { db } from '../src/db/client';
-import { controlVersions, controls, users } from '../src/db/schema';
+import { controlPublishRequests, controlVersions, controls, users } from '../src/db/schema';
 import { auth } from '../src/lib/auth';
 
 const authHeaders = {
@@ -185,6 +185,27 @@ async function publishDraftControlRequest(
   };
 }
 
+async function submitDraftControlPublishRequest(
+  organizationSlug: string,
+  draftControlId: string,
+  headers: Headers,
+  body: Record<string, unknown> = completePublishBody,
+) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/controls/drafts/${draftControlId}/publish-requests`,
+    {
+      body: JSON.stringify(body),
+      headers,
+      method: 'POST',
+    },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
 async function listControlsRequest(
   organizationSlug: string,
   headers: Headers,
@@ -307,6 +328,31 @@ async function listControlProposedUpdatesRequest(organizationSlug: string, heade
   };
 }
 
+async function listControlPublishRequestsRequest(organizationSlug: string, headers: Headers) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/controls/publish-requests`,
+    { headers },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+async function enableControlApprovalPolicy(organizationSlug: string, headers: Headers) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/control-approval-policy`,
+    {
+      body: JSON.stringify({ enabled: true, requiredApprovals: 1 }),
+      headers,
+      method: 'PATCH',
+    },
+  );
+
+  expect(response.status).toBe(200);
+}
+
 async function publishControlProposedUpdateRequest(
   organizationSlug: string,
   controlId: string,
@@ -315,6 +361,26 @@ async function publishControlProposedUpdateRequest(
 ) {
   const response = await app.request(
     `http://example.com/api/organizations/${organizationSlug}/controls/${controlId}/proposed-updates/${proposedUpdateId}/publish`,
+    {
+      headers,
+      method: 'POST',
+    },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+async function submitControlProposedUpdatePublishRequest(
+  organizationSlug: string,
+  controlId: string,
+  proposedUpdateId: string,
+  headers: Headers,
+) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/controls/${controlId}/proposed-updates/${proposedUpdateId}/publish-requests`,
     {
       headers,
       method: 'POST',
@@ -717,6 +783,142 @@ describe('Draft Controls', () => {
     ).resolves.toMatchObject({ status: 201 });
   });
 
+  it('lets members submit complete Draft Controls for review when Control Approval Policy is enabled', async () => {
+    const { headers: ownerHeaders, organization } =
+      await createSignedInOwner('request-draft-owner');
+    await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'request-draft-admin',
+      role: 'admin',
+    });
+    const member = await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'request-draft-member',
+      role: 'member',
+    });
+
+    await enableControlApprovalPolicy(organization.slug, ownerHeaders);
+
+    const createResponse = await createDraftControlRequest(organization.slug, member.headers, {
+      controlCode: 'AUTH-026',
+      title: 'Submit MFA Control',
+    });
+    const draftControl = createResponse.body.draftControl as { id: string };
+    const submitResponse = await submitDraftControlPublishRequest(
+      organization.slug,
+      draftControl.id,
+      member.headers,
+    );
+
+    expect(submitResponse.status).toBe(201);
+    expect(submitResponse.body.publishRequest).toMatchObject({
+      approvalCount: 0,
+      author: { email: member.credentials.email },
+      controlCode: 'AUTH-026',
+      draftControlId: draftControl.id,
+      requestType: 'draft_control',
+      requiredApprovalCount: 1,
+      status: 'submitted',
+      title: 'Submit MFA Control',
+    });
+
+    await expect(
+      db
+        .select()
+        .from(controlPublishRequests)
+        .where(eq(controlPublishRequests.draftControlId, draftControl.id)),
+    ).resolves.toHaveLength(1);
+  });
+
+  it('limits submitted Control Publish Request visibility to author and Organization owners/admins', async () => {
+    const { headers: ownerHeaders, organization } = await createSignedInOwner(
+      'request-visibility-owner',
+    );
+    const admin = await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'request-visibility-admin',
+      role: 'admin',
+    });
+    const firstMember = await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'request-visibility-first-member',
+      role: 'member',
+    });
+    const secondMember = await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'request-visibility-second-member',
+      role: 'member',
+    });
+
+    await enableControlApprovalPolicy(organization.slug, ownerHeaders);
+
+    const draftResponse = await createDraftControlRequest(organization.slug, firstMember.headers, {
+      controlCode: 'AUTH-027',
+      title: 'Visible submitted request',
+    });
+    const draftControl = draftResponse.body.draftControl as { id: string };
+
+    await submitDraftControlPublishRequest(organization.slug, draftControl.id, firstMember.headers);
+
+    await expect(
+      listControlPublishRequestsRequest(organization.slug, firstMember.headers),
+    ).resolves.toMatchObject({
+      body: { publishRequests: [{ controlCode: 'AUTH-027' }] },
+      status: 200,
+    });
+    await expect(
+      listControlPublishRequestsRequest(organization.slug, secondMember.headers),
+    ).resolves.toMatchObject({ body: { publishRequests: [] }, status: 200 });
+    await expect(
+      listControlPublishRequestsRequest(organization.slug, ownerHeaders),
+    ).resolves.toMatchObject({
+      body: { publishRequests: [{ controlCode: 'AUTH-027' }] },
+      status: 200,
+    });
+    await expect(
+      listControlPublishRequestsRequest(organization.slug, admin.headers),
+    ).resolves.toMatchObject({
+      body: { publishRequests: [{ controlCode: 'AUTH-027' }] },
+      status: 200,
+    });
+  });
+
+  it('blocks publishing while Control Approval Policy requires an approved Control Publish Request', async () => {
+    const { headers: ownerHeaders, organization } =
+      await createSignedInOwner('request-block-owner');
+    await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'request-block-admin',
+      role: 'admin',
+    });
+
+    await enableControlApprovalPolicy(organization.slug, ownerHeaders);
+
+    const createResponse = await createDraftControlRequest(organization.slug, ownerHeaders, {
+      controlCode: 'AUTH-028',
+      title: 'Blocked publish Control',
+    });
+    const draftControl = createResponse.body.draftControl as { id: string };
+
+    await submitDraftControlPublishRequest(organization.slug, draftControl.id, ownerHeaders);
+
+    await expect(
+      publishDraftControlRequest(organization.slug, draftControl.id, ownerHeaders),
+    ).resolves.toMatchObject({
+      body: {
+        error:
+          'Control Approval Policy requires an approved Control Publish Request before publishing.',
+      },
+      status: 400,
+    });
+  });
+
   it('validates required Control publish fields', async () => {
     const { headers: ownerHeaders, organization } = await createSignedInOwner('publish-validation');
     const createResponse = await createDraftControlRequest(organization.slug, ownerHeaders, {
@@ -853,6 +1055,84 @@ describe('Draft Controls', () => {
       createControlProposedUpdateRequest(organization.slug, control.id, ownerHeaders, proposedBody),
     ).resolves.toMatchObject({
       body: { error: 'This Control already has an open proposed update.' },
+      status: 400,
+    });
+  });
+
+  it('lets proposed Control updates be submitted as Control Publish Requests when policy is enabled', async () => {
+    const { headers: ownerHeaders, organization } =
+      await createSignedInOwner('proposal-request-owner');
+    await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'proposal-request-admin',
+      role: 'admin',
+    });
+    const member = await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'proposal-request-member',
+      role: 'member',
+    });
+
+    const createResponse = await createDraftControlRequest(organization.slug, ownerHeaders, {
+      controlCode: 'AUTH-029',
+      title: 'Require MFA before request',
+    });
+    const draftControl = createResponse.body.draftControl as { id: string };
+    const publishResponse = await publishDraftControlRequest(
+      organization.slug,
+      draftControl.id,
+      ownerHeaders,
+    );
+    const control = publishResponse.body.control as { id: string };
+
+    await enableControlApprovalPolicy(organization.slug, ownerHeaders);
+
+    const proposedResponse = await createControlProposedUpdateRequest(
+      organization.slug,
+      control.id,
+      member.headers,
+      {
+        ...completePublishBody,
+        businessMeaning: 'Updated proposed release assurance meaning.',
+        controlCode: 'AUTH-029',
+        title: 'Require MFA after request',
+      },
+    );
+    const proposedUpdate = proposedResponse.body.proposedUpdate as { id: string };
+
+    await expect(
+      submitControlProposedUpdatePublishRequest(
+        organization.slug,
+        control.id,
+        proposedUpdate.id,
+        member.headers,
+      ),
+    ).resolves.toMatchObject({
+      body: {
+        publishRequest: {
+          controlCode: 'AUTH-029',
+          controlId: control.id,
+          proposedUpdateId: proposedUpdate.id,
+          requestType: 'proposed_update',
+          requiredApprovalCount: 1,
+        },
+      },
+      status: 201,
+    });
+    await expect(
+      publishControlProposedUpdateRequest(
+        organization.slug,
+        control.id,
+        proposedUpdate.id,
+        ownerHeaders,
+      ),
+    ).resolves.toMatchObject({
+      body: {
+        error:
+          'Control Approval Policy requires an approved Control Publish Request before publishing.',
+      },
       status: 400,
     });
   });
