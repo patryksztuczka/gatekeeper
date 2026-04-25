@@ -3,7 +3,10 @@ import type { FormEvent } from 'react';
 import { AlertCircle, CheckCircle2, Copy } from 'lucide-react';
 import {
   createOrganizationInvitation,
+  getControlApprovalPolicy,
   getMembershipResolution,
+  updateControlApprovalPolicy,
+  type ControlApprovalPolicy,
   type MembershipResolutionResponse,
 } from '../../features/auth/auth-api';
 import { humanizeAuthError } from '../../features/auth/auth-errors';
@@ -28,6 +31,13 @@ export function SettingsPage() {
   const [isSubmittingInvite, setIsSubmittingInvite] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  const [policy, setPolicy] = useState<ControlApprovalPolicy | null>(null);
+  const [policyEnabled, setPolicyEnabled] = useState(false);
+  const [requiredApprovals, setRequiredApprovals] = useState('1');
+  const [policyError, setPolicyError] = useState<string | null>(null);
+  const [policyStatus, setPolicyStatus] = useState<string | null>(null);
+  const [isSubmittingPolicy, setIsSubmittingPolicy] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
     async function loadResolution() {
@@ -48,6 +58,43 @@ export function SettingsPage() {
 
   const activeOrg =
     resolution?.organizations.find((org) => org.id === resolution.activeOrganizationId) ?? null;
+  const canManagePolicy = activeOrg?.role === 'owner' || activeOrg?.role === 'admin';
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadPolicy() {
+      if (!activeOrg) {
+        setPolicy(null);
+        return;
+      }
+
+      try {
+        const response = await getControlApprovalPolicy(activeOrg.slug);
+        if (cancelled) return;
+
+        setPolicy(response.policy);
+        setPolicyEnabled(response.policy.enabled);
+        setRequiredApprovals(String(response.policy.requiredApprovals));
+      } catch (caughtError) {
+        if (cancelled) return;
+
+        const rawMessage =
+          caughtError instanceof Error
+            ? caughtError.message
+            : 'Unable to load Control Approval Policy.';
+        setPolicyError(
+          humanizeAuthError(null, rawMessage, 'Unable to load Control Approval Policy.'),
+        );
+      }
+    }
+
+    void loadPolicy();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeOrg]);
 
   const handleInviteSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -83,6 +130,52 @@ export function SettingsPage() {
     }
   };
 
+  const handlePolicySubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!activeOrg || !policy) return;
+
+    setPolicyError(null);
+    setPolicyStatus(null);
+
+    const nextRequiredApprovals = policyEnabled ? Number(requiredApprovals) : 1;
+
+    if (!Number.isInteger(nextRequiredApprovals) || nextRequiredApprovals < 1) {
+      setPolicyError('Required approval count must be at least 1.');
+      return;
+    }
+
+    if (policyEnabled && nextRequiredApprovals > policy.maxRequiredApprovals) {
+      setPolicyError(
+        'Required approval count cannot exceed eligible approvers other than the author.',
+      );
+      return;
+    }
+
+    setIsSubmittingPolicy(true);
+
+    try {
+      const response = await updateControlApprovalPolicy(activeOrg.slug, {
+        enabled: policyEnabled,
+        requiredApprovals: nextRequiredApprovals,
+      });
+
+      setPolicy(response.policy);
+      setPolicyEnabled(response.policy.enabled);
+      setRequiredApprovals(String(response.policy.requiredApprovals));
+      setPolicyStatus('Control Approval Policy saved.');
+    } catch (caughtError) {
+      const rawMessage =
+        caughtError instanceof Error
+          ? caughtError.message
+          : 'Unable to save Control Approval Policy.';
+      setPolicyError(
+        humanizeAuthError(null, rawMessage, 'Unable to save Control Approval Policy.'),
+      );
+    } finally {
+      setIsSubmittingPolicy(false);
+    }
+  };
+
   return (
     <div className="mx-auto w-full max-w-2xl space-y-10">
       <header className="space-y-1">
@@ -91,6 +184,93 @@ export function SettingsPage() {
           Manage your organization and the people who have access to it.
         </p>
       </header>
+
+      <Separator />
+
+      <section className="space-y-6">
+        <div className="space-y-1">
+          <h2 className="text-lg font-medium">Control Approval Policy</h2>
+          <p className="text-sm text-muted-foreground">
+            Require approval before Organization owners and admins publish Controls or Control
+            updates.
+          </p>
+        </div>
+
+        {!canManagePolicy && activeOrg ? (
+          <Alert>
+            <AlertCircle />
+            <AlertTitle>Read-only policy</AlertTitle>
+            <AlertDescription>
+              Only Organization owners and admins can edit Control Approval Policy.
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
+        <form className="space-y-5" onSubmit={handlePolicySubmit}>
+          <div className="flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <Label htmlFor="control-approval-enabled">Require approval to publish Controls</Label>
+              <p className="text-sm text-muted-foreground">
+                When enabled, publish actions need approval from eligible Organization owners/admins
+                other than the author.
+              </p>
+            </div>
+            <input
+              id="control-approval-enabled"
+              type="checkbox"
+              className="size-5"
+              checked={policyEnabled}
+              onChange={(event) => {
+                setPolicyEnabled(event.target.checked);
+                if (event.target.checked && requiredApprovals === '') setRequiredApprovals('1');
+              }}
+              disabled={!activeOrg || !canManagePolicy || !policy || isSubmittingPolicy}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="required-approvals">Required approval count</Label>
+            <Input
+              id="required-approvals"
+              type="number"
+              min={1}
+              max={policy?.maxRequiredApprovals || 1}
+              value={requiredApprovals}
+              onChange={(event) => setRequiredApprovals(event.target.value)}
+              disabled={!activeOrg || !canManagePolicy || !policyEnabled || isSubmittingPolicy}
+            />
+            <p className="text-sm text-muted-foreground">
+              {policy
+                ? `Maximum currently allowed: ${policy.maxRequiredApprovals}. Add more Organization owners/admins before requiring more approvals.`
+                : 'Loading approval limits...'}
+            </p>
+          </div>
+
+          {policyError ? (
+            <Alert variant="destructive">
+              <AlertCircle />
+              <AlertTitle>Couldn’t save policy</AlertTitle>
+              <AlertDescription>{policyError}</AlertDescription>
+            </Alert>
+          ) : null}
+
+          {policyStatus ? (
+            <Alert>
+              <CheckCircle2 />
+              <AlertTitle>{policyStatus}</AlertTitle>
+            </Alert>
+          ) : null}
+
+          <div>
+            <Button
+              type="submit"
+              disabled={!activeOrg || !canManagePolicy || !policy || isSubmittingPolicy}
+            >
+              {isSubmittingPolicy ? 'Saving...' : 'Save policy'}
+            </Button>
+          </div>
+        </form>
+      </section>
 
       <Separator />
 

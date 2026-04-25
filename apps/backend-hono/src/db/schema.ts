@@ -26,6 +26,10 @@ export const organizations = sqliteTable(
     slug: text('slug').notNull().unique(),
     logo: text('logo'),
     metadata: text('metadata'),
+    controlApprovalPolicyEnabled: integer('control_approval_policy_enabled', { mode: 'boolean' })
+      .default(false)
+      .notNull(),
+    controlApprovalRequiredCount: integer('control_approval_required_count').default(1).notNull(),
     createdAt: integer('created_at', { mode: 'timestamp_ms' })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),
