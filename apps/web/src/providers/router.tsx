@@ -106,6 +106,13 @@ const router = createBrowserRouter([
                     },
                   },
                   {
+                    path: 'projects',
+                    lazy: async () => {
+                      const { ProjectsPage } = await import('../components/pages/projects');
+                      return { Component: ProjectsPage };
+                    },
+                  },
+                  {
                     path: 'p/:projectSlug',
                     lazy: async () => {
                       const { ProjectDetailPage } =
@@ -113,7 +120,7 @@ const router = createBrowserRouter([
                       return { Component: ProjectDetailPage };
                     },
                   },
-                  ...['projects', 'checklists', 'controls', 'exceptions', 'audit'].map((path) => ({
+                  ...['checklists', 'controls', 'exceptions', 'audit'].map((path) => ({
                     path,
                     lazy: async () => {
                       const { StaticAppPage } = await import('../components/pages/static-app-page');

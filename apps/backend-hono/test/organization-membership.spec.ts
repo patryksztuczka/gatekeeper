@@ -181,6 +181,38 @@ describe('organization membership resolution', () => {
       expect(session?.session.activeOrganizationId).toBe(organizations[0]?.id);
     });
 
+    it('avoids reserved public route words for default organization slugs', async () => {
+      const user = {
+        ...createCredentials('reserved-default-org'),
+        name: 'Sign In',
+      };
+
+      await signUpUser(user);
+
+      const sessionHeaders = await signInUser(user);
+      const organizations = await auth.api.listOrganizations({ headers: sessionHeaders });
+
+      expect(organizations[0]?.slug).toBe('sign-in-organization');
+    });
+
+    it('rejects organization creation with public route slugs', async () => {
+      const user = createCredentials('reserved-create-org');
+
+      await signUpUser(user);
+
+      const sessionHeaders = await signInUser(user);
+
+      await expect(
+        auth.api.createOrganization({
+          body: {
+            name: 'Sign In',
+            slug: 'sign-in',
+          },
+          headers: sessionHeaders,
+        }),
+      ).rejects.toThrow('reserved for a public Gatekeeper route');
+    });
+
     it('skips default organization creation when the user already has a pending invite', async () => {
       const owner = createCredentials('owner');
 
