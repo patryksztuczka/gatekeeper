@@ -1,0 +1,29 @@
+apps/backend-hono/test/organization-membership.spec.ts
+  8a85ccc1a8d4dde3 144-145,247-251,286-288,440-442,487-489,530-532,569-571,614-616
+apps/backend-hono/src/index.ts
+  8a85ccc1a8d4dde3 45-46
+apps/backend-hono/test/email-verification.spec.ts
+  8a85ccc1a8d4dde3 137-138,216-218,229-231
+apps/backend-hono/test/password-recovery.spec.ts
+  8a85ccc1a8d4dde3 155-156
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "c9bdfcbb372824ef52becef6fb0ccb7416ad9e22",
+  "prompts": {
+    "8a85ccc1a8d4dde3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_23af0ae63ffezL6KAXf43lNZO7",
+        "model": "openai/gpt-5.5"
+      },
+      "human_author": "Patryk Sztuczka",
+      "messages": [],
+      "total_additions": 37,
+      "total_deletions": 13,
+      "accepted_lines": 37,
+      "overriden_lines": 0
+    }
+  }
+}
