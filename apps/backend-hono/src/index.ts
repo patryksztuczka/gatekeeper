@@ -11,6 +11,8 @@ import {
   getControlDetail,
   listControls,
   listDraftControls,
+  normalizeControlListFilters,
+  normalizeDraftControlListFilters,
   normalizeDraftControlCreateBody,
   normalizeDraftControlPublishBody,
   publishDraftControl,
@@ -142,7 +144,12 @@ app.get('/api/organizations/:organizationSlug/controls/drafts', async (c) => {
     return c.json({ error: 'Organization not found' }, 404);
   }
 
-  return c.json({ draftControls: await listDraftControls(membership) });
+  return c.json({
+    draftControls: await listDraftControls(
+      membership,
+      normalizeDraftControlListFilters(c.req.query()),
+    ),
+  });
 });
 
 app.get('/api/organizations/:organizationSlug/controls', async (c) => {
@@ -163,7 +170,12 @@ app.get('/api/organizations/:organizationSlug/controls', async (c) => {
     return c.json({ error: 'Organization not found' }, 404);
   }
 
-  return c.json({ controls: await listControls(membership.organizationId) });
+  return c.json({
+    controls: await listControls(
+      membership.organizationId,
+      normalizeControlListFilters(c.req.query()),
+    ),
+  });
 });
 
 app.get('/api/organizations/:organizationSlug/controls/:controlId', async (c) => {

@@ -91,7 +91,16 @@ export type ControlListItem = {
     versionNumber: number;
   };
   id: string;
+  status: 'active';
   title: string;
+};
+
+export type ControlListFilters = {
+  acceptedEvidenceType?: string;
+  releaseImpact?: string;
+  search?: string;
+  standardsFramework?: string;
+  status?: 'active' | 'archived';
 };
 
 export type OrganizationMemberListItem = {
@@ -242,18 +251,42 @@ export function createProject(
   });
 }
 
-export function listDraftControls(organizationSlug: string) {
+function toQueryString(params: Record<string, string | undefined>) {
+  const query = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value) {
+      query.set(key, value);
+    }
+  }
+
+  const value = query.toString();
+
+  return value ? `?${value}` : '';
+}
+
+export function listDraftControls(organizationSlug: string, search = '') {
+  const query = toQueryString({ q: search });
+
   return request<{ draftControls: DraftControlListItem[] }>(
-    `/api/organizations/${organizationSlug}/controls/drafts`,
+    `/api/organizations/${organizationSlug}/controls/drafts${query}`,
     {
       method: 'GET',
     },
   );
 }
 
-export function listControls(organizationSlug: string) {
+export function listControls(organizationSlug: string, filters: ControlListFilters = {}) {
+  const query = toQueryString({
+    acceptedEvidenceType: filters.acceptedEvidenceType,
+    q: filters.search,
+    releaseImpact: filters.releaseImpact,
+    standardsFramework: filters.standardsFramework,
+    status: filters.status,
+  });
+
   return request<{ controls: ControlListItem[] }>(
-    `/api/organizations/${organizationSlug}/controls`,
+    `/api/organizations/${organizationSlug}/controls${query}`,
     {
       method: 'GET',
     },

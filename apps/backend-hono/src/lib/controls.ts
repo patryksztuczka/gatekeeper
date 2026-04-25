@@ -34,7 +34,20 @@ export type ControlListItem = {
   createdAt: string;
   currentVersion: ControlVersionResponse;
   id: string;
+  status: 'active';
   title: string;
+};
+
+export type ControlListFilters = {
+  acceptedEvidenceType: string;
+  releaseImpact: ReleaseImpact | '';
+  search: string;
+  standardsFramework: string;
+  status: 'active' | 'archived';
+};
+
+export type DraftControlListFilters = {
+  search: string;
 };
 
 type CreateDraftControlInput = {
@@ -70,7 +83,14 @@ export function canPublishControls(role: string): boolean {
   return publishControlRoles.has(role);
 }
 
-export async function listControls(organizationId: string): Promise<ControlListItem[]> {
+export async function listControls(
+  organizationId: string,
+  filters: ControlListFilters = defaultControlListFilters,
+): Promise<ControlListItem[]> {
+  if (filters.status === 'archived') {
+    return [];
+  }
+
   const rows = await db
     .select({
       acceptedEvidenceTypes: controlVersions.acceptedEvidenceTypes,
@@ -92,7 +112,9 @@ export async function listControls(organizationId: string): Promise<ControlListI
     .where(eq(controls.organizationId, organizationId))
     .orderBy(asc(controlVersions.controlCode), asc(controlVersions.title));
 
-  return rows.map((row) => toControlListItem(row));
+  return rows
+    .map((row) => toControlListItem(row))
+    .filter((control) => matchesControlFilters(control, filters));
 }
 
 export async function getControlDetail(
@@ -126,6 +148,7 @@ export async function getControlDetail(
 
 export async function listDraftControls(
   membership: OrganizationMembership,
+  filters: DraftControlListFilters = defaultDraftControlListFilters,
 ): Promise<DraftControlListItem[]> {
   const rows = await db
     .select({
@@ -150,15 +173,17 @@ export async function listDraftControls(
     )
     .orderBy(asc(draftControls.createdAt), asc(draftControls.controlCode));
 
-  return rows.map(({ authorEmail, authorId, authorName, createdAt, ...draft }) => ({
-    ...draft,
-    author: {
-      email: authorEmail,
-      id: authorId,
-      name: authorName,
-    },
-    createdAt: createdAt.toISOString(),
-  }));
+  return rows
+    .map(({ authorEmail, authorId, authorName, createdAt, ...draft }) => ({
+      ...draft,
+      author: {
+        email: authorEmail,
+        id: authorId,
+        name: authorName,
+      },
+      createdAt: createdAt.toISOString(),
+    }))
+    .filter((draftControl) => matchesDraftControlFilters(draftControl, filters));
 }
 
 export async function createDraftControl(
@@ -298,6 +323,27 @@ export function normalizeDraftControlPublishBody(body: unknown): PublishDraftCon
   };
 }
 
+export function normalizeControlListFilters(
+  query: Record<string, string | string[] | undefined>,
+): ControlListFilters {
+  const releaseImpact = firstQueryValue(query.releaseImpact);
+  const status = firstQueryValue(query.status);
+
+  return {
+    acceptedEvidenceType: firstQueryValue(query.acceptedEvidenceType).trim(),
+    releaseImpact: releaseImpacts.has(releaseImpact) ? (releaseImpact as ReleaseImpact) : '',
+    search: firstQueryValue(query.q).trim(),
+    standardsFramework: firstQueryValue(query.standardsFramework).trim(),
+    status: status === 'archived' ? 'archived' : 'active',
+  };
+}
+
+export function normalizeDraftControlListFilters(
+  query: Record<string, string | string[] | undefined>,
+): DraftControlListFilters {
+  return { search: firstQueryValue(query.q).trim() };
+}
+
 function validateDraftControlInput(input: CreateDraftControlInput) {
   if (!input.controlCode.trim()) {
     throw new DraftControlInputError('Control Code is required.');
@@ -334,6 +380,77 @@ function toStringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((entry): entry is string => typeof entry === 'string' && Boolean(entry.trim()))
     : [];
+}
+
+function firstQueryValue(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? (value[0] ?? '') : (value ?? '');
+}
+
+const defaultControlListFilters: ControlListFilters = {
+  acceptedEvidenceType: '',
+  releaseImpact: '',
+  search: '',
+  standardsFramework: '',
+  status: 'active',
+};
+
+const defaultDraftControlListFilters: DraftControlListFilters = { search: '' };
+
+function matchesControlFilters(control: ControlListItem, filters: ControlListFilters): boolean {
+  const version = control.currentVersion;
+  const search = filters.search.toLowerCase();
+
+  if (
+    search &&
+    ![
+      version.controlCode,
+      version.title,
+      version.businessMeaning,
+      ...version.externalStandardsMappings.flatMap((mapping) => [
+        mapping.framework,
+        mapping.reference,
+      ]),
+    ].some((value) => value.toLowerCase().includes(search))
+  ) {
+    return false;
+  }
+
+  if (filters.releaseImpact && version.releaseImpact !== filters.releaseImpact) {
+    return false;
+  }
+
+  if (
+    filters.acceptedEvidenceType &&
+    !version.acceptedEvidenceTypes.some(
+      (value) => value.toLowerCase() === filters.acceptedEvidenceType.toLowerCase(),
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    filters.standardsFramework &&
+    !version.externalStandardsMappings.some(
+      (mapping) => mapping.framework.toLowerCase() === filters.standardsFramework.toLowerCase(),
+    )
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function matchesDraftControlFilters(
+  draftControl: DraftControlListItem,
+  filters: DraftControlListFilters,
+): boolean {
+  const search = filters.search.toLowerCase();
+
+  return search
+    ? [draftControl.controlCode, draftControl.title].some((value) =>
+        value.toLowerCase().includes(search),
+      )
+    : true;
 }
 
 function toExternalStandardsMappings(value: unknown): ExternalStandardsMapping[] {
@@ -394,6 +511,7 @@ function toControlListItem(row: {
       versionNumber: row.versionNumber,
     },
     id: row.controlId,
+    status: 'active',
     title: row.title,
   };
 }
