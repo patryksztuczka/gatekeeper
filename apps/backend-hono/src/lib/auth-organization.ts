@@ -25,6 +25,7 @@ export type MembershipResolutionResponse = {
   activeOrganizationId: string | null;
   organizations: Array<{
     id: string;
+    memberId: string;
     name: string;
     slug: string;
     role: string;
@@ -246,8 +247,9 @@ export async function resolveMembershipResolution({
     organizations: orderMembershipOrganizations(
       membershipOrganizations,
       resolvedActiveOrganizationId,
-    ).map(({ id, membershipCreatedAt: _membershipCreatedAt, name, role, slug }) => ({
+    ).map(({ id, memberId, membershipCreatedAt: _membershipCreatedAt, name, role, slug }) => ({
       id,
+      memberId,
       name,
       role,
       slug,
@@ -388,6 +390,7 @@ async function listMembershipOrganizations(userId: string): Promise<MembershipOr
   return db
     .select({
       id: organizations.id,
+      memberId: members.id,
       membershipCreatedAt: members.createdAt,
       name: organizations.name,
       role: members.role,

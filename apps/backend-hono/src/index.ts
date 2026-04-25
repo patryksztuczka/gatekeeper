@@ -13,6 +13,7 @@ import {
 import {
   canArchiveControls,
   canPublishControls,
+  approveControlPublishRequest,
   cancelDraftControl,
   ControlProposedUpdateInputError,
   ControlPublishRequestInputError,
@@ -27,15 +28,18 @@ import {
   listDraftControls,
   normalizeControlArchiveBody,
   normalizeControlListFilters,
+  normalizeControlPublishRequestRejectionBody,
   normalizeControlProposedUpdateBody,
   normalizeDraftControlListFilters,
   normalizeDraftControlCreateBody,
   normalizeDraftControlPublishBody,
   publishControlProposedUpdate,
   publishDraftControl,
+  rejectControlPublishRequest,
   setControlArchivedForMembership,
   submitControlProposedUpdatePublishRequest,
   submitDraftControlPublishRequest,
+  withdrawControlPublishRequest,
 } from './lib/controls';
 import {
   canManageProjects,
@@ -334,6 +338,21 @@ app.get('/api/organizations/:organizationSlug/controls/:controlId', async (c) =>
 
   return c.json({ control });
 });
+
+app.post(
+  '/api/organizations/:organizationSlug/controls/publish-requests/:publishRequestId/approve',
+  async (c) => reviewControlPublishRequest(c, 'approve'),
+);
+
+app.post(
+  '/api/organizations/:organizationSlug/controls/publish-requests/:publishRequestId/reject',
+  async (c) => reviewControlPublishRequest(c, 'reject'),
+);
+
+app.post(
+  '/api/organizations/:organizationSlug/controls/publish-requests/:publishRequestId/withdraw',
+  async (c) => reviewControlPublishRequest(c, 'withdraw'),
+);
 
 app.post('/api/organizations/:organizationSlug/controls/drafts', async (c) => {
   const session = await auth.api.getSession({
@@ -824,6 +843,54 @@ async function setControlArchived(c: Context, archived: boolean) {
   }
 
   return c.json({ control });
+}
+
+async function reviewControlPublishRequest(c: Context, action: 'approve' | 'reject' | 'withdraw') {
+  const organizationSlug = c.req.param('organizationSlug');
+  const publishRequestId = c.req.param('publishRequestId');
+
+  if (!organizationSlug || !publishRequestId) {
+    return c.json({ error: 'Control Publish Request unavailable' }, 404);
+  }
+
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const membership = await getOrganizationMembership(organizationSlug, session.user.id);
+
+  if (!membership) {
+    return c.json({ error: 'Control Publish Request unavailable' }, 404);
+  }
+
+  try {
+    const publishRequest =
+      action === 'approve'
+        ? await approveControlPublishRequest(membership, publishRequestId)
+        : action === 'reject'
+          ? await rejectControlPublishRequest(
+              membership,
+              publishRequestId,
+              normalizeControlPublishRequestRejectionBody(await c.req.json().catch(() => null)),
+            )
+          : await withdrawControlPublishRequest(membership, publishRequestId);
+
+    if (!publishRequest) {
+      return c.json({ error: 'Control Publish Request unavailable' }, 404);
+    }
+
+    return c.json({ publishRequest });
+  } catch (caughtError) {
+    if (caughtError instanceof ControlPublishRequestInputError) {
+      return c.json({ error: caughtError.message }, 400);
+    }
+
+    throw caughtError;
+  }
 }
 
 app.on(['POST', 'GET'], '/api/auth/*', (c) => auth.handler(c.req.raw));

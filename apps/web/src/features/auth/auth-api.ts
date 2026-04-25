@@ -5,6 +5,7 @@ export type MembershipResolutionResponse = {
   canCreateOrganization: boolean;
   organizations: Array<{
     id: string;
+    memberId: string;
     name: string;
     role: string;
     slug: string;
@@ -119,9 +120,10 @@ export type ControlPublishRequestListItem = ControlVersionResponse & {
   controlId: string | null;
   draftControlId: string | null;
   proposedUpdateId: string | null;
+  rejectionComment: string | null;
   requestType: 'draft_control' | 'proposed_update';
   requiredApprovalCount: number;
-  status: 'submitted';
+  status: 'draft' | 'submitted';
   submittedAt: string;
 };
 
@@ -365,6 +367,38 @@ export function listControlPublishRequests(organizationSlug: string) {
     `/api/organizations/${organizationSlug}/controls/publish-requests`,
     {
       method: 'GET',
+    },
+  );
+}
+
+export function approveControlPublishRequest(organizationSlug: string, publishRequestId: string) {
+  return request<{ publishRequest: ControlPublishRequestListItem }>(
+    `/api/organizations/${organizationSlug}/controls/publish-requests/${publishRequestId}/approve`,
+    {
+      method: 'POST',
+    },
+  );
+}
+
+export function rejectControlPublishRequest(
+  organizationSlug: string,
+  publishRequestId: string,
+  input: { comment: string },
+) {
+  return request<{ publishRequest: ControlPublishRequestListItem }>(
+    `/api/organizations/${organizationSlug}/controls/publish-requests/${publishRequestId}/reject`,
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function withdrawControlPublishRequest(organizationSlug: string, publishRequestId: string) {
+  return request<{ publishRequest: ControlPublishRequestListItem }>(
+    `/api/organizations/${organizationSlug}/controls/publish-requests/${publishRequestId}/withdraw`,
+    {
+      method: 'POST',
     },
   );
 }
