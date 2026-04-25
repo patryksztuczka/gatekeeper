@@ -44,6 +44,26 @@ export type InvitationEntryResponse = {
   };
 };
 
+export type ProjectListItem = {
+  createdAt: string;
+  description: string;
+  id: string;
+  name: string;
+  projectOwner: {
+    email: string;
+    id: string;
+    name: string;
+  } | null;
+  slug: string;
+};
+
+export type OrganizationMemberListItem = {
+  email: string;
+  id: string;
+  name: string;
+  role: string;
+};
+
 type ApiErrorBody = {
   error?:
     | {
@@ -147,5 +167,38 @@ export function acceptOrganizationInvitation(invitationId: string) {
   return request(`/api/auth/organization/accept-invitation`, {
     method: 'POST',
     body: JSON.stringify({ invitationId }),
+  });
+}
+
+export function listOrganizationMembers(organizationSlug: string) {
+  return request<{ members: OrganizationMemberListItem[] }>(
+    `/api/organizations/${organizationSlug}/members`,
+    {
+      method: 'GET',
+    },
+  );
+}
+
+export function listProjects(organizationSlug: string) {
+  return request<{ projects: ProjectListItem[] }>(
+    `/api/organizations/${organizationSlug}/projects`,
+    {
+      method: 'GET',
+    },
+  );
+}
+
+export function createProject(
+  organizationSlug: string,
+  input: {
+    description: string;
+    name: string;
+    projectOwnerMemberId?: string | null;
+    slug: string;
+  },
+) {
+  return request<{ project: ProjectListItem }>(`/api/organizations/${organizationSlug}/projects`, {
+    method: 'POST',
+    body: JSON.stringify(input),
   });
 }

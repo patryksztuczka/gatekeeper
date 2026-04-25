@@ -3,6 +3,15 @@ import { cors } from 'hono/cors';
 import { auth } from './lib/auth';
 import { env } from 'cloudflare:workers';
 import { resolveInvitationEntryState, resolveMembershipResolution } from './lib/auth-organization';
+import {
+  canManageProjects,
+  createProject,
+  getOrganizationMembership,
+  listActiveProjects,
+  listOrganizationMembers,
+  normalizeProjectCreateBody,
+  ProjectInputError,
+} from './lib/projects';
 
 const app = new Hono();
 
@@ -53,6 +62,86 @@ app.get('/api/auth/invitations/:invitationId', async (c) => {
   );
 
   return c.json(invitation, invitation.status === 'invalid' ? 404 : 200);
+});
+
+app.get('/api/organizations/:organizationSlug/members', async (c) => {
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const membership = await getOrganizationMembership(
+    c.req.param('organizationSlug'),
+    session.user.id,
+  );
+
+  if (!membership) {
+    return c.json({ error: 'Organization not found' }, 404);
+  }
+
+  return c.json({ members: await listOrganizationMembers(membership.organizationId) });
+});
+
+app.get('/api/organizations/:organizationSlug/projects', async (c) => {
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const membership = await getOrganizationMembership(
+    c.req.param('organizationSlug'),
+    session.user.id,
+  );
+
+  if (!membership) {
+    return c.json({ error: 'Organization not found' }, 404);
+  }
+
+  return c.json({ projects: await listActiveProjects(membership.organizationId) });
+});
+
+app.post('/api/organizations/:organizationSlug/projects', async (c) => {
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const membership = await getOrganizationMembership(
+    c.req.param('organizationSlug'),
+    session.user.id,
+  );
+
+  if (!membership) {
+    return c.json({ error: 'Organization not found' }, 404);
+  }
+
+  if (!canManageProjects(membership.role)) {
+    return c.json({ error: 'Only Organization owners and admins can create Projects.' }, 403);
+  }
+
+  try {
+    const project = await createProject(
+      membership.organizationId,
+      normalizeProjectCreateBody(await c.req.json().catch(() => null)),
+    );
+
+    return c.json({ project }, 201);
+  } catch (caughtError) {
+    if (caughtError instanceof ProjectInputError) {
+      return c.json({ error: caughtError.message }, 400);
+    }
+
+    throw caughtError;
+  }
 });
 
 app.on(['POST', 'GET'], '/api/auth/*', (c) => auth.handler(c.req.raw));

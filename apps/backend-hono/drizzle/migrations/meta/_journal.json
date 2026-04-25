@@ -15,6 +15,13 @@
       "when": 1776583468335,
       "tag": "0001_swift_war_machine",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1776583468336,
+      "tag": "0002_projects",
+      "breakpoints": true
     }
   ]
 }
