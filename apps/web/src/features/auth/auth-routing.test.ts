@@ -9,6 +9,7 @@ import {
   getVerificationCallbackState,
   isReservedOrganizationSlug,
   slugifyOrganizationName,
+  slugifyProjectName,
 } from './auth-routing';
 
 describe('auth routing helpers', () => {
@@ -54,6 +55,12 @@ describe('auth routing helpers', () => {
     expect(slugifyOrganizationName('My Workspace')).toBe('my-workspace');
     expect(slugifyOrganizationName('Zolc Team ++')).toBe('zolc-team');
     expect(slugifyOrganizationName('')).toBe('');
+  });
+
+  it('slugifies Project names for editable Project creation slugs', () => {
+    expect(slugifyProjectName('SOC 2 Readiness')).toBe('soc-2-readiness');
+    expect(slugifyProjectName('Controls & Evidence')).toBe('controls-evidence');
+    expect(slugifyProjectName('')).toBe('');
   });
 
   it('identifies organization slugs reserved by public routes', () => {

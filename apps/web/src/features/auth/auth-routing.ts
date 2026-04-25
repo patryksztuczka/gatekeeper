@@ -49,6 +49,18 @@ export function slugifyOrganizationName(value: string): string {
     .slice(0, 48);
 }
 
+export function slugifyProjectName(value: string): string {
+  const normalizedValue = Array.from(value.normalize('NFKD'))
+    .filter((character) => character.charCodeAt(0) <= 0x7f)
+    .join('');
+
+  return normalizedValue
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64);
+}
+
 export function generateOrganizationSlug(value: string): string {
   const slug = slugifyOrganizationName(value);
 
