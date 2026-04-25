@@ -338,6 +338,7 @@ export const controlPublishRequests = sqliteTable(
     externalStandardsMappings: text('external_standards_mappings').notNull(),
     approvalCount: integer('approval_count').default(0).notNull(),
     requiredApprovalCount: integer('required_approval_count').notNull(),
+    rejectionComment: text('rejection_comment'),
     status: text('status').default('submitted').notNull(),
     submittedAt: integer('submitted_at', { mode: 'timestamp_ms' })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
@@ -348,5 +349,28 @@ export const controlPublishRequests = sqliteTable(
     index('control_publish_request_author_member_id_idx').on(table.authorMemberId),
     uniqueIndex('control_publish_request_draft_unique').on(table.draftControlId),
     uniqueIndex('control_publish_request_proposed_update_unique').on(table.proposedUpdateId),
+  ],
+);
+
+export const controlPublishRequestApprovals = sqliteTable(
+  'control_publish_request_approvals',
+  {
+    id: text('id').primaryKey(),
+    requestId: text('request_id')
+      .notNull()
+      .references(() => controlPublishRequests.id, { onDelete: 'cascade' }),
+    approverMemberId: text('approver_member_id')
+      .notNull()
+      .references(() => members.id, { onDelete: 'cascade' }),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+  },
+  (table) => [
+    index('control_publish_request_approval_request_id_idx').on(table.requestId),
+    uniqueIndex('control_publish_request_approval_member_unique').on(
+      table.requestId,
+      table.approverMemberId,
+    ),
   ],
 );

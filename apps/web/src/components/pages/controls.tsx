@@ -4,6 +4,7 @@ import { AlertCircle, Archive, CheckCircle2, Plus, RotateCcw, Trash2 } from 'luc
 import { useParams, useSearchParams } from 'react-router';
 import {
   archiveControl,
+  approveControlPublishRequest,
   cancelDraftControl,
   createControlProposedUpdate,
   createDraftControl,
@@ -15,9 +16,11 @@ import {
   listDraftControls,
   publishControlProposedUpdate,
   publishDraftControl,
+  rejectControlPublishRequest,
   restoreControl,
   submitControlProposedUpdatePublishRequest,
   submitDraftControlPublishRequest,
+  withdrawControlPublishRequest,
   type ControlListItem,
   type ControlProposedUpdateListItem,
   type ControlPublishRequestListItem,
@@ -53,12 +56,16 @@ export function ControlsPage() {
   const [proposedUpdates, setProposedUpdates] = useState<ControlProposedUpdateListItem[]>([]);
   const [publishRequests, setPublishRequests] = useState<ControlPublishRequestListItem[]>([]);
   const [currentRole, setCurrentRole] = useState<string | null>(null);
+  const [currentMemberId, setCurrentMemberId] = useState<string | null>(null);
   const [approvalPolicyEnabled, setApprovalPolicyEnabled] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [publishingDraftId, setPublishingDraftId] = useState<string | null>(null);
   const [creatingProposalControlId, setCreatingProposalControlId] = useState<string | null>(null);
   const [publishingProposalId, setPublishingProposalId] = useState<string | null>(null);
+  const [reviewingRequestId, setReviewingRequestId] = useState<string | null>(null);
+  const [rejectingRequestId, setRejectingRequestId] = useState<string | null>(null);
+  const [rejectionComment, setRejectionComment] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [controlCode, setControlCode] = useState('');
@@ -124,6 +131,7 @@ export function ControlsPage() {
         setPublishRequests(publishRequestResponse.publishRequests);
         setApprovalPolicyEnabled(policyResponse.policy.enabled);
         setCurrentRole(organization?.role ?? null);
+        setCurrentMemberId(organization?.memberId ?? null);
       } catch (caughtError) {
         const rawMessage =
           caughtError instanceof Error ? caughtError.message : 'Unable to load Draft Controls.';
@@ -218,7 +226,9 @@ export function ControlsPage() {
           draftControl.id,
           payload,
         );
-        setPublishRequests((currentRequests) => [...currentRequests, response.publishRequest]);
+        setPublishRequests((currentRequests) =>
+          upsertPublishRequest(currentRequests, response.publishRequest),
+        );
         setStatus('Control Publish Request submitted.');
         return;
       }
@@ -371,7 +381,9 @@ export function ControlsPage() {
         proposedUpdate.id,
       );
 
-      setPublishRequests((currentRequests) => [...currentRequests, response.publishRequest]);
+      setPublishRequests((currentRequests) =>
+        upsertPublishRequest(currentRequests, response.publishRequest),
+      );
       setStatus('Control Publish Request submitted.');
     } catch (caughtError) {
       const rawMessage =
@@ -381,6 +393,86 @@ export function ControlsPage() {
       setError(humanizeAuthError(null, rawMessage, 'Unable to submit Control Publish Request.'));
     } finally {
       setPublishingProposalId(null);
+    }
+  };
+
+  const handleApproveControlPublishRequest = async (request: ControlPublishRequestListItem) => {
+    if (!organizationSlug) return;
+
+    setReviewingRequestId(request.id);
+    setError(null);
+    setStatus(null);
+    try {
+      const response = await approveControlPublishRequest(organizationSlug, request.id);
+
+      setPublishRequests((currentRequests) =>
+        upsertPublishRequest(currentRequests, response.publishRequest),
+      );
+      setStatus('Control Publish Request approved.');
+    } catch (caughtError) {
+      const rawMessage =
+        caughtError instanceof Error
+          ? caughtError.message
+          : 'Unable to approve Control Publish Request.';
+      setError(humanizeAuthError(null, rawMessage, 'Unable to approve Control Publish Request.'));
+    } finally {
+      setReviewingRequestId(null);
+    }
+  };
+
+  const handleRejectControlPublishRequest = async (
+    event: FormEvent<HTMLFormElement>,
+    request: ControlPublishRequestListItem,
+  ) => {
+    event.preventDefault();
+    if (!organizationSlug) return;
+
+    setReviewingRequestId(request.id);
+    setError(null);
+    setStatus(null);
+    try {
+      const response = await rejectControlPublishRequest(organizationSlug, request.id, {
+        comment: rejectionComment,
+      });
+
+      setPublishRequests((currentRequests) =>
+        upsertPublishRequest(currentRequests, response.publishRequest),
+      );
+      setRejectingRequestId(null);
+      setRejectionComment('');
+      setStatus('Control Publish Request rejected and returned to draft.');
+    } catch (caughtError) {
+      const rawMessage =
+        caughtError instanceof Error
+          ? caughtError.message
+          : 'Unable to reject Control Publish Request.';
+      setError(humanizeAuthError(null, rawMessage, 'Unable to reject Control Publish Request.'));
+    } finally {
+      setReviewingRequestId(null);
+    }
+  };
+
+  const handleWithdrawControlPublishRequest = async (request: ControlPublishRequestListItem) => {
+    if (!organizationSlug) return;
+
+    setReviewingRequestId(request.id);
+    setError(null);
+    setStatus(null);
+    try {
+      const response = await withdrawControlPublishRequest(organizationSlug, request.id);
+
+      setPublishRequests((currentRequests) =>
+        upsertPublishRequest(currentRequests, response.publishRequest),
+      );
+      setStatus('Control Publish Request withdrawn.');
+    } catch (caughtError) {
+      const rawMessage =
+        caughtError instanceof Error
+          ? caughtError.message
+          : 'Unable to withdraw Control Publish Request.';
+      setError(humanizeAuthError(null, rawMessage, 'Unable to withdraw Control Publish Request.'));
+    } finally {
+      setReviewingRequestId(null);
     }
   };
 
@@ -626,14 +718,18 @@ export function ControlsPage() {
                             disabled={
                               publishingProposalId === proposedUpdate.id ||
                               publishRequests.some(
-                                (request) => request.proposedUpdateId === proposedUpdate.id,
+                                (request) =>
+                                  request.proposedUpdateId === proposedUpdate.id &&
+                                  request.status === 'submitted',
                               )
                             }
                             onClick={() => void handleSubmitControlProposedUpdate(proposedUpdate)}
                           >
                             <CheckCircle2 />
                             {publishRequests.some(
-                              (request) => request.proposedUpdateId === proposedUpdate.id,
+                              (request) =>
+                                request.proposedUpdateId === proposedUpdate.id &&
+                                request.status === 'submitted',
                             )
                               ? 'Request Submitted'
                               : publishingProposalId === proposedUpdate.id
@@ -922,11 +1018,19 @@ export function ControlsPage() {
                     type="submit"
                     disabled={
                       publishingDraftId === draftControl.id ||
-                      publishRequests.some((request) => request.draftControlId === draftControl.id)
+                      publishRequests.some(
+                        (request) =>
+                          request.draftControlId === draftControl.id &&
+                          request.status === 'submitted',
+                      )
                     }
                   >
                     <CheckCircle2 />
-                    {publishRequests.some((request) => request.draftControlId === draftControl.id)
+                    {publishRequests.some(
+                      (request) =>
+                        request.draftControlId === draftControl.id &&
+                        request.status === 'submitted',
+                    )
                       ? 'Request Submitted'
                       : publishingDraftId === draftControl.id
                         ? approvalPolicyEnabled
@@ -967,11 +1071,89 @@ export function ControlsPage() {
                     <p className="text-sm text-muted-foreground">
                       Approvals: {request.approvalCount} of {request.requiredApprovalCount}
                     </p>
+                    <p className="text-sm text-muted-foreground">Status: {request.status}</p>
+                    {request.rejectionComment ? (
+                      <p className="text-sm text-muted-foreground">
+                        Rejection comment: {request.rejectionComment}
+                      </p>
+                    ) : null}
                   </div>
                   <p className="shrink-0 text-xs text-muted-foreground">
                     Submitted {formatDate(request.submittedAt)}
                   </p>
                 </div>
+                {request.status === 'submitted' ? (
+                  <div className="mt-4 flex flex-wrap justify-end gap-2">
+                    {request.author.id === currentMemberId ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={reviewingRequestId === request.id}
+                        onClick={() => void handleWithdrawControlPublishRequest(request)}
+                      >
+                        Withdraw
+                      </Button>
+                    ) : null}
+                    {canPublish && request.author.id !== currentMemberId ? (
+                      <>
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled={reviewingRequestId === request.id}
+                          onClick={() => void handleApproveControlPublishRequest(request)}
+                        >
+                          Approve
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={reviewingRequestId === request.id}
+                          onClick={() => {
+                            setRejectingRequestId(request.id);
+                            setRejectionComment('');
+                          }}
+                        >
+                          Reject
+                        </Button>
+                      </>
+                    ) : null}
+                  </div>
+                ) : null}
+                {rejectingRequestId === request.id ? (
+                  <form
+                    className="mt-4 space-y-3 rounded-lg border bg-muted/30 p-3"
+                    onSubmit={(event) => handleRejectControlPublishRequest(event, request)}
+                  >
+                    <div className="space-y-2">
+                      <Label htmlFor={`${request.id}-rejection-comment`}>Rejection comment</Label>
+                      <textarea
+                        id={`${request.id}-rejection-comment`}
+                        value={rejectionComment}
+                        onChange={(event) => setRejectionComment(event.target.value)}
+                        className="min-h-20 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                        required
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setRejectingRequestId(null);
+                          setRejectionComment('');
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                      <Button type="submit" size="sm" disabled={reviewingRequestId === request.id}>
+                        Reject Request
+                      </Button>
+                    </div>
+                  </form>
+                ) : null}
               </article>
             ))}
           </div>
@@ -979,4 +1161,13 @@ export function ControlsPage() {
       ) : null}
     </div>
   );
+}
+
+function upsertPublishRequest(
+  requests: ControlPublishRequestListItem[],
+  nextRequest: ControlPublishRequestListItem,
+) {
+  return requests.some((request) => request.id === nextRequest.id)
+    ? requests.map((request) => (request.id === nextRequest.id ? nextRequest : request))
+    : [...requests, nextRequest];
 }

@@ -3,7 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import app from '../src/index';
 import { db } from '../src/db/client';
-import { controlPublishRequests, controlVersions, controls, users } from '../src/db/schema';
+import {
+  controlPublishRequestApprovals,
+  controlPublishRequests,
+  controlVersions,
+  controls,
+  users,
+} from '../src/db/schema';
 import { auth } from '../src/lib/auth';
 
 const authHeaders = {
@@ -332,6 +338,65 @@ async function listControlPublishRequestsRequest(organizationSlug: string, heade
   const response = await app.request(
     `http://example.com/api/organizations/${organizationSlug}/controls/publish-requests`,
     { headers },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+async function approveControlPublishRequest(
+  organizationSlug: string,
+  publishRequestId: string,
+  headers: Headers,
+) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/controls/publish-requests/${publishRequestId}/approve`,
+    {
+      headers,
+      method: 'POST',
+    },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+async function rejectControlPublishRequest(
+  organizationSlug: string,
+  publishRequestId: string,
+  headers: Headers,
+  body: Record<string, unknown>,
+) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/controls/publish-requests/${publishRequestId}/reject`,
+    {
+      body: JSON.stringify(body),
+      headers,
+      method: 'POST',
+    },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+async function withdrawControlPublishRequest(
+  organizationSlug: string,
+  publishRequestId: string,
+  headers: Headers,
+) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/controls/publish-requests/${publishRequestId}/withdraw`,
+    {
+      headers,
+      method: 'POST',
+    },
   );
 
   return {
@@ -916,6 +981,223 @@ describe('Draft Controls', () => {
           'Control Approval Policy requires an approved Control Publish Request before publishing.',
       },
       status: 400,
+    });
+  });
+
+  it('lets eligible owners and admins approve submitted Control Publish Requests except their own', async () => {
+    const { headers: ownerHeaders, organization } =
+      await createSignedInOwner('request-approve-owner');
+    const admin = await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'request-approve-admin',
+      role: 'admin',
+    });
+    const member = await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'request-approve-member',
+      role: 'member',
+    });
+
+    await enableControlApprovalPolicy(organization.slug, ownerHeaders);
+
+    const createResponse = await createDraftControlRequest(organization.slug, member.headers, {
+      controlCode: 'AUTH-030',
+      title: 'Approval reviewed Control',
+    });
+    const draftControl = createResponse.body.draftControl as { id: string };
+    const submitResponse = await submitDraftControlPublishRequest(
+      organization.slug,
+      draftControl.id,
+      member.headers,
+    );
+    const publishRequest = submitResponse.body.publishRequest as { id: string };
+
+    await expect(
+      approveControlPublishRequest(organization.slug, publishRequest.id, member.headers),
+    ).resolves.toMatchObject({
+      body: { error: 'Only Organization owners and admins can approve Control Publish Requests.' },
+      status: 400,
+    });
+
+    const adminApproveResponse = await approveControlPublishRequest(
+      organization.slug,
+      publishRequest.id,
+      admin.headers,
+    );
+
+    expect(adminApproveResponse.status).toBe(200);
+    expect(adminApproveResponse.body.publishRequest).toMatchObject({
+      approvalCount: 1,
+      status: 'submitted',
+    });
+
+    await expect(
+      approveControlPublishRequest(organization.slug, publishRequest.id, admin.headers),
+    ).resolves.toMatchObject({
+      body: { publishRequest: { approvalCount: 1 } },
+      status: 200,
+    });
+  });
+
+  it('prevents Control Publish Request authors from approving their own requests', async () => {
+    const { headers: ownerHeaders, organization } = await createSignedInOwner(
+      'request-self-approve-owner',
+    );
+    await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'request-self-approve-admin',
+      role: 'admin',
+    });
+
+    await enableControlApprovalPolicy(organization.slug, ownerHeaders);
+
+    const createResponse = await createDraftControlRequest(organization.slug, ownerHeaders, {
+      controlCode: 'AUTH-031',
+      title: 'Self approval Control',
+    });
+    const draftControl = createResponse.body.draftControl as { id: string };
+    const submitResponse = await submitDraftControlPublishRequest(
+      organization.slug,
+      draftControl.id,
+      ownerHeaders,
+    );
+    const publishRequest = submitResponse.body.publishRequest as { id: string };
+
+    await expect(
+      approveControlPublishRequest(organization.slug, publishRequest.id, ownerHeaders),
+    ).resolves.toMatchObject({
+      body: { error: 'Authors cannot approve their own Control Publish Requests.' },
+      status: 400,
+    });
+  });
+
+  it('requires a rejection comment and returns submitted requests to draft with approvals reset', async () => {
+    const { headers: ownerHeaders, organization } =
+      await createSignedInOwner('request-reject-owner');
+    const admin = await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'request-reject-admin',
+      role: 'admin',
+    });
+    const member = await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'request-reject-member',
+      role: 'member',
+    });
+
+    await enableControlApprovalPolicy(organization.slug, ownerHeaders);
+
+    const createResponse = await createDraftControlRequest(organization.slug, member.headers, {
+      controlCode: 'AUTH-032',
+      title: 'Rejected Control',
+    });
+    const draftControl = createResponse.body.draftControl as { id: string };
+    const submitResponse = await submitDraftControlPublishRequest(
+      organization.slug,
+      draftControl.id,
+      member.headers,
+    );
+    const publishRequest = submitResponse.body.publishRequest as { id: string };
+
+    await approveControlPublishRequest(organization.slug, publishRequest.id, admin.headers);
+
+    await expect(
+      rejectControlPublishRequest(organization.slug, publishRequest.id, ownerHeaders, {
+        comment: '',
+      }),
+    ).resolves.toMatchObject({
+      body: { error: 'Rejection comment is required.' },
+      status: 400,
+    });
+
+    const rejectResponse = await rejectControlPublishRequest(
+      organization.slug,
+      publishRequest.id,
+      ownerHeaders,
+      { comment: 'Evidence does not cover the applicability conditions.' },
+    );
+
+    expect(rejectResponse.status).toBe(200);
+    expect(rejectResponse.body.publishRequest).toMatchObject({
+      approvalCount: 0,
+      rejectionComment: 'Evidence does not cover the applicability conditions.',
+      status: 'draft',
+    });
+    await expect(
+      db
+        .select()
+        .from(controlPublishRequestApprovals)
+        .where(eq(controlPublishRequestApprovals.requestId, publishRequest.id)),
+    ).resolves.toHaveLength(0);
+  });
+
+  it('lets authors withdraw submitted requests and resubmit edits with approvals reset', async () => {
+    const { headers: ownerHeaders, organization } =
+      await createSignedInOwner('request-withdraw-owner');
+    const admin = await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'request-withdraw-admin',
+      role: 'admin',
+    });
+    const member = await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'request-withdraw-member',
+      role: 'member',
+    });
+
+    await enableControlApprovalPolicy(organization.slug, ownerHeaders);
+
+    const createResponse = await createDraftControlRequest(organization.slug, member.headers, {
+      controlCode: 'AUTH-033',
+      title: 'Withdrawn Control',
+    });
+    const draftControl = createResponse.body.draftControl as { id: string };
+    const submitResponse = await submitDraftControlPublishRequest(
+      organization.slug,
+      draftControl.id,
+      member.headers,
+    );
+    const publishRequest = submitResponse.body.publishRequest as { id: string };
+
+    await approveControlPublishRequest(organization.slug, publishRequest.id, admin.headers);
+
+    await expect(
+      withdrawControlPublishRequest(organization.slug, publishRequest.id, ownerHeaders),
+    ).resolves.toMatchObject({
+      body: { error: 'Only the author can withdraw a Control Publish Request.' },
+      status: 400,
+    });
+
+    await expect(
+      withdrawControlPublishRequest(organization.slug, publishRequest.id, member.headers),
+    ).resolves.toMatchObject({
+      body: { publishRequest: { approvalCount: 0, status: 'draft' } },
+      status: 200,
+    });
+
+    const resubmitResponse = await submitDraftControlPublishRequest(
+      organization.slug,
+      draftControl.id,
+      member.headers,
+      {
+        ...completePublishBody,
+        businessMeaning: 'Edited after review so approvals must be recollected.',
+      },
+    );
+
+    expect(resubmitResponse.status).toBe(201);
+    expect(resubmitResponse.body.publishRequest).toMatchObject({
+      approvalCount: 0,
+      businessMeaning: 'Edited after review so approvals must be recollected.',
+      id: publishRequest.id,
+      status: 'submitted',
     });
   });
 
