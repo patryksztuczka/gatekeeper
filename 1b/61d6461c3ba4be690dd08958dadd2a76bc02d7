@@ -1,0 +1,45 @@
+apps/backend-hono/src/index.ts
+  bab7fac9b9ee69bd 6-15,68-144
+apps/backend-hono/src/lib/projects.ts
+  bab7fac9b9ee69bd 1,5-17,33-128,134,186-284
+apps/web/src/features/auth/auth-api.ts
+  bab7fac9b9ee69bd 47-66,172-202
+apps/backend-hono/src/lib/auth-organization.ts
+  bab7fac9b9ee69bd 2,94-102,116-124,331-334,359-362
+apps/backend-hono/test/organization-membership.spec.ts
+  bab7fac9b9ee69bd 184-215
+apps/web/src/components/layouts/dashboard-sidebar.tsx
+  bab7fac9b9ee69bd 21-24,106-114
+apps/web/src/components/pages/home.tsx
+  bab7fac9b9ee69bd 14,16,73-76,170
+apps/web/src/components/pages/projects.tsx
+  bab7fac9b9ee69bd 1-268
+apps/web/src/features/auth/auth-routing.ts
+  bab7fac9b9ee69bd 7-16,52-73,80-116
+apps/web/src/features/auth/auth-routing.test.ts
+  bab7fac9b9ee69bd 5,7,10,12,60-76,83-156
+apps/web/src/providers/router.tsx
+  bab7fac9b9ee69bd 109-114,123
+apps/backend-hono/test/projects.spec.ts
+  bab7fac9b9ee69bd 1-314
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "1b61d6461c3ba4be690dd08958dadd2a76bc02d7",
+  "prompts": {
+    "bab7fac9b9ee69bd": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_23ace7653ffed49sj75INu6M3e",
+        "model": "openai/gpt-5.5"
+      },
+      "human_author": "Patryk Sztuczka",
+      "messages": [],
+      "total_additions": 1221,
+      "total_deletions": 4,
+      "accepted_lines": 1175,
+      "overriden_lines": 1
+    }
+  }
+}
