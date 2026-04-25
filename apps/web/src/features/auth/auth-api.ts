@@ -70,6 +70,30 @@ export type DraftControlListItem = {
   title: string;
 };
 
+export type ControlListItem = {
+  controlCode: string;
+  createdAt: string;
+  currentVersion: {
+    acceptedEvidenceTypes: string[];
+    applicabilityConditions: string;
+    businessMeaning: string;
+    controlCode: string;
+    createdAt: string;
+    externalStandardsMappings: Array<{
+      description?: string;
+      framework: string;
+      reference: string;
+    }>;
+    id: string;
+    releaseImpact: 'advisory' | 'blocking' | 'needs review';
+    title: string;
+    verificationMethod: string;
+    versionNumber: number;
+  };
+  id: string;
+  title: string;
+};
+
 export type OrganizationMemberListItem = {
   email: string;
   id: string;
@@ -227,6 +251,15 @@ export function listDraftControls(organizationSlug: string) {
   );
 }
 
+export function listControls(organizationSlug: string) {
+  return request<{ controls: ControlListItem[] }>(
+    `/api/organizations/${organizationSlug}/controls`,
+    {
+      method: 'GET',
+    },
+  );
+}
+
 export function createDraftControl(
   organizationSlug: string,
   input: {
@@ -236,6 +269,26 @@ export function createDraftControl(
 ) {
   return request<{ draftControl: DraftControlListItem }>(
     `/api/organizations/${organizationSlug}/controls/drafts`,
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function publishDraftControl(
+  organizationSlug: string,
+  draftControlId: string,
+  input: {
+    acceptedEvidenceTypes: string[];
+    applicabilityConditions: string;
+    businessMeaning: string;
+    releaseImpact: string;
+    verificationMethod: string;
+  },
+) {
+  return request<{ control: ControlListItem }>(
+    `/api/organizations/${organizationSlug}/controls/drafts/${draftControlId}/publish`,
     {
       method: 'POST',
       body: JSON.stringify(input),

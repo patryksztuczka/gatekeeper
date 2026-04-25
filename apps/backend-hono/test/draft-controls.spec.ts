@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import app from '../src/index';
 import { db } from '../src/db/client';
-import { users } from '../src/db/schema';
+import { controlVersions, controls, users } from '../src/db/schema';
 import { auth } from '../src/lib/auth';
 
 const authHeaders = {
@@ -129,6 +129,61 @@ async function createDraftControlRequest(
 async function listDraftControlsRequest(organizationSlug: string, headers: Headers) {
   const response = await app.request(
     `http://example.com/api/organizations/${organizationSlug}/controls/drafts`,
+    { headers },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+const completePublishBody = {
+  acceptedEvidenceTypes: ['document', 'approval record'],
+  applicabilityConditions: 'Applies to internet-facing authentication surfaces.',
+  businessMeaning: 'Release teams must verify users have a second authentication factor.',
+  releaseImpact: 'blocking',
+  verificationMethod: 'Review identity provider MFA policy evidence.',
+};
+
+async function publishDraftControlRequest(
+  organizationSlug: string,
+  draftControlId: string,
+  headers: Headers,
+  body: Record<string, unknown> = completePublishBody,
+) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/controls/drafts/${draftControlId}/publish`,
+    {
+      body: JSON.stringify(body),
+      headers,
+      method: 'POST',
+    },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+async function listControlsRequest(organizationSlug: string, headers: Headers) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/controls`,
+    {
+      headers,
+    },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+async function getControlRequest(organizationSlug: string, controlId: string, headers: Headers) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/controls/${controlId}`,
     { headers },
   );
 
@@ -293,5 +348,149 @@ describe('Draft Controls', () => {
         title: 'Same code in another Organization',
       }),
     ).resolves.toMatchObject({ status: 201 });
+  });
+
+  it('lets Organization owners publish a complete Draft Control as active Control Version v1', async () => {
+    const { headers: ownerHeaders, organization } = await createSignedInOwner('publish-owner');
+
+    const createResponse = await createDraftControlRequest(organization.slug, ownerHeaders, {
+      controlCode: 'AUTH-004',
+      title: 'Require phishing-resistant MFA',
+    });
+
+    expect(createResponse.status).toBe(201);
+
+    const draftControl = createResponse.body.draftControl as { id: string };
+    const publishResponse = await publishDraftControlRequest(
+      organization.slug,
+      draftControl.id,
+      ownerHeaders,
+    );
+
+    expect(publishResponse.status).toBe(201);
+    expect(publishResponse.body.control).toMatchObject({
+      controlCode: 'AUTH-004',
+      currentVersion: {
+        acceptedEvidenceTypes: ['document', 'approval record'],
+        releaseImpact: 'blocking',
+        title: 'Require phishing-resistant MFA',
+        versionNumber: 1,
+      },
+      title: 'Require phishing-resistant MFA',
+    });
+
+    const [controlRow] = await db
+      .select()
+      .from(controls)
+      .where(eq(controls.organizationId, organization.id));
+    expect(controlRow?.currentControlCode).toBe('AUTH-004');
+
+    const versions = await db
+      .select()
+      .from(controlVersions)
+      .where(eq(controlVersions.controlId, controlRow!.id));
+    expect(versions).toHaveLength(1);
+    expect(versions[0]).toMatchObject({ controlCode: 'AUTH-004', versionNumber: 1 });
+
+    await expect(listDraftControlsRequest(organization.slug, ownerHeaders)).resolves.toMatchObject({
+      body: { draftControls: [] },
+      status: 200,
+    });
+  });
+
+  it('makes published Controls visible in list and detail to all Organization members', async () => {
+    const { headers: ownerHeaders, organization } = await createSignedInOwner('active-owner');
+    const member = await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'active-member',
+      role: 'member',
+    });
+
+    const createResponse = await createDraftControlRequest(organization.slug, ownerHeaders, {
+      controlCode: 'DATA-002',
+      title: 'Classify customer data',
+    });
+    const draftControl = createResponse.body.draftControl as { id: string };
+    const publishResponse = await publishDraftControlRequest(
+      organization.slug,
+      draftControl.id,
+      ownerHeaders,
+    );
+    const control = publishResponse.body.control as { id: string };
+
+    await expect(listControlsRequest(organization.slug, member.headers)).resolves.toMatchObject({
+      body: { controls: [{ controlCode: 'DATA-002', currentVersion: { versionNumber: 1 } }] },
+      status: 200,
+    });
+    await expect(
+      getControlRequest(organization.slug, control.id, member.headers),
+    ).resolves.toMatchObject({
+      body: { control: { controlCode: 'DATA-002', currentVersion: { releaseImpact: 'blocking' } } },
+      status: 200,
+    });
+  });
+
+  it('limits Draft Control publishing to Organization owners and admins', async () => {
+    const { headers: ownerHeaders, organization } = await createSignedInOwner('publish-role-owner');
+    const member = await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'publish-role-member',
+      role: 'member',
+    });
+    const admin = await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'publish-role-admin',
+      role: 'admin',
+    });
+
+    const firstDraftResponse = await createDraftControlRequest(organization.slug, member.headers, {
+      controlCode: 'AUTH-005',
+      title: 'Review privileged sessions',
+    });
+    const firstDraft = firstDraftResponse.body.draftControl as { id: string };
+
+    await expect(
+      publishDraftControlRequest(organization.slug, firstDraft.id, member.headers),
+    ).resolves.toMatchObject({
+      body: { error: 'Only Organization owners and admins can publish Controls.' },
+      status: 403,
+    });
+
+    const secondDraftResponse = await createDraftControlRequest(organization.slug, admin.headers, {
+      controlCode: 'AUTH-006',
+      title: 'Review production access',
+    });
+    const secondDraft = secondDraftResponse.body.draftControl as { id: string };
+
+    await expect(
+      publishDraftControlRequest(organization.slug, secondDraft.id, admin.headers),
+    ).resolves.toMatchObject({ status: 201 });
+  });
+
+  it('validates required Control publish fields', async () => {
+    const { headers: ownerHeaders, organization } = await createSignedInOwner('publish-validation');
+    const createResponse = await createDraftControlRequest(organization.slug, ownerHeaders, {
+      controlCode: 'AUTH-007',
+      title: 'Validate publish fields',
+    });
+    const draftControl = createResponse.body.draftControl as { id: string };
+
+    const publishResponse = await publishDraftControlRequest(
+      organization.slug,
+      draftControl.id,
+      ownerHeaders,
+      {
+        ...completePublishBody,
+        acceptedEvidenceTypes: [],
+      },
+    );
+
+    expect(publishResponse.status).toBe(400);
+    expect(publishResponse.body).toMatchObject({
+      error: 'At least one Accepted Evidence Type is required.',
+    });
   });
 });

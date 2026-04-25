@@ -211,3 +211,55 @@ export const draftControls = sqliteTable(
     ),
   ],
 );
+
+export const controls = sqliteTable(
+  'controls',
+  {
+    id: text('id').primaryKey(),
+    organizationId: text('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    currentVersionId: text('current_version_id'),
+    currentControlCode: text('current_control_code').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index('control_organization_id_idx').on(table.organizationId),
+    uniqueIndex('control_organization_code_unique').on(
+      table.organizationId,
+      table.currentControlCode,
+    ),
+  ],
+);
+
+export const controlVersions = sqliteTable(
+  'control_versions',
+  {
+    id: text('id').primaryKey(),
+    controlId: text('control_id')
+      .notNull()
+      .references(() => controls.id, { onDelete: 'cascade' }),
+    versionNumber: integer('version_number').notNull(),
+    controlCode: text('control_code').notNull(),
+    title: text('title').notNull(),
+    businessMeaning: text('business_meaning').notNull(),
+    verificationMethod: text('verification_method').notNull(),
+    acceptedEvidenceTypes: text('accepted_evidence_types').notNull(),
+    applicabilityConditions: text('applicability_conditions').notNull(),
+    releaseImpact: text('release_impact').notNull(),
+    externalStandardsMappings: text('external_standards_mappings').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+  },
+  (table) => [
+    index('control_version_control_id_idx').on(table.controlId),
+    uniqueIndex('control_version_number_unique').on(table.controlId, table.versionNumber),
+  ],
+);
