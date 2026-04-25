@@ -45,9 +45,11 @@ export type InvitationEntryResponse = {
 };
 
 type ApiErrorBody = {
-  error?: {
-    message?: string;
-  } | string;
+  error?:
+    | {
+        message?: string;
+      }
+    | string;
   message?: string;
 };
 
@@ -67,12 +69,11 @@ async function request<T>(
   const errorBody = typeof body === 'object' && body !== null ? (body as ApiErrorBody) : null;
 
   if (!response.ok && !init?.allowStatuses?.includes(response.status)) {
-    const message =
-      errorBody
-        ? typeof errorBody.error === 'string'
-          ? errorBody.error
-          : errorBody.error?.message || errorBody.message || 'Request failed.'
-        : 'Request failed.';
+    const message = errorBody
+      ? typeof errorBody.error === 'string'
+        ? errorBody.error
+        : errorBody.error?.message || errorBody.message || 'Request failed.'
+      : 'Request failed.';
 
     throw new Error(message);
   }

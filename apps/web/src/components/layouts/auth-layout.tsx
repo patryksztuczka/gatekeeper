@@ -9,8 +9,7 @@ export function AuthLayout() {
           aria-hidden
           className="pointer-events-none absolute inset-0 opacity-[0.08]"
           style={{
-            backgroundImage:
-              'radial-gradient(currentColor 1px, transparent 1px)',
+            backgroundImage: 'radial-gradient(currentColor 1px, transparent 1px)',
             backgroundSize: '18px 18px',
           }}
         />
@@ -25,12 +24,10 @@ export function AuthLayout() {
         </div>
 
         <div className="relative max-w-md space-y-3">
-          <h2 className="text-3xl font-semibold tracking-tight">
-            Release decisions, evidenced.
-          </h2>
+          <h2 className="text-3xl font-semibold tracking-tight">Release decisions, evidenced.</h2>
           <p className="text-sm text-primary-foreground/70">
-            One system for checklists, controls, and exceptions — so every release
-            is verified on evidence, not memory, and stays audit-ready.
+            One system for checklists, controls, and exceptions — so every release is verified on
+            evidence, not memory, and stays audit-ready.
           </p>
         </div>
       </aside>

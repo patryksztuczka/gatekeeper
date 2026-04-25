@@ -53,8 +53,7 @@ const FRIENDLY_ERRORS: Record<string, string> = {
   PASSWORD_TOO_SHORT: 'Your password must be at least 8 characters.',
 };
 
-const NETWORK_ERROR_MESSAGE =
-  'We couldn’t reach the server. Check your connection and try again.';
+const NETWORK_ERROR_MESSAGE = 'We couldn’t reach the server. Check your connection and try again.';
 
 const isNetworkError = (message: string): boolean => {
   const normalized = message.toLowerCase();

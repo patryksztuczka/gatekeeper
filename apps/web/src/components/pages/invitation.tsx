@@ -173,10 +173,12 @@ export function InvitationPage() {
   return (
     <div>
       <p className="text-xs uppercase">Invite link</p>
-      <h2 className="mt-2 text-2xl font-bold">Join {invitationEntry.invitation.organizationName}</h2>
+      <h2 className="mt-2 text-2xl font-bold">
+        Join {invitationEntry.invitation.organizationName}
+      </h2>
       <p className="mt-4 text-sm leading-6">
-        {invitationEntry.invitation.inviterEmail} invited {invitationEntry.invitation.email} to join as{' '}
-        {getInviteRoleLabel(invitationEntry.invitation.role)}.
+        {invitationEntry.invitation.inviterEmail} invited {invitationEntry.invitation.email} to join
+        as {getInviteRoleLabel(invitationEntry.invitation.role)}.
       </p>
       <p className="mt-2 text-sm">
         Expires {new Date(invitationEntry.invitation.expiresAt).toLocaleString()}.
@@ -247,7 +249,9 @@ export function InvitationPage() {
       ) : null}
 
       {error ? <p className="mt-4 border border-red-700 bg-red-100 p-3 text-sm">{error}</p> : null}
-      {status ? <p className="mt-4 border border-green-700 bg-green-100 p-3 text-sm">{status}</p> : null}
+      {status ? (
+        <p className="mt-4 border border-green-700 bg-green-100 p-3 text-sm">{status}</p>
+      ) : null}
     </div>
   );
 }

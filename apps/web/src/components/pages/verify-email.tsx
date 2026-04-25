@@ -32,7 +32,9 @@ export function VerifyEmailPage() {
         }),
       });
 
-      setStatus('Verification email sent. Check your inbox and open the link from the same browser.');
+      setStatus(
+        'Verification email sent. Check your inbox and open the link from the same browser.',
+      );
     } catch (caughtError) {
       setError(
         caughtError instanceof Error ? caughtError.message : 'Unable to send verification email.',
@@ -64,7 +66,9 @@ export function VerifyEmailPage() {
         </label>
 
         {error ? <p className="border border-red-700 bg-red-100 p-3 text-sm">{error}</p> : null}
-        {status ? <p className="border border-green-700 bg-green-100 p-3 text-sm">{status}</p> : null}
+        {status ? (
+          <p className="border border-green-700 bg-green-100 p-3 text-sm">{status}</p>
+        ) : null}
 
         <button
           type="submit"

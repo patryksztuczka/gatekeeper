@@ -8,10 +8,7 @@ import {
   humanizeAuthError,
 } from '../../features/auth/auth-errors';
 import { signIn } from '../../features/auth/auth-client';
-import {
-  buildSignUpLink,
-  buildVerifyEmailLink,
-} from '../../features/auth/auth-routing';
+import { buildSignUpLink, buildVerifyEmailLink } from '../../features/auth/auth-routing';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -59,8 +56,7 @@ export function SignInPage() {
 
       navigate(redirectTo);
     } catch (caughtError) {
-      const rawMessage =
-        caughtError instanceof Error ? caughtError.message : 'Unable to sign in.';
+      const rawMessage = caughtError instanceof Error ? caughtError.message : 'Unable to sign in.';
 
       if (rawMessage === 'Email not verified') {
         navigate(verifyEmailLink);
@@ -82,9 +78,7 @@ export function SignInPage() {
           </div>
         </div>
         <h1 className="text-2xl font-semibold tracking-tight">Welcome back</h1>
-        <p className="text-sm text-muted-foreground">
-          Sign in to your Gatekeeper account.
-        </p>
+        <p className="text-sm text-muted-foreground">Sign in to your Gatekeeper account.</p>
       </div>
 
       {isInviteJourney ? (
