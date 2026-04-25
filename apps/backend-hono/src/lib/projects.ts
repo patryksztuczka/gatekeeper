@@ -15,6 +15,21 @@ export type ProjectListItem = {
   slug: string;
 };
 
+export type ProjectDetailResponse = {
+  id: string;
+  name: string;
+  description: string;
+  slug: string;
+  archivedAt: string | null;
+  createdAt: string;
+  projectOwner: {
+    email: string;
+    id: string;
+    name: string;
+    role: string;
+  } | null;
+};
+
 export type OrganizationMemberListItem = {
   email: string;
   id: string;
@@ -109,6 +124,64 @@ export async function listActiveProjects(organizationId: string): Promise<Projec
           }
         : null,
   }));
+}
+
+export async function getProjectDetailForMember(input: {
+  organizationSlug: string;
+  projectSlug: string;
+  userId: string;
+}): Promise<ProjectDetailResponse | null> {
+  const membership = await getOrganizationMembership(input.organizationSlug, input.userId);
+
+  if (!membership) {
+    return null;
+  }
+
+  const project = await db
+    .select()
+    .from(projects)
+    .where(
+      and(
+        eq(projects.organizationId, membership.organizationId),
+        eq(projects.slug, input.projectSlug),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (!project) {
+    return null;
+  }
+
+  const projectOwner = project.projectOwnerMemberId
+    ? await db
+        .select({
+          email: users.email,
+          id: members.id,
+          name: users.name,
+          role: members.role,
+        })
+        .from(members)
+        .innerJoin(users, eq(users.id, members.userId))
+        .where(
+          and(
+            eq(members.id, project.projectOwnerMemberId),
+            eq(members.organizationId, membership.organizationId),
+          ),
+        )
+        .limit(1)
+        .then((rows) => rows[0] ?? null)
+    : null;
+
+  return {
+    id: project.id,
+    name: project.name,
+    description: project.description,
+    slug: project.slug,
+    archivedAt: project.archivedAt?.toISOString() ?? null,
+    createdAt: project.createdAt.toISOString(),
+    projectOwner,
+  };
 }
 
 export async function createProject(

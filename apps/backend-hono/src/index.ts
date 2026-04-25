@@ -6,6 +6,7 @@ import { resolveInvitationEntryState, resolveMembershipResolution } from './lib/
 import {
   canManageProjects,
   createProject,
+  getProjectDetailForMember,
   getOrganizationMembership,
   listActiveProjects,
   listOrganizationMembers,
@@ -142,6 +143,28 @@ app.post('/api/organizations/:organizationSlug/projects', async (c) => {
 
     throw caughtError;
   }
+});
+
+app.get('/api/organizations/:organizationSlug/projects/:projectSlug', async (c) => {
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const project = await getProjectDetailForMember({
+    organizationSlug: c.req.param('organizationSlug'),
+    projectSlug: c.req.param('projectSlug'),
+    userId: session.user.id,
+  });
+
+  if (!project) {
+    return c.json({ error: 'Project unavailable' }, 404);
+  }
+
+  return c.json({ project });
 });
 
 app.on(['POST', 'GET'], '/api/auth/*', (c) => auth.handler(c.req.raw));
