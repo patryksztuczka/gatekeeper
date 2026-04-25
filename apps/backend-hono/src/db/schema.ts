@@ -181,3 +181,33 @@ export const projects = sqliteTable(
     uniqueIndex('project_organization_slug_unique').on(table.organizationId, table.slug),
   ],
 );
+
+export const draftControls = sqliteTable(
+  'draft_controls',
+  {
+    id: text('id').primaryKey(),
+    organizationId: text('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    authorMemberId: text('author_member_id')
+      .notNull()
+      .references(() => members.id, { onDelete: 'cascade' }),
+    controlCode: text('control_code').notNull(),
+    title: text('title').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index('draft_control_organization_id_idx').on(table.organizationId),
+    index('draft_control_author_member_id_idx').on(table.authorMemberId),
+    uniqueIndex('draft_control_organization_code_unique').on(
+      table.organizationId,
+      table.controlCode,
+    ),
+  ],
+);

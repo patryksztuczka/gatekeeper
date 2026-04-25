@@ -4,6 +4,12 @@ import { auth } from './lib/auth';
 import { env } from 'cloudflare:workers';
 import { resolveInvitationEntryState, resolveMembershipResolution } from './lib/auth-organization';
 import {
+  createDraftControl,
+  DraftControlInputError,
+  listDraftControls,
+  normalizeDraftControlCreateBody,
+} from './lib/controls';
+import {
   canManageProjects,
   createProject,
   getProjectDetailForMember,
@@ -110,6 +116,61 @@ app.get('/api/organizations/:organizationSlug/projects', async (c) => {
   const status = c.req.query('status') === 'archived' ? 'archived' : 'active';
 
   return c.json({ projects: await listProjects(membership.organizationId, status) });
+});
+
+app.get('/api/organizations/:organizationSlug/controls/drafts', async (c) => {
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const membership = await getOrganizationMembership(
+    c.req.param('organizationSlug'),
+    session.user.id,
+  );
+
+  if (!membership) {
+    return c.json({ error: 'Organization not found' }, 404);
+  }
+
+  return c.json({ draftControls: await listDraftControls(membership) });
+});
+
+app.post('/api/organizations/:organizationSlug/controls/drafts', async (c) => {
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const membership = await getOrganizationMembership(
+    c.req.param('organizationSlug'),
+    session.user.id,
+  );
+
+  if (!membership) {
+    return c.json({ error: 'Organization not found' }, 404);
+  }
+
+  try {
+    const draftControl = await createDraftControl(
+      membership,
+      normalizeDraftControlCreateBody(await c.req.json().catch(() => null)),
+    );
+
+    return c.json({ draftControl }, 201);
+  } catch (caughtError) {
+    if (caughtError instanceof DraftControlInputError) {
+      return c.json({ error: caughtError.message }, 400);
+    }
+
+    throw caughtError;
+  }
 });
 
 app.post('/api/organizations/:organizationSlug/projects', async (c) => {
