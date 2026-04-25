@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
 import { auth } from './lib/auth';
 import { env } from 'cloudflare:workers';
@@ -8,11 +8,12 @@ import {
   createProject,
   getProjectDetailForMember,
   getOrganizationMembership,
-  listActiveProjects,
+  listProjects,
   listOrganizationMembers,
   normalizeProjectCreateBody,
   normalizeProjectUpdateBody,
   ProjectInputError,
+  setProjectArchivedForMembership,
   updateProjectForMembership,
 } from './lib/projects';
 
@@ -106,7 +107,9 @@ app.get('/api/organizations/:organizationSlug/projects', async (c) => {
     return c.json({ error: 'Organization not found' }, 404);
   }
 
-  return c.json({ projects: await listActiveProjects(membership.organizationId) });
+  const status = c.req.query('status') === 'archived' ? 'archived' : 'active';
+
+  return c.json({ projects: await listProjects(membership.organizationId, status) });
 });
 
 app.post('/api/organizations/:organizationSlug/projects', async (c) => {
@@ -211,6 +214,58 @@ app.patch('/api/organizations/:organizationSlug/projects/:projectSlug', async (c
     throw caughtError;
   }
 });
+
+app.patch('/api/organizations/:organizationSlug/projects/:projectSlug/archive', async (c) => {
+  return setProjectArchived(c, true);
+});
+
+app.patch('/api/organizations/:organizationSlug/projects/:projectSlug/restore', async (c) => {
+  return setProjectArchived(c, false);
+});
+
+async function setProjectArchived(c: Context, archived: boolean) {
+  const organizationSlug = c.req.param('organizationSlug');
+  const projectSlug = c.req.param('projectSlug');
+
+  if (!organizationSlug || !projectSlug) {
+    return c.json({ error: 'Project unavailable' }, 404);
+  }
+
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const membership = await getOrganizationMembership(organizationSlug, session.user.id);
+
+  if (!membership) {
+    return c.json({ error: 'Project unavailable' }, 404);
+  }
+
+  if (!canManageProjects(membership.role)) {
+    return c.json(
+      {
+        error: `Only Organization owners and admins can ${archived ? 'archive' : 'restore'} Projects.`,
+      },
+      403,
+    );
+  }
+
+  const project = await setProjectArchivedForMembership({
+    archived,
+    membership,
+    projectSlug,
+  });
+
+  if (!project) {
+    return c.json({ error: 'Project unavailable' }, 404);
+  }
+
+  return c.json({ project });
+}
 
 app.on(['POST', 'GET'], '/api/auth/*', (c) => auth.handler(c.req.raw));
 

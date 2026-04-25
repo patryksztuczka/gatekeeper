@@ -45,6 +45,7 @@ export type InvitationEntryResponse = {
 };
 
 export type ProjectListItem = {
+  archivedAt: string | null;
   createdAt: string;
   description: string;
   id: string;
@@ -179,9 +180,11 @@ export function listOrganizationMembers(organizationSlug: string) {
   );
 }
 
-export function listProjects(organizationSlug: string) {
+export function listProjects(organizationSlug: string, status: 'active' | 'archived' = 'active') {
+  const query = status === 'archived' ? '?status=archived' : '';
+
   return request<{ projects: ProjectListItem[] }>(
-    `/api/organizations/${organizationSlug}/projects`,
+    `/api/organizations/${organizationSlug}/projects${query}`,
     {
       method: 'GET',
     },

@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, useParams } from 'react-router';
-import { AlertCircle, CheckCircle2, LockKeyhole } from 'lucide-react';
+import { AlertCircle, Archive, CheckCircle2, LockKeyhole, RotateCcw } from 'lucide-react';
 import {
+  archiveProject,
   getProjectDetail,
+  restoreProject,
   updateProjectSettings,
   type ProjectDetail,
 } from '@/features/projects/project-api';
@@ -40,6 +42,7 @@ export function ProjectSettingsPage() {
   const [description, setDescription] = useState('');
   const [projectOwnerMemberId, setProjectOwnerMemberId] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const projectsPath = organizationSlug ? buildProjectsPath(organizationSlug) : '/';
@@ -129,6 +132,37 @@ export function ProjectSettingsPage() {
     }
   };
 
+  const handleArchiveStateChange = async () => {
+    if (
+      !organizationSlug ||
+      !projectSlug ||
+      !canManageProjects(currentRole) ||
+      state.status !== 'available'
+    ) {
+      return;
+    }
+
+    setIsArchiving(true);
+    setSaveError(null);
+    setStatus(null);
+
+    try {
+      const project = state.project.archivedAt
+        ? await restoreProject({ organizationSlug, projectSlug })
+        : await archiveProject({ organizationSlug, projectSlug });
+
+      setState({ status: 'available', project });
+      setStatus(project.archivedAt ? 'Project archived.' : 'Project restored.');
+    } catch (caughtError) {
+      const action = state.project.archivedAt ? 'restore' : 'archive';
+      const rawMessage =
+        caughtError instanceof Error ? caughtError.message : `Unable to ${action} Project.`;
+      setSaveError(humanizeAuthError(null, rawMessage, `Unable to ${action} Project.`));
+    } finally {
+      setIsArchiving(false);
+    }
+  };
+
   if (state.status === 'loading') {
     return (
       <div className="mx-auto w-full max-w-3xl space-y-6">
@@ -176,6 +210,16 @@ export function ProjectSettingsPage() {
           <Link to={projectPath}>Back to Project</Link>
         </Button>
       </header>
+
+      {project.archivedAt ? (
+        <Alert>
+          <Archive className="size-4" />
+          <AlertTitle>Archived Project</AlertTitle>
+          <AlertDescription>
+            This Project is hidden from active work. Restore it to return it to active Projects.
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       {!canEdit ? (
         <Alert>
@@ -265,6 +309,36 @@ export function ProjectSettingsPage() {
           </form>
         </CardContent>
       </Card>
+
+      {canEdit ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>{project.archivedAt ? 'Restore Project' : 'Archive Project'}</CardTitle>
+            <CardDescription>
+              {project.archivedAt
+                ? 'Move this Project back to active work.'
+                : 'Hide this Project from active work without deleting its record or URL.'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button
+              type="button"
+              variant={project.archivedAt ? 'default' : 'outline'}
+              disabled={isArchiving}
+              onClick={() => void handleArchiveStateChange()}
+            >
+              {project.archivedAt ? <RotateCcw /> : <Archive />}
+              {isArchiving
+                ? project.archivedAt
+                  ? 'Restoring...'
+                  : 'Archiving...'
+                : project.archivedAt
+                  ? 'Restore Project'
+                  : 'Archive Project'}
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
     </div>
   );
 }

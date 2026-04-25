@@ -1,8 +1,9 @@
-import { and, asc, eq, isNull } from 'drizzle-orm';
+import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm';
 import { db } from '../db/client';
 import { members, organizations, projects, users } from '../db/schema';
 
 export type ProjectListItem = {
+  archivedAt: string | null;
   createdAt: string;
   description: string;
   id: string;
@@ -14,6 +15,8 @@ export type ProjectListItem = {
   } | null;
   slug: string;
 };
+
+export type ProjectListStatus = 'active' | 'archived';
 
 export type ProjectDetailResponse = {
   id: string;
@@ -100,9 +103,13 @@ export async function listOrganizationMembers(
     .orderBy(asc(users.name), asc(users.email));
 }
 
-export async function listActiveProjects(organizationId: string): Promise<ProjectListItem[]> {
+export async function listProjects(
+  organizationId: string,
+  status: ProjectListStatus,
+): Promise<ProjectListItem[]> {
   const rows = await db
     .select({
+      archivedAt: projects.archivedAt,
       createdAt: projects.createdAt,
       description: projects.description,
       id: projects.id,
@@ -115,11 +122,17 @@ export async function listActiveProjects(organizationId: string): Promise<Projec
     .from(projects)
     .leftJoin(members, eq(projects.projectOwnerMemberId, members.id))
     .leftJoin(users, eq(members.userId, users.id))
-    .where(and(eq(projects.organizationId, organizationId), isNull(projects.archivedAt)))
+    .where(
+      and(
+        eq(projects.organizationId, organizationId),
+        status === 'archived' ? isNotNull(projects.archivedAt) : isNull(projects.archivedAt),
+      ),
+    )
     .orderBy(asc(projects.createdAt), asc(projects.name));
 
-  return rows.map(({ createdAt, ownerEmail, ownerId, ownerName, ...project }) => ({
+  return rows.map(({ archivedAt, createdAt, ownerEmail, ownerId, ownerName, ...project }) => ({
     ...project,
+    archivedAt: archivedAt?.toISOString() ?? null,
     createdAt: createdAt.toISOString(),
     projectOwner:
       ownerId && ownerEmail && ownerName
@@ -240,7 +253,39 @@ export async function createProject(
 
   await db.insert(projects).values(project);
 
-  return (await listActiveProjects(organizationId)).find(({ id }) => id === project.id)!;
+  return (await listProjects(organizationId, 'active')).find(({ id }) => id === project.id)!;
+}
+
+export async function setProjectArchivedForMembership(input: {
+  archived: boolean;
+  membership: OrganizationMembership;
+  projectSlug: string;
+}): Promise<ProjectDetailResponse | null> {
+  const existingProject = await db
+    .select({ id: projects.id })
+    .from(projects)
+    .where(
+      and(
+        eq(projects.organizationId, input.membership.organizationId),
+        eq(projects.slug, input.projectSlug),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (!existingProject) {
+    return null;
+  }
+
+  await db
+    .update(projects)
+    .set({
+      archivedAt: input.archived ? new Date() : null,
+      updatedAt: new Date(),
+    })
+    .where(eq(projects.id, existingProject.id));
+
+  return getProjectDetailForMembership(input.membership, input.projectSlug);
 }
 
 export async function updateProjectForMembership(input: {

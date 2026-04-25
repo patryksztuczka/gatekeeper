@@ -79,3 +79,45 @@ export async function updateProjectSettings(input: {
 
   return body.project;
 }
+
+export async function archiveProject(input: {
+  organizationSlug: string;
+  projectSlug: string;
+}): Promise<ProjectDetail> {
+  return setProjectArchived(input, 'archive');
+}
+
+export async function restoreProject(input: {
+  organizationSlug: string;
+  projectSlug: string;
+}): Promise<ProjectDetail> {
+  return setProjectArchived(input, 'restore');
+}
+
+async function setProjectArchived(
+  input: { organizationSlug: string; projectSlug: string },
+  action: 'archive' | 'restore',
+): Promise<ProjectDetail> {
+  const response = await fetch(
+    `${AUTH_BASE_URL}/api/organizations/${input.organizationSlug}/projects/${input.projectSlug}/${action}`,
+    {
+      credentials: 'include',
+      headers: { 'content-type': 'application/json' },
+      method: 'PATCH',
+    },
+  );
+  const body = (await response.json().catch(() => null)) as {
+    error?: string;
+    project?: ProjectDetail;
+  } | null;
+
+  if (!response.ok) {
+    throw new Error(body?.error ?? `Unable to ${action} Project.`);
+  }
+
+  if (!body?.project) {
+    throw new Error(`Unable to ${action} Project.`);
+  }
+
+  return body.project;
+}
