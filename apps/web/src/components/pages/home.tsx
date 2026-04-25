@@ -11,7 +11,9 @@ import {
 import { humanizeAuthError } from '../../features/auth/auth-errors';
 import {
   buildOrganizationPath,
+  generateOrganizationSlug,
   getPostLoginView,
+  isReservedOrganizationSlug,
   slugifyOrganizationName,
 } from '../../features/auth/auth-routing';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -66,6 +68,10 @@ export function HomePage() {
     event.preventDefault();
     if (!orgSlug) {
       setOrgError('Organization slug is required.');
+      return;
+    }
+    if (isReservedOrganizationSlug(orgSlug)) {
+      setOrgError('This organization slug is reserved for a public Gatekeeper route.');
       return;
     }
     setOrgError(null);
@@ -161,7 +167,7 @@ export function HomePage() {
           value={orgName}
           onChange={(event) => {
             setOrgName(event.target.value);
-            setOrgSlug(slugifyOrganizationName(event.target.value));
+            setOrgSlug(generateOrganizationSlug(event.target.value));
           }}
           required
         />
