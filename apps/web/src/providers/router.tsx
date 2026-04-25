@@ -120,6 +120,14 @@ const router = createBrowserRouter([
                       return { Component: ProjectDetailPage };
                     },
                   },
+                  {
+                    path: 'p/:projectSlug/settings',
+                    lazy: async () => {
+                      const { ProjectSettingsPage } =
+                        await import('../components/pages/project-settings');
+                      return { Component: ProjectSettingsPage };
+                    },
+                  },
                   ...['checklists', 'controls', 'exceptions', 'audit'].map((path) => ({
                     path,
                     lazy: async () => {
