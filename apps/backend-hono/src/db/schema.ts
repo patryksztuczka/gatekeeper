@@ -225,6 +225,11 @@ export const controls = sqliteTable(
       .references(() => organizations.id, { onDelete: 'cascade' }),
     currentVersionId: text('current_version_id'),
     currentControlCode: text('current_control_code').notNull(),
+    archivedAt: integer('archived_at', { mode: 'timestamp_ms' }),
+    archivedByMemberId: text('archived_by_member_id').references(() => members.id, {
+      onDelete: 'set null',
+    }),
+    archiveReason: text('archive_reason'),
     createdAt: integer('created_at', { mode: 'timestamp_ms' })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),
@@ -235,6 +240,7 @@ export const controls = sqliteTable(
   },
   (table) => [
     index('control_organization_id_idx').on(table.organizationId),
+    index('control_archived_by_member_id_idx').on(table.archivedByMemberId),
     uniqueIndex('control_organization_code_unique').on(
       table.organizationId,
       table.currentControlCode,

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, ne } from 'drizzle-orm';
+import { and, asc, desc, eq, isNotNull, isNull, ne } from 'drizzle-orm';
 import { db } from '../db/client';
 import {
   controlProposedUpdates,
@@ -37,6 +37,8 @@ export type ControlVersionResponse = {
 };
 
 export type ControlListItem = {
+  archivedAt: string | null;
+  archiveReason: string | null;
   controlCode: string;
   createdAt: string;
   currentVersion: ControlVersionResponse;
@@ -76,6 +78,10 @@ type PublishDraftControlInput = {
   verificationMethod: string;
 };
 
+type ArchiveControlInput = {
+  reason: string;
+};
+
 type CreateControlProposedUpdateInput = PublishDraftControlInput & {
   controlCode: string;
   title: string;
@@ -83,6 +89,7 @@ type CreateControlProposedUpdateInput = PublishDraftControlInput & {
 
 const draftReviewerRoles = new Set(['owner', 'admin']);
 const publishControlRoles = new Set(['owner', 'admin']);
+const archiveControlRoles = new Set(['owner', 'admin']);
 const releaseImpacts = new Set(['advisory', 'blocking', 'needs review']);
 
 export class DraftControlInputError extends Error {}
@@ -93,10 +100,19 @@ export function canPublishControls(role: string): boolean {
   return publishControlRoles.has(role);
 }
 
-export async function listControls(organizationId: string): Promise<ControlListItem[]> {
+export function canArchiveControls(role: string): boolean {
+  return archiveControlRoles.has(role);
+}
+
+export async function listControls(
+  organizationId: string,
+  status: 'active' | 'archived' = 'active',
+): Promise<ControlListItem[]> {
   const rows = await db
     .select({
       acceptedEvidenceTypes: controlVersions.acceptedEvidenceTypes,
+      archivedAt: controls.archivedAt,
+      archiveReason: controls.archiveReason,
       applicabilityConditions: controlVersions.applicabilityConditions,
       businessMeaning: controlVersions.businessMeaning,
       controlCode: controlVersions.controlCode,
@@ -112,7 +128,12 @@ export async function listControls(organizationId: string): Promise<ControlListI
     })
     .from(controls)
     .innerJoin(controlVersions, eq(controls.currentVersionId, controlVersions.id))
-    .where(eq(controls.organizationId, organizationId))
+    .where(
+      and(
+        eq(controls.organizationId, organizationId),
+        status === 'archived' ? isNotNull(controls.archivedAt) : isNull(controls.archivedAt),
+      ),
+    )
     .orderBy(asc(controlVersions.controlCode), asc(controlVersions.title));
 
   return Promise.all(rows.map((row) => toControlListItem(row)));
@@ -125,6 +146,8 @@ export async function getControlDetail(
   const row = await db
     .select({
       acceptedEvidenceTypes: controlVersions.acceptedEvidenceTypes,
+      archivedAt: controls.archivedAt,
+      archiveReason: controls.archiveReason,
       applicabilityConditions: controlVersions.applicabilityConditions,
       businessMeaning: controlVersions.businessMeaning,
       controlCode: controlVersions.controlCode,
@@ -144,7 +167,11 @@ export async function getControlDetail(
     .limit(1)
     .then((rows) => rows[0] ?? null);
 
-  return row ? toControlListItem(row) : null;
+  if (!row || (row.archivedAt && !archiveControlRoles.has(membership.role))) {
+    return null;
+  }
+
+  return toControlListItem(row);
 }
 
 export async function listControlProposedUpdates(
@@ -234,13 +261,14 @@ export async function createDraftControl(
 ): Promise<DraftControlListItem> {
   validateDraftControlInput(input);
 
+  const trimmedControlCode = input.controlCode.trim();
   const existingDraft = await db
     .select({ id: draftControls.id })
     .from(draftControls)
     .where(
       and(
         eq(draftControls.organizationId, membership.organizationId),
-        eq(draftControls.controlCode, input.controlCode.trim()),
+        eq(draftControls.controlCode, trimmedControlCode),
       ),
     )
     .limit(1)
@@ -250,10 +278,26 @@ export async function createDraftControl(
     throw new DraftControlInputError('Control Code is already used in this Organization.');
   }
 
+  const existingControl = await db
+    .select({ id: controls.id })
+    .from(controls)
+    .where(
+      and(
+        eq(controls.organizationId, membership.organizationId),
+        eq(controls.currentControlCode, trimmedControlCode),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (existingControl) {
+    throw new DraftControlInputError('Control Code is already used in this Organization.');
+  }
+
   const now = new Date();
   const draft = {
     authorMemberId: membership.id,
-    controlCode: input.controlCode.trim(),
+    controlCode: trimmedControlCode,
     createdAt: now,
     id: crypto.randomUUID(),
     organizationId: membership.organizationId,
@@ -264,6 +308,35 @@ export async function createDraftControl(
   await db.insert(draftControls).values(draft);
 
   return (await listDraftControls(membership)).find(({ id }) => id === draft.id)!;
+}
+
+export async function cancelDraftControl(
+  membership: OrganizationMembership,
+  draftControlId: string,
+): Promise<boolean> {
+  const draftControl = await db
+    .select({ authorMemberId: draftControls.authorMemberId, id: draftControls.id })
+    .from(draftControls)
+    .where(
+      and(
+        eq(draftControls.id, draftControlId),
+        eq(draftControls.organizationId, membership.organizationId),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (!draftControl) {
+    return false;
+  }
+
+  if (draftControl.authorMemberId !== membership.id && !draftReviewerRoles.has(membership.role)) {
+    return false;
+  }
+
+  await db.delete(draftControls).where(eq(draftControls.id, draftControl.id));
+
+  return true;
 }
 
 export async function publishDraftControl(
@@ -336,6 +409,50 @@ export async function publishDraftControl(
   return getControlDetail(membership, controlId);
 }
 
+export async function setControlArchivedForMembership(input: {
+  archived: boolean;
+  controlId: string;
+  membership: OrganizationMembership;
+  reason?: string;
+}): Promise<ControlListItem | null> {
+  const control = await db
+    .select({ id: controls.id })
+    .from(controls)
+    .where(
+      and(
+        eq(controls.id, input.controlId),
+        eq(controls.organizationId, input.membership.organizationId),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (!control) {
+    return null;
+  }
+
+  await db
+    .update(controls)
+    .set(
+      input.archived
+        ? {
+            archivedAt: new Date(),
+            archivedByMemberId: input.membership.id,
+            archiveReason: input.reason?.trim() || null,
+            updatedAt: new Date(),
+          }
+        : {
+            archivedAt: null,
+            archivedByMemberId: null,
+            archiveReason: null,
+            updatedAt: new Date(),
+          },
+    )
+    .where(eq(controls.id, control.id));
+
+  return getControlDetail(input.membership, input.controlId);
+}
+
 export async function createControlProposedUpdate(
   membership: OrganizationMembership,
   controlId: string,
@@ -346,7 +463,13 @@ export async function createControlProposedUpdate(
   const control = await db
     .select({ id: controls.id })
     .from(controls)
-    .where(and(eq(controls.id, controlId), eq(controls.organizationId, membership.organizationId)))
+    .where(
+      and(
+        eq(controls.id, controlId),
+        eq(controls.organizationId, membership.organizationId),
+        isNull(controls.archivedAt),
+      ),
+    )
     .limit(1)
     .then((rows) => rows[0] ?? null);
 
@@ -424,6 +547,23 @@ export async function publishControlProposedUpdate(
     .then((rows) => rows[0] ?? null);
 
   if (!proposedUpdate) {
+    return null;
+  }
+
+  const activeControl = await db
+    .select({ id: controls.id })
+    .from(controls)
+    .where(
+      and(
+        eq(controls.id, controlId),
+        eq(controls.organizationId, membership.organizationId),
+        isNull(controls.archivedAt),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (!activeControl) {
     return null;
   }
 
@@ -515,6 +655,15 @@ export function normalizeDraftControlPublishBody(body: unknown): PublishDraftCon
   };
 }
 
+export function normalizeControlArchiveBody(body: unknown): ArchiveControlInput {
+  const value = typeof body === 'object' && body !== null ? body : {};
+  const record = value as Record<string, unknown>;
+
+  return {
+    reason: typeof record.reason === 'string' ? record.reason : '',
+  };
+}
+
 export function normalizeControlProposedUpdateBody(
   body: unknown,
 ): CreateControlProposedUpdateInput {
@@ -598,6 +747,8 @@ function toExternalStandardsMappings(value: unknown): ExternalStandardsMapping[]
 
 async function toControlListItem(row: {
   acceptedEvidenceTypes: string;
+  archivedAt: Date | null;
+  archiveReason: string | null;
   applicabilityConditions: string;
   businessMeaning: string;
   controlCode: string;
@@ -614,6 +765,8 @@ async function toControlListItem(row: {
   const versions = await getControlVersions(row.controlId);
 
   return {
+    archivedAt: row.archivedAt?.toISOString() ?? null,
+    archiveReason: row.archiveReason,
     controlCode: row.controlCode,
     createdAt: row.controlCreatedAt.toISOString(),
     currentVersion: toControlVersionResponse({

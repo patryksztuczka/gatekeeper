@@ -167,11 +167,75 @@ async function publishDraftControlRequest(
   };
 }
 
-async function listControlsRequest(organizationSlug: string, headers: Headers) {
+async function listControlsRequest(
+  organizationSlug: string,
+  headers: Headers,
+  status: 'active' | 'archived' = 'active',
+) {
+  const query = status === 'archived' ? '?status=archived' : '';
   const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/controls`,
+    `http://example.com/api/organizations/${organizationSlug}/controls${query}`,
     {
       headers,
+    },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+async function archiveControlRequest(
+  organizationSlug: string,
+  controlId: string,
+  headers: Headers,
+  body: Record<string, unknown> = {},
+) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/controls/${controlId}/archive`,
+    {
+      body: JSON.stringify(body),
+      headers,
+      method: 'PATCH',
+    },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+async function restoreControlRequest(
+  organizationSlug: string,
+  controlId: string,
+  headers: Headers,
+) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/controls/${controlId}/restore`,
+    {
+      headers,
+      method: 'PATCH',
+    },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+async function cancelDraftControlRequest(
+  organizationSlug: string,
+  draftControlId: string,
+  headers: Headers,
+) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/controls/drafts/${draftControlId}`,
+    {
+      headers,
+      method: 'DELETE',
     },
   );
 
@@ -547,6 +611,66 @@ describe('Draft Controls', () => {
     });
   });
 
+  it('lets Organization owners archive and restore published Controls with an optional reason', async () => {
+    const { headers: ownerHeaders, organization } = await createSignedInOwner('archive-owner');
+
+    const createResponse = await createDraftControlRequest(organization.slug, ownerHeaders, {
+      controlCode: 'AUTH-008',
+      title: 'Archive published Control',
+    });
+    const draftControl = createResponse.body.draftControl as { id: string };
+    const publishResponse = await publishDraftControlRequest(
+      organization.slug,
+      draftControl.id,
+      ownerHeaders,
+    );
+    const control = publishResponse.body.control as { id: string };
+
+    const archiveResponse = await archiveControlRequest(
+      organization.slug,
+      control.id,
+      ownerHeaders,
+      {
+        reason: 'Replaced by a stricter Control.',
+      },
+    );
+
+    expect(archiveResponse.status).toBe(200);
+    expect(archiveResponse.body.control).toMatchObject({
+      archiveReason: 'Replaced by a stricter Control.',
+      controlCode: 'AUTH-008',
+    });
+    expect((archiveResponse.body.control as { archivedAt?: string }).archivedAt).toBeTruthy();
+
+    await expect(listControlsRequest(organization.slug, ownerHeaders)).resolves.toMatchObject({
+      body: { controls: [] },
+      status: 200,
+    });
+    await expect(
+      listControlsRequest(organization.slug, ownerHeaders, 'archived'),
+    ).resolves.toMatchObject({
+      body: { controls: [{ controlCode: 'AUTH-008' }] },
+      status: 200,
+    });
+
+    const restoreResponse = await restoreControlRequest(
+      organization.slug,
+      control.id,
+      ownerHeaders,
+    );
+
+    expect(restoreResponse.status).toBe(200);
+    expect(restoreResponse.body.control).toMatchObject({
+      archivedAt: null,
+      archiveReason: null,
+      controlCode: 'AUTH-008',
+    });
+    await expect(listControlsRequest(organization.slug, ownerHeaders)).resolves.toMatchObject({
+      body: { controls: [{ controlCode: 'AUTH-008' }] },
+      status: 200,
+    });
+  });
+
   it('creates one proposed update for an active Control without changing the current version', async () => {
     const { headers: ownerHeaders, organization } = await createSignedInOwner('proposal-create');
     const createResponse = await createDraftControlRequest(organization.slug, ownerHeaders, {
@@ -603,6 +727,56 @@ describe('Draft Controls', () => {
     });
   });
 
+  it('restricts archived Control access and archive actions to Organization owners and admins', async () => {
+    const { headers: ownerHeaders, organization } = await createSignedInOwner('archive-role-owner');
+    const member = await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'archive-role-member',
+      role: 'member',
+    });
+    const admin = await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'archive-role-admin',
+      role: 'admin',
+    });
+
+    const createResponse = await createDraftControlRequest(organization.slug, ownerHeaders, {
+      controlCode: 'AUTH-009',
+      title: 'Restrict archived Control',
+    });
+    const draftControl = createResponse.body.draftControl as { id: string };
+    const publishResponse = await publishDraftControlRequest(
+      organization.slug,
+      draftControl.id,
+      ownerHeaders,
+    );
+    const control = publishResponse.body.control as { id: string };
+
+    await expect(
+      archiveControlRequest(organization.slug, control.id, member.headers),
+    ).resolves.toMatchObject({ status: 403 });
+
+    await archiveControlRequest(organization.slug, control.id, admin.headers);
+
+    await expect(
+      listControlsRequest(organization.slug, member.headers, 'archived'),
+    ).resolves.toMatchObject({
+      body: { error: 'Only Organization owners and admins can view archived Controls.' },
+      status: 403,
+    });
+    await expect(
+      getControlRequest(organization.slug, control.id, member.headers),
+    ).resolves.toMatchObject({
+      body: { error: 'Control unavailable' },
+      status: 404,
+    });
+    await expect(
+      restoreControlRequest(organization.slug, control.id, member.headers),
+    ).resolves.toMatchObject({ status: 403 });
+  });
+
   it('publishes a proposed update as the next Control Version and clears the open proposal', async () => {
     const { headers: ownerHeaders, organization } = await createSignedInOwner('proposal-publish');
     const createResponse = await createDraftControlRequest(organization.slug, ownerHeaders, {
@@ -616,6 +790,7 @@ describe('Draft Controls', () => {
       ownerHeaders,
     );
     const control = publishResponse.body.control as { id: string };
+
     const proposedResponse = await createControlProposedUpdateRequest(
       organization.slug,
       control.id,
@@ -656,5 +831,53 @@ describe('Draft Controls', () => {
     await expect(
       listControlProposedUpdatesRequest(organization.slug, ownerHeaders),
     ).resolves.toMatchObject({ body: { proposedUpdates: [] }, status: 200 });
+  });
+
+  it('keeps archived published Control Codes reserved while canceled Draft Control codes can be reused', async () => {
+    const { headers: ownerHeaders, organization } = await createSignedInOwner('code-reuse-owner');
+
+    const publishedDraftResponse = await createDraftControlRequest(
+      organization.slug,
+      ownerHeaders,
+      {
+        controlCode: 'AUTH-010',
+        title: 'Reserve archived code',
+      },
+    );
+    const publishedDraft = publishedDraftResponse.body.draftControl as { id: string };
+    const publishResponse = await publishDraftControlRequest(
+      organization.slug,
+      publishedDraft.id,
+      ownerHeaders,
+    );
+    const control = publishResponse.body.control as { id: string };
+
+    await archiveControlRequest(organization.slug, control.id, ownerHeaders);
+
+    const reservedCodeResponse = await createDraftControlRequest(organization.slug, ownerHeaders, {
+      controlCode: 'AUTH-010',
+      title: 'Reuse archived published code',
+    });
+
+    expect(reservedCodeResponse.status).toBe(400);
+    expect(reservedCodeResponse.body).toMatchObject({
+      error: 'Control Code is already used in this Organization.',
+    });
+
+    const canceledDraftResponse = await createDraftControlRequest(organization.slug, ownerHeaders, {
+      controlCode: 'AUTH-011',
+      title: 'Reusable canceled draft',
+    });
+    const canceledDraft = canceledDraftResponse.body.draftControl as { id: string };
+
+    await expect(
+      cancelDraftControlRequest(organization.slug, canceledDraft.id, ownerHeaders),
+    ).resolves.toMatchObject({ body: { canceled: true }, status: 200 });
+    await expect(
+      createDraftControlRequest(organization.slug, ownerHeaders, {
+        controlCode: 'AUTH-011',
+        title: 'Reused canceled draft code',
+      }),
+    ).resolves.toMatchObject({ status: 201 });
   });
 });

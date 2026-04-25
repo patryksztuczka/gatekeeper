@@ -71,6 +71,8 @@ export type DraftControlListItem = {
 };
 
 export type ControlListItem = {
+  archivedAt: string | null;
+  archiveReason: string | null;
   controlCode: string;
   createdAt: string;
   currentVersion: ControlVersionResponse;
@@ -291,9 +293,11 @@ export function listDraftControls(organizationSlug: string) {
   );
 }
 
-export function listControls(organizationSlug: string) {
+export function listControls(organizationSlug: string, status: 'active' | 'archived' = 'active') {
+  const query = status === 'archived' ? '?status=archived' : '';
+
   return request<{ controls: ControlListItem[] }>(
-    `/api/organizations/${organizationSlug}/controls`,
+    `/api/organizations/${organizationSlug}/controls${query}`,
     {
       method: 'GET',
     },
@@ -345,6 +349,15 @@ export function publishDraftControl(
   );
 }
 
+export function cancelDraftControl(organizationSlug: string, draftControlId: string) {
+  return request<{ canceled: boolean }>(
+    `/api/organizations/${organizationSlug}/controls/drafts/${draftControlId}`,
+    {
+      method: 'DELETE',
+    },
+  );
+}
+
 export function createControlProposedUpdate(
   organizationSlug: string,
   controlId: string,
@@ -363,6 +376,29 @@ export function createControlProposedUpdate(
     {
       method: 'POST',
       body: JSON.stringify(input),
+    },
+  );
+}
+
+export function archiveControl(
+  organizationSlug: string,
+  controlId: string,
+  input: { reason?: string } = {},
+) {
+  return request<{ control: ControlListItem }>(
+    `/api/organizations/${organizationSlug}/controls/${controlId}/archive`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function restoreControl(organizationSlug: string, controlId: string) {
+  return request<{ control: ControlListItem }>(
+    `/api/organizations/${organizationSlug}/controls/${controlId}/restore`,
+    {
+      method: 'PATCH',
     },
   );
 }
