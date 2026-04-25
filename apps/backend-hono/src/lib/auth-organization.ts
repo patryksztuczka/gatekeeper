@@ -1,4 +1,5 @@
 import { and, asc, eq, gt, sql } from 'drizzle-orm';
+import { APIError } from 'better-auth/api';
 import { getOrgAdapter, type OrganizationOptions } from 'better-auth/plugins';
 import { db } from '../db/client';
 import {
@@ -90,6 +91,15 @@ type InvitationEntryViewer = {
 const defaultOrganizationNameSuffix = ' Organization';
 const fallbackOrganizationName = 'Workspace';
 const maxSlugSuffixAttempts = 100;
+const reservedOrganizationSlugs = new Set([
+  'api',
+  'forgot-password',
+  'invite',
+  'reset-password',
+  'sign-in',
+  'sign-up',
+  'verify-email',
+]);
 
 // Gatekeeper maps product concepts onto Better Auth's organization plugin:
 // - account => Better Auth user
@@ -103,6 +113,15 @@ const maxSlugSuffixAttempts = 100;
 // - new session: initialize the active organization from the user's memberships, if any exist
 export const gatekeeperOrganizationOptions: OrganizationOptions = {
   allowUserToCreateOrganization: true,
+  organizationHooks: {
+    beforeCreateOrganization: async ({ organization }) => {
+      if (organization.slug && isReservedOrganizationSlug(organization.slug)) {
+        throw new APIError('BAD_REQUEST', {
+          message: 'This organization slug is reserved for a public Gatekeeper route.',
+        });
+      }
+    },
+  },
 };
 
 export async function resolveSignUpOrganizationMode(
@@ -309,6 +328,10 @@ export function isEmailPasswordSignUp(context: { path?: string } | null): boolea
   return context?.path === '/sign-up/email';
 }
 
+export function isReservedOrganizationSlug(slug: string): boolean {
+  return reservedOrganizationSlugs.has(slug.toLowerCase());
+}
+
 async function getPendingInvitations(authContext: OrganizationAuthContext, email: string) {
   const pendingInvitations = await getOrgAdapter(
     authContext,
@@ -333,7 +356,10 @@ async function getUniqueDefaultOrganizationSlug(
 ): Promise<string> {
   const adapter = getOrgAdapter(authContext, gatekeeperOrganizationOptions);
   const emailLocalPart = user.email.split('@')[0] ?? '';
-  const baseSlug = slugify(user.name) || slugify(emailLocalPart) || 'workspace';
+  const candidateBaseSlug = slugify(user.name) || slugify(emailLocalPart) || 'workspace';
+  const baseSlug = isReservedOrganizationSlug(candidateBaseSlug)
+    ? `${candidateBaseSlug}-organization`
+    : candidateBaseSlug;
 
   for (let attempt = 0; attempt < maxSlugSuffixAttempts; attempt += 1) {
     const slug = attempt === 0 ? baseSlug : `${baseSlug}-${attempt + 1}`;

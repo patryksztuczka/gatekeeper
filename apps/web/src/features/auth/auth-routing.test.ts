@@ -3,8 +3,10 @@ import {
   buildEmailVerificationCallbackUrl,
   buildOrganizationPath,
   buildPasswordResetCallbackUrl,
+  generateOrganizationSlug,
   getPostLoginView,
   getVerificationCallbackState,
+  isReservedOrganizationSlug,
   slugifyOrganizationName,
 } from './auth-routing';
 
@@ -51,6 +53,17 @@ describe('auth routing helpers', () => {
     expect(slugifyOrganizationName('My Workspace')).toBe('my-workspace');
     expect(slugifyOrganizationName('Zolc Team ++')).toBe('zolc-team');
     expect(slugifyOrganizationName('')).toBe('');
+  });
+
+  it('identifies organization slugs reserved by public routes', () => {
+    expect(isReservedOrganizationSlug('sign-in')).toBe(true);
+    expect(isReservedOrganizationSlug('verify-email')).toBe(true);
+    expect(isReservedOrganizationSlug('my-workspace')).toBe(false);
+  });
+
+  it('avoids reserved route words when generating organization slugs', () => {
+    expect(generateOrganizationSlug('Sign In')).toBe('sign-in-organization');
+    expect(generateOrganizationSlug('My Workspace')).toBe('my-workspace');
   });
 
   it('builds organization-scoped app paths', () => {
