@@ -18,7 +18,10 @@ import {
   type MembershipResolutionResponse,
 } from '../../features/auth/auth-api';
 import { signOut, useSession } from '../../features/auth/auth-client';
-import { buildOrganizationPath } from '../../features/auth/auth-routing';
+import {
+  buildOrganizationPath,
+  buildOrganizationSwitchPath,
+} from '../../features/auth/auth-routing';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import {
   DropdownMenu,
@@ -100,7 +103,15 @@ export function DashboardSidebar() {
       setResolution(next);
       const activeOrg = next.organizations.find((org) => org.id === organizationId);
       if (activeOrg) {
-        navigate(buildOrganizationPath(activeOrg.slug));
+        navigate(
+          buildOrganizationSwitchPath({
+            currentOrganizationSlug:
+              resolution?.organizations.find((org) => org.id === resolution.activeOrganizationId)
+                ?.slug ?? null,
+            currentPathname: location.pathname,
+            nextOrganizationSlug: activeOrg.slug,
+          }),
+        );
       }
     } finally {
       setSwitchingOrgId(null);

@@ -4,6 +4,16 @@ export type PostLoginView = 'app' | 'organization-choice' | 'organization-creati
 
 export type VerificationCallbackState = 'expired' | 'invalid' | 'success';
 
+const reservedOrganizationSlugs = new Set([
+  'api',
+  'forgot-password',
+  'invite',
+  'reset-password',
+  'sign-in',
+  'sign-up',
+  'verify-email',
+]);
+
 export function getPostLoginView(resolution: MembershipResolutionResponse): PostLoginView {
   switch (resolution.status) {
     case 'active-organization':
@@ -51,10 +61,59 @@ export function slugifyProjectName(value: string): string {
     .slice(0, 64);
 }
 
+export function generateOrganizationSlug(value: string): string {
+  const slug = slugifyOrganizationName(value);
+
+  return isReservedOrganizationSlug(slug) ? `${slug}-organization` : slug;
+}
+
+export function isReservedOrganizationSlug(slug: string): boolean {
+  return reservedOrganizationSlugs.has(slug.toLowerCase());
+}
+
 export function buildOrganizationPath(organizationSlug: string, path = '/'): string {
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
 
   return `/${organizationSlug}${normalizedPath === '/' ? '' : normalizedPath}`;
+}
+
+const STATIC_ORGANIZATION_PATHS = new Set([
+  '/',
+  '/settings',
+  '/projects',
+  '/controls',
+  '/checklists',
+  '/exceptions',
+  '/audit',
+]);
+
+export function buildOrganizationSwitchPath(input: {
+  currentPathname: string;
+  currentOrganizationSlug: string | null;
+  nextOrganizationSlug: string;
+}): string {
+  const { currentPathname, currentOrganizationSlug, nextOrganizationSlug } = input;
+
+  if (!currentOrganizationSlug) {
+    return buildOrganizationPath(nextOrganizationSlug);
+  }
+
+  const organizationPathPrefix = `/${currentOrganizationSlug}`;
+
+  if (
+    currentPathname !== organizationPathPrefix &&
+    !currentPathname.startsWith(`${organizationPathPrefix}/`)
+  ) {
+    return buildOrganizationPath(nextOrganizationSlug);
+  }
+
+  const pathWithinOrganization = currentPathname.slice(organizationPathPrefix.length) || '/';
+
+  if (!STATIC_ORGANIZATION_PATHS.has(pathWithinOrganization)) {
+    return buildOrganizationPath(nextOrganizationSlug);
+  }
+
+  return buildOrganizationPath(nextOrganizationSlug, pathWithinOrganization);
 }
 
 export function buildEmailVerificationCallbackUrl(input: {
