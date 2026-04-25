@@ -58,6 +58,18 @@ export type ProjectListItem = {
   slug: string;
 };
 
+export type DraftControlListItem = {
+  author: {
+    email: string;
+    id: string;
+    name: string;
+  };
+  controlCode: string;
+  createdAt: string;
+  id: string;
+  title: string;
+};
+
 export type OrganizationMemberListItem = {
   email: string;
   id: string;
@@ -204,4 +216,29 @@ export function createProject(
     method: 'POST',
     body: JSON.stringify(input),
   });
+}
+
+export function listDraftControls(organizationSlug: string) {
+  return request<{ draftControls: DraftControlListItem[] }>(
+    `/api/organizations/${organizationSlug}/controls/drafts`,
+    {
+      method: 'GET',
+    },
+  );
+}
+
+export function createDraftControl(
+  organizationSlug: string,
+  input: {
+    controlCode: string;
+    title: string;
+  },
+) {
+  return request<{ draftControl: DraftControlListItem }>(
+    `/api/organizations/${organizationSlug}/controls/drafts`,
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+  );
 }
