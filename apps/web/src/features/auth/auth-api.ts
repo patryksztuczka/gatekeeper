@@ -75,25 +75,37 @@ export type ControlListItem = {
   archiveReason: string | null;
   controlCode: string;
   createdAt: string;
-  currentVersion: {
-    acceptedEvidenceTypes: string[];
-    applicabilityConditions: string;
-    businessMeaning: string;
-    controlCode: string;
-    createdAt: string;
-    externalStandardsMappings: Array<{
-      description?: string;
-      framework: string;
-      reference: string;
-    }>;
-    id: string;
-    releaseImpact: 'advisory' | 'blocking' | 'needs review';
-    title: string;
-    verificationMethod: string;
-    versionNumber: number;
-  };
+  currentVersion: ControlVersionResponse;
   id: string;
   title: string;
+  versions: ControlVersionResponse[];
+};
+
+export type ControlVersionResponse = {
+  acceptedEvidenceTypes: string[];
+  applicabilityConditions: string;
+  businessMeaning: string;
+  controlCode: string;
+  createdAt: string;
+  externalStandardsMappings: Array<{
+    description?: string;
+    framework: string;
+    reference: string;
+  }>;
+  id: string;
+  releaseImpact: 'advisory' | 'blocking' | 'needs review';
+  title: string;
+  verificationMethod: string;
+  versionNumber: number;
+};
+
+export type ControlProposedUpdateListItem = ControlVersionResponse & {
+  author: {
+    email: string;
+    id: string;
+    name: string;
+  };
+  controlId: string;
 };
 
 export type OrganizationMemberListItem = {
@@ -101,6 +113,12 @@ export type OrganizationMemberListItem = {
   id: string;
   name: string;
   role: string;
+};
+
+export type ControlApprovalPolicy = {
+  enabled: boolean;
+  maxRequiredApprovals: number;
+  requiredApprovals: number;
 };
 
 type ApiErrorBody = {
@@ -218,6 +236,28 @@ export function listOrganizationMembers(organizationSlug: string) {
   );
 }
 
+export function getControlApprovalPolicy(organizationSlug: string) {
+  return request<{ policy: ControlApprovalPolicy }>(
+    `/api/organizations/${organizationSlug}/control-approval-policy`,
+    {
+      method: 'GET',
+    },
+  );
+}
+
+export function updateControlApprovalPolicy(
+  organizationSlug: string,
+  input: { enabled: boolean; requiredApprovals: number },
+) {
+  return request<{ policy: ControlApprovalPolicy }>(
+    `/api/organizations/${organizationSlug}/control-approval-policy`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    },
+  );
+}
+
 export function listProjects(organizationSlug: string, status: 'active' | 'archived' = 'active') {
   const query = status === 'archived' ? '?status=archived' : '';
 
@@ -258,6 +298,15 @@ export function listControls(organizationSlug: string, status: 'active' | 'archi
 
   return request<{ controls: ControlListItem[] }>(
     `/api/organizations/${organizationSlug}/controls${query}`,
+    {
+      method: 'GET',
+    },
+  );
+}
+
+export function listControlProposedUpdates(organizationSlug: string) {
+  return request<{ proposedUpdates: ControlProposedUpdateListItem[] }>(
+    `/api/organizations/${organizationSlug}/controls/proposed-updates`,
     {
       method: 'GET',
     },
@@ -309,6 +358,28 @@ export function cancelDraftControl(organizationSlug: string, draftControlId: str
   );
 }
 
+export function createControlProposedUpdate(
+  organizationSlug: string,
+  controlId: string,
+  input: {
+    acceptedEvidenceTypes: string[];
+    applicabilityConditions: string;
+    businessMeaning: string;
+    controlCode: string;
+    releaseImpact: string;
+    title: string;
+    verificationMethod: string;
+  },
+) {
+  return request<{ proposedUpdate: ControlProposedUpdateListItem }>(
+    `/api/organizations/${organizationSlug}/controls/${controlId}/proposed-updates`,
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+  );
+}
+
 export function archiveControl(
   organizationSlug: string,
   controlId: string,
@@ -328,6 +399,19 @@ export function restoreControl(organizationSlug: string, controlId: string) {
     `/api/organizations/${organizationSlug}/controls/${controlId}/restore`,
     {
       method: 'PATCH',
+    },
+  );
+}
+
+export function publishControlProposedUpdate(
+  organizationSlug: string,
+  controlId: string,
+  proposedUpdateId: string,
+) {
+  return request<{ control: ControlListItem }>(
+    `/api/organizations/${organizationSlug}/controls/${controlId}/proposed-updates/${proposedUpdateId}/publish`,
+    {
+      method: 'POST',
     },
   );
 }
