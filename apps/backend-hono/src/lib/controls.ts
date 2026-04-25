@@ -1,6 +1,13 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, isNotNull, isNull, ne } from 'drizzle-orm';
 import { db } from '../db/client';
-import { controls, controlVersions, draftControls, members, users } from '../db/schema';
+import {
+  controlProposedUpdates,
+  controls,
+  controlVersions,
+  draftControls,
+  members,
+  users,
+} from '../db/schema';
 import type { OrganizationMembership } from './projects';
 
 export type DraftControlListItem = {
@@ -30,12 +37,24 @@ export type ControlVersionResponse = {
 };
 
 export type ControlListItem = {
+  archivedAt: string | null;
+  archiveReason: string | null;
   controlCode: string;
   createdAt: string;
   currentVersion: ControlVersionResponse;
   id: string;
   status: 'active';
   title: string;
+  versions: ControlVersionResponse[];
+};
+
+export type ControlProposedUpdateListItem = ControlVersionResponse & {
+  author: {
+    email: string;
+    id: string;
+    name: string;
+  };
+  controlId: string;
 };
 
 export type ControlListFilters = {
@@ -72,28 +91,41 @@ type PublishDraftControlInput = {
   verificationMethod: string;
 };
 
+type ArchiveControlInput = {
+  reason: string;
+};
+
+type CreateControlProposedUpdateInput = PublishDraftControlInput & {
+  controlCode: string;
+  title: string;
+};
+
 const draftReviewerRoles = new Set(['owner', 'admin']);
 const publishControlRoles = new Set(['owner', 'admin']);
+const archiveControlRoles = new Set(['owner', 'admin']);
 const releaseImpacts = new Set(['advisory', 'blocking', 'needs review']);
 
 export class DraftControlInputError extends Error {}
 export class ControlPublishInputError extends Error {}
+export class ControlProposedUpdateInputError extends Error {}
 
 export function canPublishControls(role: string): boolean {
   return publishControlRoles.has(role);
+}
+
+export function canArchiveControls(role: string): boolean {
+  return archiveControlRoles.has(role);
 }
 
 export async function listControls(
   organizationId: string,
   filters: ControlListFilters = defaultControlListFilters,
 ): Promise<ControlListItem[]> {
-  if (filters.status === 'archived') {
-    return [];
-  }
-
   const rows = await db
     .select({
       acceptedEvidenceTypes: controlVersions.acceptedEvidenceTypes,
+      archivedAt: controls.archivedAt,
+      archiveReason: controls.archiveReason,
       applicabilityConditions: controlVersions.applicabilityConditions,
       businessMeaning: controlVersions.businessMeaning,
       controlCode: controlVersions.controlCode,
@@ -109,12 +141,19 @@ export async function listControls(
     })
     .from(controls)
     .innerJoin(controlVersions, eq(controls.currentVersionId, controlVersions.id))
-    .where(eq(controls.organizationId, organizationId))
+    .where(
+      and(
+        eq(controls.organizationId, organizationId),
+        filters.status === 'archived'
+          ? isNotNull(controls.archivedAt)
+          : isNull(controls.archivedAt),
+      ),
+    )
     .orderBy(asc(controlVersions.controlCode), asc(controlVersions.title));
 
-  return rows
-    .map((row) => toControlListItem(row))
-    .filter((control) => matchesControlFilters(control, filters));
+  return (await Promise.all(rows.map((row) => toControlListItem(row)))).filter((control) =>
+    matchesControlFilters(control, filters),
+  );
 }
 
 export async function getControlDetail(
@@ -124,6 +163,8 @@ export async function getControlDetail(
   const row = await db
     .select({
       acceptedEvidenceTypes: controlVersions.acceptedEvidenceTypes,
+      archivedAt: controls.archivedAt,
+      archiveReason: controls.archiveReason,
       applicabilityConditions: controlVersions.applicabilityConditions,
       businessMeaning: controlVersions.businessMeaning,
       controlCode: controlVersions.controlCode,
@@ -143,7 +184,55 @@ export async function getControlDetail(
     .limit(1)
     .then((rows) => rows[0] ?? null);
 
-  return row ? toControlListItem(row) : null;
+  if (!row || (row.archivedAt && !archiveControlRoles.has(membership.role))) {
+    return null;
+  }
+
+  return toControlListItem(row);
+}
+
+export async function listControlProposedUpdates(
+  membership: OrganizationMembership,
+): Promise<ControlProposedUpdateListItem[]> {
+  const rows = await db
+    .select({
+      acceptedEvidenceTypes: controlProposedUpdates.acceptedEvidenceTypes,
+      applicabilityConditions: controlProposedUpdates.applicabilityConditions,
+      authorEmail: users.email,
+      authorId: members.id,
+      authorName: users.name,
+      businessMeaning: controlProposedUpdates.businessMeaning,
+      controlCode: controlProposedUpdates.controlCode,
+      controlId: controlProposedUpdates.controlId,
+      createdAt: controlProposedUpdates.createdAt,
+      externalStandardsMappings: controlProposedUpdates.externalStandardsMappings,
+      id: controlProposedUpdates.id,
+      releaseImpact: controlProposedUpdates.releaseImpact,
+      title: controlProposedUpdates.title,
+      verificationMethod: controlProposedUpdates.verificationMethod,
+    })
+    .from(controlProposedUpdates)
+    .innerJoin(members, eq(controlProposedUpdates.authorMemberId, members.id))
+    .innerJoin(users, eq(members.userId, users.id))
+    .where(
+      draftReviewerRoles.has(membership.role)
+        ? eq(controlProposedUpdates.organizationId, membership.organizationId)
+        : and(
+            eq(controlProposedUpdates.organizationId, membership.organizationId),
+            eq(controlProposedUpdates.authorMemberId, membership.id),
+          ),
+    )
+    .orderBy(asc(controlProposedUpdates.createdAt), asc(controlProposedUpdates.controlCode));
+
+  return rows.map(({ authorEmail, authorId, authorName, controlId, ...row }) => ({
+    ...toControlVersionResponse({ ...row, versionNumber: 0 }),
+    author: {
+      email: authorEmail,
+      id: authorId,
+      name: authorName,
+    },
+    controlId,
+  }));
 }
 
 export async function listDraftControls(
@@ -192,13 +281,14 @@ export async function createDraftControl(
 ): Promise<DraftControlListItem> {
   validateDraftControlInput(input);
 
+  const trimmedControlCode = input.controlCode.trim();
   const existingDraft = await db
     .select({ id: draftControls.id })
     .from(draftControls)
     .where(
       and(
         eq(draftControls.organizationId, membership.organizationId),
-        eq(draftControls.controlCode, input.controlCode.trim()),
+        eq(draftControls.controlCode, trimmedControlCode),
       ),
     )
     .limit(1)
@@ -208,10 +298,26 @@ export async function createDraftControl(
     throw new DraftControlInputError('Control Code is already used in this Organization.');
   }
 
+  const existingControl = await db
+    .select({ id: controls.id })
+    .from(controls)
+    .where(
+      and(
+        eq(controls.organizationId, membership.organizationId),
+        eq(controls.currentControlCode, trimmedControlCode),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (existingControl) {
+    throw new DraftControlInputError('Control Code is already used in this Organization.');
+  }
+
   const now = new Date();
   const draft = {
     authorMemberId: membership.id,
-    controlCode: input.controlCode.trim(),
+    controlCode: trimmedControlCode,
     createdAt: now,
     id: crypto.randomUUID(),
     organizationId: membership.organizationId,
@@ -222,6 +328,35 @@ export async function createDraftControl(
   await db.insert(draftControls).values(draft);
 
   return (await listDraftControls(membership)).find(({ id }) => id === draft.id)!;
+}
+
+export async function cancelDraftControl(
+  membership: OrganizationMembership,
+  draftControlId: string,
+): Promise<boolean> {
+  const draftControl = await db
+    .select({ authorMemberId: draftControls.authorMemberId, id: draftControls.id })
+    .from(draftControls)
+    .where(
+      and(
+        eq(draftControls.id, draftControlId),
+        eq(draftControls.organizationId, membership.organizationId),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (!draftControl) {
+    return false;
+  }
+
+  if (draftControl.authorMemberId !== membership.id && !draftReviewerRoles.has(membership.role)) {
+    return false;
+  }
+
+  await db.delete(draftControls).where(eq(draftControls.id, draftControl.id));
+
+  return true;
 }
 
 export async function publishDraftControl(
@@ -294,6 +429,223 @@ export async function publishDraftControl(
   return getControlDetail(membership, controlId);
 }
 
+export async function setControlArchivedForMembership(input: {
+  archived: boolean;
+  controlId: string;
+  membership: OrganizationMembership;
+  reason?: string;
+}): Promise<ControlListItem | null> {
+  const control = await db
+    .select({ id: controls.id })
+    .from(controls)
+    .where(
+      and(
+        eq(controls.id, input.controlId),
+        eq(controls.organizationId, input.membership.organizationId),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (!control) {
+    return null;
+  }
+
+  await db
+    .update(controls)
+    .set(
+      input.archived
+        ? {
+            archivedAt: new Date(),
+            archivedByMemberId: input.membership.id,
+            archiveReason: input.reason?.trim() || null,
+            updatedAt: new Date(),
+          }
+        : {
+            archivedAt: null,
+            archivedByMemberId: null,
+            archiveReason: null,
+            updatedAt: new Date(),
+          },
+    )
+    .where(eq(controls.id, control.id));
+
+  return getControlDetail(input.membership, input.controlId);
+}
+
+export async function createControlProposedUpdate(
+  membership: OrganizationMembership,
+  controlId: string,
+  input: CreateControlProposedUpdateInput,
+): Promise<ControlProposedUpdateListItem | null> {
+  validateProposedUpdateInput(input);
+
+  const control = await db
+    .select({ id: controls.id })
+    .from(controls)
+    .where(
+      and(
+        eq(controls.id, controlId),
+        eq(controls.organizationId, membership.organizationId),
+        isNull(controls.archivedAt),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (!control) {
+    return null;
+  }
+
+  const existingProposal = await db
+    .select({ id: controlProposedUpdates.id })
+    .from(controlProposedUpdates)
+    .where(eq(controlProposedUpdates.controlId, controlId))
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (existingProposal) {
+    throw new ControlProposedUpdateInputError('This Control already has an open proposed update.');
+  }
+
+  const existingControlWithCode = await db
+    .select({ id: controls.id })
+    .from(controls)
+    .where(
+      and(
+        eq(controls.organizationId, membership.organizationId),
+        eq(controls.currentControlCode, input.controlCode.trim()),
+        ne(controls.id, controlId),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (existingControlWithCode) {
+    throw new ControlProposedUpdateInputError('Control Code is already used in this Organization.');
+  }
+
+  const now = new Date();
+  const proposedUpdate = {
+    acceptedEvidenceTypes: JSON.stringify(input.acceptedEvidenceTypes.map((value) => value.trim())),
+    applicabilityConditions: input.applicabilityConditions.trim(),
+    authorMemberId: membership.id,
+    businessMeaning: input.businessMeaning.trim(),
+    controlCode: input.controlCode.trim(),
+    controlId,
+    createdAt: now,
+    externalStandardsMappings: JSON.stringify(input.externalStandardsMappings),
+    id: crypto.randomUUID(),
+    organizationId: membership.organizationId,
+    releaseImpact: input.releaseImpact,
+    title: input.title.trim(),
+    updatedAt: now,
+    verificationMethod: input.verificationMethod.trim(),
+  };
+
+  await db.insert(controlProposedUpdates).values(proposedUpdate);
+
+  return (await listControlProposedUpdates(membership)).find(({ id }) => id === proposedUpdate.id)!;
+}
+
+export async function publishControlProposedUpdate(
+  membership: OrganizationMembership,
+  controlId: string,
+  proposedUpdateId: string,
+): Promise<ControlListItem | null> {
+  const proposedUpdate = await db
+    .select()
+    .from(controlProposedUpdates)
+    .where(
+      and(
+        eq(controlProposedUpdates.id, proposedUpdateId),
+        eq(controlProposedUpdates.controlId, controlId),
+        eq(controlProposedUpdates.organizationId, membership.organizationId),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (!proposedUpdate) {
+    return null;
+  }
+
+  const activeControl = await db
+    .select({ id: controls.id })
+    .from(controls)
+    .where(
+      and(
+        eq(controls.id, controlId),
+        eq(controls.organizationId, membership.organizationId),
+        isNull(controls.archivedAt),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (!activeControl) {
+    return null;
+  }
+
+  const existingControlWithCode = await db
+    .select({ id: controls.id })
+    .from(controls)
+    .where(
+      and(
+        eq(controls.organizationId, membership.organizationId),
+        eq(controls.currentControlCode, proposedUpdate.controlCode),
+        ne(controls.id, controlId),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (existingControlWithCode) {
+    throw new ControlProposedUpdateInputError('Control Code is already used in this Organization.');
+  }
+
+  const latestVersion = await db
+    .select({ versionNumber: controlVersions.versionNumber })
+    .from(controlVersions)
+    .where(eq(controlVersions.controlId, controlId))
+    .orderBy(desc(controlVersions.versionNumber))
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (!latestVersion) {
+    return null;
+  }
+
+  const now = new Date();
+  const versionId = crypto.randomUUID();
+
+  await db.insert(controlVersions).values({
+    acceptedEvidenceTypes: proposedUpdate.acceptedEvidenceTypes,
+    applicabilityConditions: proposedUpdate.applicabilityConditions,
+    businessMeaning: proposedUpdate.businessMeaning,
+    controlCode: proposedUpdate.controlCode,
+    controlId,
+    createdAt: now,
+    externalStandardsMappings: proposedUpdate.externalStandardsMappings,
+    id: versionId,
+    releaseImpact: proposedUpdate.releaseImpact,
+    title: proposedUpdate.title,
+    verificationMethod: proposedUpdate.verificationMethod,
+    versionNumber: latestVersion.versionNumber + 1,
+  });
+  await db
+    .update(controls)
+    .set({
+      currentControlCode: proposedUpdate.controlCode,
+      currentVersionId: versionId,
+      updatedAt: now,
+    })
+    .where(eq(controls.id, controlId));
+  await db.delete(controlProposedUpdates).where(eq(controlProposedUpdates.id, proposedUpdateId));
+
+  return getControlDetail(membership, controlId);
+}
+
 export function normalizeDraftControlCreateBody(body: unknown): CreateDraftControlInput {
   const value = typeof body === 'object' && body !== null ? body : {};
   const record = value as Record<string, unknown>;
@@ -344,6 +696,29 @@ export function normalizeDraftControlListFilters(
   return { search: firstQueryValue(query.q).trim() };
 }
 
+export function normalizeControlArchiveBody(body: unknown): ArchiveControlInput {
+  const value = typeof body === 'object' && body !== null ? body : {};
+  const record = value as Record<string, unknown>;
+
+  return {
+    reason: typeof record.reason === 'string' ? record.reason : '',
+  };
+}
+
+export function normalizeControlProposedUpdateBody(
+  body: unknown,
+): CreateControlProposedUpdateInput {
+  const value = typeof body === 'object' && body !== null ? body : {};
+  const record = value as Record<string, unknown>;
+  const publishInput = normalizeDraftControlPublishBody(body);
+
+  return {
+    ...publishInput,
+    controlCode: typeof record.controlCode === 'string' ? record.controlCode : '',
+    title: typeof record.title === 'string' ? record.title : '',
+  };
+}
+
 function validateDraftControlInput(input: CreateDraftControlInput) {
   if (!input.controlCode.trim()) {
     throw new DraftControlInputError('Control Code is required.');
@@ -374,6 +749,11 @@ function validatePublishInput(input: PublishDraftControlInput) {
   if (!input.releaseImpact) {
     throw new ControlPublishInputError('Release Impact is required.');
   }
+}
+
+function validateProposedUpdateInput(input: CreateControlProposedUpdateInput) {
+  validateDraftControlInput(input);
+  validatePublishInput(input);
 }
 
 function toStringArray(value: unknown): string[] {
@@ -477,8 +857,10 @@ function toExternalStandardsMappings(value: unknown): ExternalStandardsMapping[]
   });
 }
 
-function toControlListItem(row: {
+async function toControlListItem(row: {
   acceptedEvidenceTypes: string;
+  archivedAt: Date | null;
+  archiveReason: string | null;
   applicabilityConditions: string;
   businessMeaning: string;
   controlCode: string;
@@ -491,27 +873,70 @@ function toControlListItem(row: {
   versionCreatedAt: Date;
   versionId: string;
   versionNumber: number;
-}): ControlListItem {
+}): Promise<ControlListItem> {
+  const versions = await getControlVersions(row.controlId);
+
   return {
+    archivedAt: row.archivedAt?.toISOString() ?? null,
+    archiveReason: row.archiveReason,
     controlCode: row.controlCode,
     createdAt: row.controlCreatedAt.toISOString(),
-    currentVersion: {
-      acceptedEvidenceTypes: JSON.parse(row.acceptedEvidenceTypes) as string[],
+    currentVersion: toControlVersionResponse({
+      acceptedEvidenceTypes: row.acceptedEvidenceTypes,
       applicabilityConditions: row.applicabilityConditions,
       businessMeaning: row.businessMeaning,
       controlCode: row.controlCode,
-      createdAt: row.versionCreatedAt.toISOString(),
-      externalStandardsMappings: JSON.parse(
-        row.externalStandardsMappings,
-      ) as ExternalStandardsMapping[],
+      createdAt: row.versionCreatedAt,
+      externalStandardsMappings: row.externalStandardsMappings,
       id: row.versionId,
-      releaseImpact: row.releaseImpact as ReleaseImpact,
+      releaseImpact: row.releaseImpact,
       title: row.title,
       verificationMethod: row.verificationMethod,
       versionNumber: row.versionNumber,
-    },
+    }),
     id: row.controlId,
     status: 'active',
     title: row.title,
+    versions,
+  };
+}
+
+async function getControlVersions(controlId: string): Promise<ControlVersionResponse[]> {
+  const rows = await db
+    .select()
+    .from(controlVersions)
+    .where(eq(controlVersions.controlId, controlId))
+    .orderBy(desc(controlVersions.versionNumber));
+
+  return rows.map((row) => toControlVersionResponse(row));
+}
+
+function toControlVersionResponse(row: {
+  acceptedEvidenceTypes: string;
+  applicabilityConditions: string;
+  businessMeaning: string;
+  controlCode: string;
+  createdAt: Date;
+  externalStandardsMappings: string;
+  id: string;
+  releaseImpact: string;
+  title: string;
+  verificationMethod: string;
+  versionNumber: number;
+}): ControlVersionResponse {
+  return {
+    acceptedEvidenceTypes: JSON.parse(row.acceptedEvidenceTypes) as string[],
+    applicabilityConditions: row.applicabilityConditions,
+    businessMeaning: row.businessMeaning,
+    controlCode: row.controlCode,
+    createdAt: row.createdAt.toISOString(),
+    externalStandardsMappings: JSON.parse(
+      row.externalStandardsMappings,
+    ) as ExternalStandardsMapping[],
+    id: row.id,
+    releaseImpact: row.releaseImpact as ReleaseImpact,
+    title: row.title,
+    verificationMethod: row.verificationMethod,
+    versionNumber: row.versionNumber,
   };
 }

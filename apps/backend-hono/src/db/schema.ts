@@ -26,6 +26,10 @@ export const organizations = sqliteTable(
     slug: text('slug').notNull().unique(),
     logo: text('logo'),
     metadata: text('metadata'),
+    controlApprovalPolicyEnabled: integer('control_approval_policy_enabled', { mode: 'boolean' })
+      .default(false)
+      .notNull(),
+    controlApprovalRequiredCount: integer('control_approval_required_count').default(1).notNull(),
     createdAt: integer('created_at', { mode: 'timestamp_ms' })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),
@@ -221,6 +225,11 @@ export const controls = sqliteTable(
       .references(() => organizations.id, { onDelete: 'cascade' }),
     currentVersionId: text('current_version_id'),
     currentControlCode: text('current_control_code').notNull(),
+    archivedAt: integer('archived_at', { mode: 'timestamp_ms' }),
+    archivedByMemberId: text('archived_by_member_id').references(() => members.id, {
+      onDelete: 'set null',
+    }),
+    archiveReason: text('archive_reason'),
     createdAt: integer('created_at', { mode: 'timestamp_ms' })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),
@@ -231,6 +240,7 @@ export const controls = sqliteTable(
   },
   (table) => [
     index('control_organization_id_idx').on(table.organizationId),
+    index('control_archived_by_member_id_idx').on(table.archivedByMemberId),
     uniqueIndex('control_organization_code_unique').on(
       table.organizationId,
       table.currentControlCode,
@@ -261,5 +271,41 @@ export const controlVersions = sqliteTable(
   (table) => [
     index('control_version_control_id_idx').on(table.controlId),
     uniqueIndex('control_version_number_unique').on(table.controlId, table.versionNumber),
+  ],
+);
+
+export const controlProposedUpdates = sqliteTable(
+  'control_proposed_updates',
+  {
+    id: text('id').primaryKey(),
+    organizationId: text('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    controlId: text('control_id')
+      .notNull()
+      .references(() => controls.id, { onDelete: 'cascade' }),
+    authorMemberId: text('author_member_id')
+      .notNull()
+      .references(() => members.id, { onDelete: 'cascade' }),
+    controlCode: text('control_code').notNull(),
+    title: text('title').notNull(),
+    businessMeaning: text('business_meaning').notNull(),
+    verificationMethod: text('verification_method').notNull(),
+    acceptedEvidenceTypes: text('accepted_evidence_types').notNull(),
+    applicabilityConditions: text('applicability_conditions').notNull(),
+    releaseImpact: text('release_impact').notNull(),
+    externalStandardsMappings: text('external_standards_mappings').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index('control_proposed_update_organization_id_idx').on(table.organizationId),
+    index('control_proposed_update_author_member_id_idx').on(table.authorMemberId),
+    uniqueIndex('control_proposed_update_control_id_unique').on(table.controlId),
   ],
 );

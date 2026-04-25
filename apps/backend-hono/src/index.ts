@@ -4,18 +4,34 @@ import { auth } from './lib/auth';
 import { env } from 'cloudflare:workers';
 import { resolveInvitationEntryState, resolveMembershipResolution } from './lib/auth-organization';
 import {
+  canManageControlApprovalPolicy,
+  ControlApprovalPolicyInputError,
+  getControlApprovalPolicy,
+  normalizeControlApprovalPolicyUpdateBody,
+  updateControlApprovalPolicy,
+} from './lib/control-approval-policy';
+import {
+  canArchiveControls,
   canPublishControls,
+  cancelDraftControl,
+  ControlProposedUpdateInputError,
+  createControlProposedUpdate,
   ControlPublishInputError,
   createDraftControl,
   DraftControlInputError,
   getControlDetail,
+  listControlProposedUpdates,
   listControls,
   listDraftControls,
+  normalizeControlArchiveBody,
   normalizeControlListFilters,
+  normalizeControlProposedUpdateBody,
   normalizeDraftControlListFilters,
   normalizeDraftControlCreateBody,
   normalizeDraftControlPublishBody,
+  publishControlProposedUpdate,
   publishDraftControl,
+  setControlArchivedForMembership,
 } from './lib/controls';
 import {
   canManageProjects,
@@ -103,6 +119,68 @@ app.get('/api/organizations/:organizationSlug/members', async (c) => {
   return c.json({ members: await listOrganizationMembers(membership.organizationId) });
 });
 
+app.get('/api/organizations/:organizationSlug/control-approval-policy', async (c) => {
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const membership = await getOrganizationMembership(
+    c.req.param('organizationSlug'),
+    session.user.id,
+  );
+
+  if (!membership) {
+    return c.json({ error: 'Organization not found' }, 404);
+  }
+
+  return c.json({ policy: await getControlApprovalPolicy(membership.organizationId) });
+});
+
+app.patch('/api/organizations/:organizationSlug/control-approval-policy', async (c) => {
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const membership = await getOrganizationMembership(
+    c.req.param('organizationSlug'),
+    session.user.id,
+  );
+
+  if (!membership) {
+    return c.json({ error: 'Organization not found' }, 404);
+  }
+
+  if (!canManageControlApprovalPolicy(membership.role)) {
+    return c.json(
+      { error: 'Only Organization owners and admins can edit Control Approval Policy.' },
+      403,
+    );
+  }
+
+  try {
+    const policy = await updateControlApprovalPolicy(
+      membership,
+      normalizeControlApprovalPolicyUpdateBody(await c.req.json().catch(() => null)),
+    );
+
+    return c.json({ policy });
+  } catch (caughtError) {
+    if (caughtError instanceof ControlApprovalPolicyInputError) {
+      return c.json({ error: caughtError.message }, 400);
+    }
+
+    throw caughtError;
+  }
+});
+
 app.get('/api/organizations/:organizationSlug/projects', async (c) => {
   const session = await auth.api.getSession({
     headers: c.req.raw.headers,
@@ -170,12 +248,39 @@ app.get('/api/organizations/:organizationSlug/controls', async (c) => {
     return c.json({ error: 'Organization not found' }, 404);
   }
 
+  const filters = normalizeControlListFilters(c.req.query());
+
+  if (filters.status === 'archived' && !canArchiveControls(membership.role)) {
+    return c.json(
+      { error: 'Only Organization owners and admins can view archived Controls.' },
+      403,
+    );
+  }
+
   return c.json({
-    controls: await listControls(
-      membership.organizationId,
-      normalizeControlListFilters(c.req.query()),
-    ),
+    controls: await listControls(membership.organizationId, filters),
   });
+});
+
+app.get('/api/organizations/:organizationSlug/controls/proposed-updates', async (c) => {
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const membership = await getOrganizationMembership(
+    c.req.param('organizationSlug'),
+    session.user.id,
+  );
+
+  if (!membership) {
+    return c.json({ error: 'Organization not found' }, 404);
+  }
+
+  return c.json({ proposedUpdates: await listControlProposedUpdates(membership) });
 });
 
 app.get('/api/organizations/:organizationSlug/controls/:controlId', async (c) => {
@@ -239,6 +344,45 @@ app.post('/api/organizations/:organizationSlug/controls/drafts', async (c) => {
   }
 });
 
+app.post('/api/organizations/:organizationSlug/controls/:controlId/proposed-updates', async (c) => {
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const membership = await getOrganizationMembership(
+    c.req.param('organizationSlug'),
+    session.user.id,
+  );
+
+  if (!membership) {
+    return c.json({ error: 'Control unavailable' }, 404);
+  }
+
+  try {
+    const proposedUpdate = await createControlProposedUpdate(
+      membership,
+      c.req.param('controlId'),
+      normalizeControlProposedUpdateBody(await c.req.json().catch(() => null)),
+    );
+
+    if (!proposedUpdate) {
+      return c.json({ error: 'Control unavailable' }, 404);
+    }
+
+    return c.json({ proposedUpdate }, 201);
+  } catch (caughtError) {
+    if (caughtError instanceof ControlProposedUpdateInputError) {
+      return c.json({ error: caughtError.message }, 400);
+    }
+
+    throw caughtError;
+  }
+});
+
 app.post(
   '/api/organizations/:organizationSlug/controls/drafts/:draftControlId/publish',
   async (c) => {
@@ -277,6 +421,87 @@ app.post(
       return c.json({ control }, 201);
     } catch (caughtError) {
       if (caughtError instanceof ControlPublishInputError) {
+        return c.json({ error: caughtError.message }, 400);
+      }
+
+      throw caughtError;
+    }
+  },
+);
+
+app.delete('/api/organizations/:organizationSlug/controls/drafts/:draftControlId', async (c) => {
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const membership = await getOrganizationMembership(
+    c.req.param('organizationSlug'),
+    session.user.id,
+  );
+
+  if (!membership) {
+    return c.json({ error: 'Draft Control unavailable' }, 404);
+  }
+
+  const canceled = await cancelDraftControl(membership, c.req.param('draftControlId'));
+
+  if (!canceled) {
+    return c.json({ error: 'Draft Control unavailable' }, 404);
+  }
+
+  return c.json({ canceled: true });
+});
+
+app.patch('/api/organizations/:organizationSlug/controls/:controlId/archive', async (c) => {
+  return setControlArchived(c, true);
+});
+
+app.patch('/api/organizations/:organizationSlug/controls/:controlId/restore', async (c) => {
+  return setControlArchived(c, false);
+});
+
+app.post(
+  '/api/organizations/:organizationSlug/controls/:controlId/proposed-updates/:proposedUpdateId/publish',
+  async (c) => {
+    const session = await auth.api.getSession({
+      headers: c.req.raw.headers,
+    });
+
+    if (!session) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const membership = await getOrganizationMembership(
+      c.req.param('organizationSlug'),
+      session.user.id,
+    );
+
+    if (!membership) {
+      return c.json({ error: 'Proposed update unavailable' }, 404);
+    }
+
+    if (!canPublishControls(membership.role)) {
+      return c.json({ error: 'Only Organization owners and admins can publish Controls.' }, 403);
+    }
+
+    try {
+      const control = await publishControlProposedUpdate(
+        membership,
+        c.req.param('controlId'),
+        c.req.param('proposedUpdateId'),
+      );
+
+      if (!control) {
+        return c.json({ error: 'Proposed update unavailable' }, 404);
+      }
+
+      return c.json({ control }, 201);
+    } catch (caughtError) {
+      if (caughtError instanceof ControlProposedUpdateInputError) {
         return c.json({ error: caughtError.message }, 400);
       }
 
@@ -438,6 +663,54 @@ async function setProjectArchived(c: Context, archived: boolean) {
   }
 
   return c.json({ project });
+}
+
+async function setControlArchived(c: Context, archived: boolean) {
+  const organizationSlug = c.req.param('organizationSlug');
+  const controlId = c.req.param('controlId');
+
+  if (!organizationSlug || !controlId) {
+    return c.json({ error: 'Control unavailable' }, 404);
+  }
+
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const membership = await getOrganizationMembership(organizationSlug, session.user.id);
+
+  if (!membership) {
+    return c.json({ error: 'Control unavailable' }, 404);
+  }
+
+  if (!canArchiveControls(membership.role)) {
+    return c.json(
+      {
+        error: `Only Organization owners and admins can ${archived ? 'archive' : 'restore'} Controls.`,
+      },
+      403,
+    );
+  }
+
+  const archiveReason = archived
+    ? normalizeControlArchiveBody(await c.req.json().catch(() => null)).reason
+    : undefined;
+  const control = await setControlArchivedForMembership({
+    archived,
+    controlId,
+    membership,
+    reason: archiveReason,
+  });
+
+  if (!control) {
+    return c.json({ error: 'Control unavailable' }, 404);
+  }
+
+  return c.json({ control });
 }
 
 app.on(['POST', 'GET'], '/api/auth/*', (c) => auth.handler(c.req.raw));

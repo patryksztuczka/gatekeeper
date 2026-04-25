@@ -1,14 +1,21 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { AlertCircle, CheckCircle2, Plus } from 'lucide-react';
+import { AlertCircle, Archive, CheckCircle2, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import { useParams, useSearchParams } from 'react-router';
 import {
+  archiveControl,
+  cancelDraftControl,
+  createControlProposedUpdate,
   createDraftControl,
   getMembershipResolution,
+  listControlProposedUpdates,
   listControls,
   listDraftControls,
+  publishControlProposedUpdate,
   publishDraftControl,
+  restoreControl,
   type ControlListItem,
+  type ControlProposedUpdateListItem,
   type DraftControlListItem,
 } from '../../features/auth/auth-api';
 import { humanizeAuthError } from '../../features/auth/auth-errors';
@@ -38,16 +45,22 @@ export function ControlsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [controls, setControls] = useState<ControlListItem[]>([]);
   const [draftControls, setDraftControls] = useState<DraftControlListItem[]>([]);
+  const [proposedUpdates, setProposedUpdates] = useState<ControlProposedUpdateListItem[]>([]);
   const [currentRole, setCurrentRole] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [publishingDraftId, setPublishingDraftId] = useState<string | null>(null);
+  const [creatingProposalControlId, setCreatingProposalControlId] = useState<string | null>(null);
+  const [publishingProposalId, setPublishingProposalId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [controlCode, setControlCode] = useState('');
   const [title, setTitle] = useState('');
+  const [archiveControlId, setArchiveControlId] = useState<string | null>(null);
+  const [archiveReason, setArchiveReason] = useState('');
   const search = searchParams.get('q') ?? '';
   const statusFilter = toStatusFilter(searchParams.get('status'));
+  const archivedView = statusFilter === 'archived';
   const releaseImpact = searchParams.get('releaseImpact') ?? '';
   const acceptedEvidenceType = searchParams.get('acceptedEvidenceType') ?? '';
   const standardsFramework = searchParams.get('standardsFramework') ?? '';
@@ -67,7 +80,7 @@ export function ControlsPage() {
       setIsLoading(true);
       setError(null);
       try {
-        const [controlResponse, draftResponse, resolution] = await Promise.all([
+        const [controlResponse, draftResponse, proposalResponse, resolution] = await Promise.all([
           statusFilter === 'draft'
             ? Promise.resolve({ controls: [] })
             : listControls(organizationSlug, {
@@ -80,12 +93,16 @@ export function ControlsPage() {
           canListDrafts
             ? listDraftControls(organizationSlug, search)
             : Promise.resolve({ draftControls: [] }),
+          archivedView
+            ? Promise.resolve({ proposedUpdates: [] })
+            : listControlProposedUpdates(organizationSlug),
           getMembershipResolution(),
         ]);
         const organization = resolution.organizations.find((org) => org.slug === organizationSlug);
 
         setControls(controlResponse.controls);
         setDraftControls(draftResponse.draftControls);
+        setProposedUpdates(proposalResponse.proposedUpdates);
         setCurrentRole(organization?.role ?? null);
       } catch (caughtError) {
         const rawMessage =
@@ -99,6 +116,7 @@ export function ControlsPage() {
     void refresh();
   }, [
     acceptedEvidenceType,
+    archivedView,
     canListDrafts,
     organizationSlug,
     releaseImpact,
@@ -190,15 +208,156 @@ export function ControlsPage() {
     }
   };
 
+  const handleArchiveStateChange = async (control: ControlListItem, reason = '') => {
+    if (!organizationSlug) return;
+
+    setError(null);
+    setStatus(null);
+    try {
+      if (archivedView) {
+        await restoreControl(organizationSlug, control.id);
+        setStatus('Control restored.');
+      } else {
+        await archiveControl(organizationSlug, control.id, { reason });
+        setArchiveControlId(null);
+        setArchiveReason('');
+        setStatus('Control archived.');
+      }
+      setControls((currentControls) =>
+        currentControls.filter((currentControl) => currentControl.id !== control.id),
+      );
+    } catch (caughtError) {
+      const action = archivedView ? 'restore' : 'archive';
+      const rawMessage =
+        caughtError instanceof Error ? caughtError.message : `Unable to ${action} Control.`;
+      setError(humanizeAuthError(null, rawMessage, `Unable to ${action} Control.`));
+    }
+  };
+
+  const handleCancelDraftControl = async (draftControl: DraftControlListItem) => {
+    if (!organizationSlug) return;
+
+    setError(null);
+    setStatus(null);
+    try {
+      await cancelDraftControl(organizationSlug, draftControl.id);
+      setDraftControls((currentDrafts) =>
+        currentDrafts.filter((currentDraft) => currentDraft.id !== draftControl.id),
+      );
+      setStatus('Draft Control canceled.');
+    } catch (caughtError) {
+      const rawMessage =
+        caughtError instanceof Error ? caughtError.message : 'Unable to cancel Draft Control.';
+      setError(humanizeAuthError(null, rawMessage, 'Unable to cancel Draft Control.'));
+    }
+  };
+
+  const handleCreateControlProposedUpdate = async (
+    event: FormEvent<HTMLFormElement>,
+    control: ControlListItem,
+  ) => {
+    event.preventDefault();
+    if (!organizationSlug) return;
+
+    const formData = new FormData(event.currentTarget);
+    const acceptedEvidenceTypes = String(formData.get('acceptedEvidenceTypes') ?? '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    setCreatingProposalControlId(control.id);
+    setError(null);
+    setStatus(null);
+    try {
+      const response = await createControlProposedUpdate(organizationSlug, control.id, {
+        acceptedEvidenceTypes,
+        applicabilityConditions: String(formData.get('applicabilityConditions') ?? ''),
+        businessMeaning: String(formData.get('businessMeaning') ?? ''),
+        controlCode: String(formData.get('controlCode') ?? ''),
+        releaseImpact: String(formData.get('releaseImpact') ?? ''),
+        title: String(formData.get('title') ?? ''),
+        verificationMethod: String(formData.get('verificationMethod') ?? ''),
+      });
+
+      setProposedUpdates((currentUpdates) => [...currentUpdates, response.proposedUpdate]);
+      setStatus('Proposed update saved.');
+    } catch (caughtError) {
+      const rawMessage =
+        caughtError instanceof Error ? caughtError.message : 'Unable to save proposed update.';
+      setError(humanizeAuthError(null, rawMessage, 'Unable to save proposed update.'));
+    } finally {
+      setCreatingProposalControlId(null);
+    }
+  };
+
+  const handlePublishControlProposedUpdate = async (
+    proposedUpdate: ControlProposedUpdateListItem,
+  ) => {
+    if (!organizationSlug) return;
+
+    setPublishingProposalId(proposedUpdate.id);
+    setError(null);
+    setStatus(null);
+    try {
+      const response = await publishControlProposedUpdate(
+        organizationSlug,
+        proposedUpdate.controlId,
+        proposedUpdate.id,
+      );
+
+      setControls((currentControls) =>
+        currentControls.map((control) =>
+          control.id === response.control.id ? response.control : control,
+        ),
+      );
+      setProposedUpdates((currentUpdates) =>
+        currentUpdates.filter((currentUpdate) => currentUpdate.id !== proposedUpdate.id),
+      );
+      setStatus('Proposed update published.');
+    } catch (caughtError) {
+      const rawMessage =
+        caughtError instanceof Error ? caughtError.message : 'Unable to publish proposed update.';
+      setError(humanizeAuthError(null, rawMessage, 'Unable to publish proposed update.'));
+    } finally {
+      setPublishingProposalId(null);
+    }
+  };
+
   const canPublish = canPublishControls(currentRole);
+  const emptyTitle = archivedView ? 'No archived Controls' : 'No active Controls yet';
+  const emptyDescription = archivedView
+    ? 'Archived Controls will appear here after they are hidden from active use.'
+    : 'Published Controls will appear here after a Draft Control is completed.';
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6">
-      <header className="space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Controls</h1>
-        <p className="text-sm text-muted-foreground">
-          Publish complete Controls into the active Control Library.
-        </p>
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-semibold tracking-tight">Controls</h1>
+          <p className="text-sm text-muted-foreground">
+            {archivedView
+              ? 'Review Archived Controls hidden from active Control Library use.'
+              : 'Publish complete Controls into the active Control Library.'}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant={archivedView ? 'outline' : 'default'}
+            onClick={() => setSearchParams({})}
+          >
+            Active
+          </Button>
+          {canPublish ? (
+            <Button
+              type="button"
+              variant={archivedView ? 'default' : 'outline'}
+              onClick={() => setSearchParams({ status: 'archived' })}
+            >
+              Archived
+            </Button>
+          ) : null}
+        </div>
       </header>
 
       {error ? (
@@ -216,49 +375,55 @@ export function ControlsPage() {
         </Alert>
       ) : null}
 
-      <section className="rounded-xl border bg-card p-5">
-        <div className="space-y-1">
-          <h2 className="text-lg font-semibold">Create Draft Control</h2>
-          <p className="text-sm text-muted-foreground">
-            Only Control Code and title are required while a Control is still a draft.
-          </p>
-        </div>
-        <form
-          className="mt-5 grid gap-4 sm:grid-cols-[12rem_1fr_auto]"
-          onSubmit={handleCreateDraftControl}
-        >
-          <div className="space-y-2">
-            <Label htmlFor="control-code">Control Code</Label>
-            <Input
-              id="control-code"
-              value={controlCode}
-              onChange={(event) => setControlCode(event.target.value)}
-              placeholder="AUTH-001"
-              required
-            />
+      {!archivedView ? (
+        <section className="rounded-xl border bg-card p-5">
+          <div className="space-y-1">
+            <h2 className="text-lg font-semibold">Create Draft Control</h2>
+            <p className="text-sm text-muted-foreground">
+              Only Control Code and title are required while a Control is still a draft.
+            </p>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="control-title">Title</Label>
-            <Input
-              id="control-title"
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              placeholder="Require multi-factor authentication"
-              required
-            />
-          </div>
-          <Button className="self-end" type="submit" disabled={isCreating}>
-            <Plus />
-            {isCreating ? 'Saving...' : 'Save Draft'}
-          </Button>
-        </form>
-      </section>
+          <form
+            className="mt-5 grid gap-4 sm:grid-cols-[12rem_1fr_auto]"
+            onSubmit={handleCreateDraftControl}
+          >
+            <div className="space-y-2">
+              <Label htmlFor="control-code">Control Code</Label>
+              <Input
+                id="control-code"
+                value={controlCode}
+                onChange={(event) => setControlCode(event.target.value)}
+                placeholder="AUTH-001"
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="control-title">Title</Label>
+              <Input
+                id="control-title"
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                placeholder="Require multi-factor authentication"
+                required
+              />
+            </div>
+            <Button className="self-end" type="submit" disabled={isCreating}>
+              <Plus />
+              {isCreating ? 'Saving...' : 'Save Draft'}
+            </Button>
+          </form>
+        </section>
+      ) : null}
 
       <section className="space-y-3">
         <div className="space-y-1">
-          <h2 className="text-lg font-semibold">Active Control Library</h2>
+          <h2 className="text-lg font-semibold">
+            {archivedView ? 'Archived Controls' : 'Active Control Library'}
+          </h2>
           <p className="text-sm text-muted-foreground">
-            Published Controls are visible to every Organization member.
+            {archivedView
+              ? 'Archived Controls keep their Control Codes reserved and are unavailable for new use.'
+              : 'Published Controls are visible to every Organization member.'}
           </p>
         </div>
         <form className="rounded-xl border bg-card p-4" onSubmit={handleFilterControls}>
@@ -332,46 +497,252 @@ export function ControlsPage() {
           <p className="text-sm text-muted-foreground">Loading Controls...</p>
         ) : controls.length === 0 ? (
           <div className="rounded-xl border border-dashed p-8 text-center">
-            <h3 className="text-lg font-medium">No active Controls yet</h3>
+            <h3 className="text-lg font-medium">{emptyTitle}</h3>
             <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
-              Published Controls will appear here after a Draft Control is completed.
+              {emptyDescription}
             </p>
           </div>
         ) : (
           <div className="grid gap-3">
-            {controls.map((control) => (
-              <article key={control.id} className="rounded-xl border bg-card p-5">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="space-y-2">
-                    <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                      {control.controlCode} · v{control.currentVersion.versionNumber}
+            {controls.map((control) => {
+              const proposedUpdate = proposedUpdates.find(
+                (update) => update.controlId === control.id,
+              );
+
+              return (
+                <article key={control.id} className="rounded-xl border bg-card p-5">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                        {control.controlCode} · v{control.currentVersion.versionNumber}
+                      </p>
+                      <h3 className="text-base font-semibold">{control.title}</h3>
+                      <p className="text-sm text-muted-foreground">
+                        Release Impact: {control.currentVersion.releaseImpact}
+                      </p>
+                      <p className="text-sm">{control.currentVersion.businessMeaning}</p>
+                    </div>
+                    <p className="shrink-0 text-xs text-muted-foreground">
+                      {archivedView && control.archivedAt
+                        ? `Archived ${formatDate(control.archivedAt)}`
+                        : `Published ${formatDate(control.createdAt)}`}
                     </p>
-                    <h3 className="text-base font-semibold">{control.title}</h3>
-                    <p className="text-sm text-muted-foreground">
-                      Release Impact: {control.currentVersion.releaseImpact}
-                    </p>
-                    <p className="text-sm">{control.currentVersion.businessMeaning}</p>
                   </div>
-                  <p className="shrink-0 text-xs text-muted-foreground">
-                    Published {formatDate(control.createdAt)}
-                  </p>
-                </div>
-              </article>
-            ))}
+                  {archivedView && control.archiveReason ? (
+                    <p className="mt-3 text-sm text-muted-foreground">
+                      Archive reason: {control.archiveReason}
+                    </p>
+                  ) : null}
+                  {control.versions.length > 0 ? (
+                    <div className="mt-4 rounded-lg border bg-muted/30 p-3">
+                      <h4 className="text-sm font-medium">Version history</h4>
+                      <div className="mt-2 space-y-2">
+                        {control.versions.map((version) => (
+                          <div key={version.id} className="text-sm text-muted-foreground">
+                            v{version.versionNumber} · {version.controlCode} · {version.title} ·{' '}
+                            {formatDate(version.createdAt)}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {!archivedView && proposedUpdate ? (
+                    <div className="mt-4 rounded-lg border border-dashed p-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="space-y-1">
+                          <h4 className="text-sm font-medium">Open proposed update</h4>
+                          <p className="text-sm text-muted-foreground">
+                            {proposedUpdate.controlCode} · {proposedUpdate.title}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            Author: {proposedUpdate.author.name} ({proposedUpdate.author.email})
+                          </p>
+                        </div>
+                        {canPublish ? (
+                          <Button
+                            type="button"
+                            disabled={publishingProposalId === proposedUpdate.id}
+                            onClick={() => void handlePublishControlProposedUpdate(proposedUpdate)}
+                          >
+                            <CheckCircle2 />
+                            {publishingProposalId === proposedUpdate.id
+                              ? 'Publishing...'
+                              : 'Publish Proposed Update'}
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : !archivedView ? (
+                    <form
+                      className="mt-4 grid gap-4 rounded-lg border p-4"
+                      onSubmit={(event) => handleCreateControlProposedUpdate(event, control)}
+                    >
+                      <h4 className="text-sm font-medium">Propose update</h4>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label htmlFor={`${control.id}-proposal-code`}>Control Code</Label>
+                          <Input
+                            id={`${control.id}-proposal-code`}
+                            name="controlCode"
+                            defaultValue={control.currentVersion.controlCode}
+                            required
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor={`${control.id}-proposal-title`}>Title</Label>
+                          <Input
+                            id={`${control.id}-proposal-title`}
+                            name="title"
+                            defaultValue={control.currentVersion.title}
+                            required
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor={`${control.id}-proposal-business-meaning`}>
+                            Business meaning
+                          </Label>
+                          <textarea
+                            id={`${control.id}-proposal-business-meaning`}
+                            name="businessMeaning"
+                            className="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                            defaultValue={control.currentVersion.businessMeaning}
+                            required
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor={`${control.id}-proposal-verification-method`}>
+                            Verification method
+                          </Label>
+                          <textarea
+                            id={`${control.id}-proposal-verification-method`}
+                            name="verificationMethod"
+                            className="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                            defaultValue={control.currentVersion.verificationMethod}
+                            required
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor={`${control.id}-proposal-evidence-types`}>
+                            Accepted Evidence Types
+                          </Label>
+                          <Input
+                            id={`${control.id}-proposal-evidence-types`}
+                            name="acceptedEvidenceTypes"
+                            defaultValue={control.currentVersion.acceptedEvidenceTypes.join(', ')}
+                            required
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor={`${control.id}-proposal-release-impact`}>
+                            Release Impact
+                          </Label>
+                          <select
+                            id={`${control.id}-proposal-release-impact`}
+                            name="releaseImpact"
+                            className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                            defaultValue={control.currentVersion.releaseImpact}
+                            required
+                          >
+                            <option value="blocking">blocking</option>
+                            <option value="needs review">needs review</option>
+                            <option value="advisory">advisory</option>
+                          </select>
+                        </div>
+                        <div className="space-y-2 sm:col-span-2">
+                          <Label htmlFor={`${control.id}-proposal-applicability`}>
+                            Applicability conditions
+                          </Label>
+                          <textarea
+                            id={`${control.id}-proposal-applicability`}
+                            name="applicabilityConditions"
+                            className="min-h-20 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                            defaultValue={control.currentVersion.applicabilityConditions}
+                            required
+                          />
+                        </div>
+                      </div>
+                      <Button type="submit" disabled={creatingProposalControlId === control.id}>
+                        <Plus />
+                        {creatingProposalControlId === control.id
+                          ? 'Saving...'
+                          : 'Save Proposed Update'}
+                      </Button>
+                    </form>
+                  ) : null}
+                  {canPublish ? (
+                    <div className="mt-4 flex justify-end gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          if (archivedView) {
+                            void handleArchiveStateChange(control);
+                            return;
+                          }
+
+                          setArchiveControlId(control.id);
+                          setArchiveReason('');
+                        }}
+                      >
+                        {archivedView ? <RotateCcw /> : <Archive />}
+                        {archivedView ? 'Restore' : 'Archive'}
+                      </Button>
+                    </div>
+                  ) : null}
+                  {!archivedView && archiveControlId === control.id ? (
+                    <form
+                      className="mt-4 space-y-3 rounded-lg border bg-muted/30 p-3"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void handleArchiveStateChange(control, archiveReason);
+                      }}
+                    >
+                      <div className="space-y-2">
+                        <Label htmlFor={`${control.id}-archive-reason`}>Archive reason</Label>
+                        <textarea
+                          id={`${control.id}-archive-reason`}
+                          value={archiveReason}
+                          onChange={(event) => setArchiveReason(event.target.value)}
+                          className="min-h-20 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                          placeholder="Optional context for why this Control is no longer used."
+                        />
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setArchiveControlId(null);
+                            setArchiveReason('');
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                        <Button type="submit" size="sm">
+                          Archive Control
+                        </Button>
+                      </div>
+                    </form>
+                  ) : null}
+                </article>
+              );
+            })}
           </div>
         )}
       </section>
 
-      {isLoading ? (
+      {!archivedView && isLoading ? (
         <p className="text-sm text-muted-foreground">Loading Draft Controls...</p>
-      ) : draftControls.length === 0 ? (
+      ) : !archivedView && draftControls.length === 0 ? (
         <section className="rounded-xl border border-dashed p-8 text-center">
           <h2 className="text-lg font-medium">No Draft Controls yet</h2>
           <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
             Draft Controls you can access will appear here after they are saved.
           </p>
         </section>
-      ) : (
+      ) : !archivedView ? (
         <section className="grid gap-3">
           {draftControls.map((draftControl) => (
             <article key={draftControl.id} className="rounded-xl border bg-card p-5">
@@ -385,9 +756,20 @@ export function ControlsPage() {
                     Author: {draftControl.author.name} ({draftControl.author.email})
                   </p>
                 </div>
-                <p className="shrink-0 text-xs text-muted-foreground">
-                  Saved {formatDate(draftControl.createdAt)}
-                </p>
+                <div className="flex shrink-0 items-center gap-2">
+                  <p className="text-xs text-muted-foreground">
+                    Saved {formatDate(draftControl.createdAt)}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleCancelDraftControl(draftControl)}
+                  >
+                    <Trash2 />
+                    Cancel
+                  </Button>
+                </div>
               </div>
               {canPublish ? (
                 <form
@@ -463,7 +845,7 @@ export function ControlsPage() {
             </article>
           ))}
         </section>
-      )}
+      ) : null}
     </div>
   );
 }
