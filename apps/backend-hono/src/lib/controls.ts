@@ -2,10 +2,12 @@ import { and, asc, desc, eq, isNotNull, isNull, ne } from 'drizzle-orm';
 import { db } from '../db/client';
 import {
   controlProposedUpdates,
+  controlPublishRequests,
   controls,
   controlVersions,
   draftControls,
   members,
+  organizations,
   users,
 } from '../db/schema';
 import type { OrganizationMembership } from './projects';
@@ -55,6 +57,22 @@ export type ControlProposedUpdateListItem = ControlVersionResponse & {
     name: string;
   };
   controlId: string;
+};
+
+export type ControlPublishRequestListItem = ControlVersionResponse & {
+  approvalCount: number;
+  author: {
+    email: string;
+    id: string;
+    name: string;
+  };
+  controlId: string | null;
+  draftControlId: string | null;
+  proposedUpdateId: string | null;
+  requestType: 'draft_control' | 'proposed_update';
+  requiredApprovalCount: number;
+  status: 'submitted';
+  submittedAt: string;
 };
 
 export type ControlListFilters = {
@@ -108,6 +126,7 @@ const releaseImpacts = new Set(['advisory', 'blocking', 'needs review']);
 export class DraftControlInputError extends Error {}
 export class ControlPublishInputError extends Error {}
 export class ControlProposedUpdateInputError extends Error {}
+export class ControlPublishRequestInputError extends Error {}
 
 export function canPublishControls(role: string): boolean {
   return publishControlRoles.has(role);
@@ -233,6 +252,79 @@ export async function listControlProposedUpdates(
     },
     controlId,
   }));
+}
+
+export async function listControlPublishRequests(
+  membership: OrganizationMembership,
+): Promise<ControlPublishRequestListItem[]> {
+  const rows = await db
+    .select({
+      acceptedEvidenceTypes: controlPublishRequests.acceptedEvidenceTypes,
+      approvalCount: controlPublishRequests.approvalCount,
+      applicabilityConditions: controlPublishRequests.applicabilityConditions,
+      authorEmail: users.email,
+      authorId: members.id,
+      authorName: users.name,
+      businessMeaning: controlPublishRequests.businessMeaning,
+      controlCode: controlPublishRequests.controlCode,
+      controlId: controlPublishRequests.controlId,
+      createdAt: controlPublishRequests.submittedAt,
+      draftControlId: controlPublishRequests.draftControlId,
+      externalStandardsMappings: controlPublishRequests.externalStandardsMappings,
+      id: controlPublishRequests.id,
+      proposedUpdateId: controlPublishRequests.proposedUpdateId,
+      releaseImpact: controlPublishRequests.releaseImpact,
+      requestType: controlPublishRequests.requestType,
+      requiredApprovalCount: controlPublishRequests.requiredApprovalCount,
+      status: controlPublishRequests.status,
+      submittedAt: controlPublishRequests.submittedAt,
+      title: controlPublishRequests.title,
+      verificationMethod: controlPublishRequests.verificationMethod,
+    })
+    .from(controlPublishRequests)
+    .innerJoin(members, eq(controlPublishRequests.authorMemberId, members.id))
+    .innerJoin(users, eq(members.userId, users.id))
+    .where(
+      draftReviewerRoles.has(membership.role)
+        ? eq(controlPublishRequests.organizationId, membership.organizationId)
+        : and(
+            eq(controlPublishRequests.organizationId, membership.organizationId),
+            eq(controlPublishRequests.authorMemberId, membership.id),
+          ),
+    )
+    .orderBy(desc(controlPublishRequests.submittedAt), asc(controlPublishRequests.controlCode));
+
+  return rows.map(
+    ({
+      approvalCount,
+      authorEmail,
+      authorId,
+      authorName,
+      controlId,
+      draftControlId,
+      proposedUpdateId,
+      requestType,
+      requiredApprovalCount,
+      status,
+      submittedAt,
+      ...row
+    }) => ({
+      ...toControlVersionResponse({ ...row, versionNumber: 0 }),
+      approvalCount,
+      author: {
+        email: authorEmail,
+        id: authorId,
+        name: authorName,
+      },
+      controlId,
+      draftControlId,
+      proposedUpdateId,
+      requestType: requestType as 'draft_control' | 'proposed_update',
+      requiredApprovalCount,
+      status: status as 'submitted',
+      submittedAt: submittedAt.toISOString(),
+    }),
+  );
 }
 
 export async function listDraftControls(
@@ -365,6 +457,12 @@ export async function publishDraftControl(
   input: PublishDraftControlInput,
 ): Promise<ControlListItem | null> {
   validatePublishInput(input);
+
+  await ensureControlPublishAllowed({
+    draftControlId,
+    membership,
+    proposedUpdateId: null,
+  });
 
   const draftControl = await db
     .select()
@@ -548,11 +646,162 @@ export async function createControlProposedUpdate(
   return (await listControlProposedUpdates(membership)).find(({ id }) => id === proposedUpdate.id)!;
 }
 
+export async function submitDraftControlPublishRequest(
+  membership: OrganizationMembership,
+  draftControlId: string,
+  input: PublishDraftControlInput,
+): Promise<ControlPublishRequestListItem | null> {
+  validatePublishInput(input);
+
+  const policy = await getApprovalPolicy(membership.organizationId);
+
+  if (!policy.enabled) {
+    throw new ControlPublishRequestInputError('Control Approval Policy is not enabled.');
+  }
+
+  const draftControl = await db
+    .select()
+    .from(draftControls)
+    .where(
+      and(
+        eq(draftControls.id, draftControlId),
+        eq(draftControls.organizationId, membership.organizationId),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (!draftControl) {
+    return null;
+  }
+
+  if (draftControl.authorMemberId !== membership.id && !draftReviewerRoles.has(membership.role)) {
+    return null;
+  }
+
+  const existingRequest = await db
+    .select({ id: controlPublishRequests.id })
+    .from(controlPublishRequests)
+    .where(eq(controlPublishRequests.draftControlId, draftControlId))
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (existingRequest) {
+    throw new ControlPublishRequestInputError(
+      'This Draft Control already has a Control Publish Request.',
+    );
+  }
+
+  const request = {
+    acceptedEvidenceTypes: JSON.stringify(input.acceptedEvidenceTypes.map((value) => value.trim())),
+    applicabilityConditions: input.applicabilityConditions.trim(),
+    approvalCount: 0,
+    authorMemberId: membership.id,
+    businessMeaning: input.businessMeaning.trim(),
+    controlCode: draftControl.controlCode,
+    controlId: null,
+    draftControlId,
+    externalStandardsMappings: JSON.stringify(input.externalStandardsMappings),
+    id: crypto.randomUUID(),
+    organizationId: membership.organizationId,
+    proposedUpdateId: null,
+    releaseImpact: input.releaseImpact,
+    requestType: 'draft_control',
+    requiredApprovalCount: policy.requiredApprovals,
+    status: 'submitted',
+    submittedAt: new Date(),
+    title: draftControl.title,
+    verificationMethod: input.verificationMethod.trim(),
+  };
+
+  await db.insert(controlPublishRequests).values(request);
+
+  return (await listControlPublishRequests(membership)).find(({ id }) => id === request.id)!;
+}
+
+export async function submitControlProposedUpdatePublishRequest(
+  membership: OrganizationMembership,
+  controlId: string,
+  proposedUpdateId: string,
+): Promise<ControlPublishRequestListItem | null> {
+  const policy = await getApprovalPolicy(membership.organizationId);
+
+  if (!policy.enabled) {
+    throw new ControlPublishRequestInputError('Control Approval Policy is not enabled.');
+  }
+
+  const proposedUpdate = await db
+    .select()
+    .from(controlProposedUpdates)
+    .where(
+      and(
+        eq(controlProposedUpdates.id, proposedUpdateId),
+        eq(controlProposedUpdates.controlId, controlId),
+        eq(controlProposedUpdates.organizationId, membership.organizationId),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (!proposedUpdate) {
+    return null;
+  }
+
+  if (proposedUpdate.authorMemberId !== membership.id && !draftReviewerRoles.has(membership.role)) {
+    return null;
+  }
+
+  const existingRequest = await db
+    .select({ id: controlPublishRequests.id })
+    .from(controlPublishRequests)
+    .where(eq(controlPublishRequests.proposedUpdateId, proposedUpdateId))
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (existingRequest) {
+    throw new ControlPublishRequestInputError(
+      'This proposed Control update already has a Control Publish Request.',
+    );
+  }
+
+  const request = {
+    acceptedEvidenceTypes: proposedUpdate.acceptedEvidenceTypes,
+    applicabilityConditions: proposedUpdate.applicabilityConditions,
+    approvalCount: 0,
+    authorMemberId: membership.id,
+    businessMeaning: proposedUpdate.businessMeaning,
+    controlCode: proposedUpdate.controlCode,
+    controlId,
+    draftControlId: null,
+    externalStandardsMappings: proposedUpdate.externalStandardsMappings,
+    id: crypto.randomUUID(),
+    organizationId: membership.organizationId,
+    proposedUpdateId,
+    releaseImpact: proposedUpdate.releaseImpact,
+    requestType: 'proposed_update',
+    requiredApprovalCount: policy.requiredApprovals,
+    status: 'submitted',
+    submittedAt: new Date(),
+    title: proposedUpdate.title,
+    verificationMethod: proposedUpdate.verificationMethod,
+  };
+
+  await db.insert(controlPublishRequests).values(request);
+
+  return (await listControlPublishRequests(membership)).find(({ id }) => id === request.id)!;
+}
+
 export async function publishControlProposedUpdate(
   membership: OrganizationMembership,
   controlId: string,
   proposedUpdateId: string,
 ): Promise<ControlListItem | null> {
+  await ensureControlPublishAllowed({
+    draftControlId: null,
+    membership,
+    proposedUpdateId,
+  });
+
   const proposedUpdate = await db
     .select()
     .from(controlProposedUpdates)
@@ -909,6 +1158,57 @@ async function getControlVersions(controlId: string): Promise<ControlVersionResp
     .orderBy(desc(controlVersions.versionNumber));
 
   return rows.map((row) => toControlVersionResponse(row));
+}
+
+async function getApprovalPolicy(organizationId: string) {
+  const organization = await db
+    .select({
+      enabled: organizations.controlApprovalPolicyEnabled,
+      requiredApprovals: organizations.controlApprovalRequiredCount,
+    })
+    .from(organizations)
+    .where(eq(organizations.id, organizationId))
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (!organization) {
+    throw new ControlPublishInputError('Organization not found.');
+  }
+
+  return organization;
+}
+
+async function ensureControlPublishAllowed(input: {
+  draftControlId: string | null;
+  membership: OrganizationMembership;
+  proposedUpdateId: string | null;
+}) {
+  const policy = await getApprovalPolicy(input.membership.organizationId);
+
+  if (!policy.enabled) {
+    return;
+  }
+
+  const request = await db
+    .select({ approvalCount: controlPublishRequests.approvalCount })
+    .from(controlPublishRequests)
+    .where(
+      and(
+        eq(controlPublishRequests.organizationId, input.membership.organizationId),
+        eq(controlPublishRequests.status, 'submitted'),
+        input.draftControlId
+          ? eq(controlPublishRequests.draftControlId, input.draftControlId)
+          : eq(controlPublishRequests.proposedUpdateId, input.proposedUpdateId ?? ''),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (!request || request.approvalCount < policy.requiredApprovals) {
+    throw new ControlPublishInputError(
+      'Control Approval Policy requires an approved Control Publish Request before publishing.',
+    );
+  }
 }
 
 function toControlVersionResponse(row: {

@@ -15,12 +15,14 @@ import {
   canPublishControls,
   cancelDraftControl,
   ControlProposedUpdateInputError,
+  ControlPublishRequestInputError,
   createControlProposedUpdate,
   ControlPublishInputError,
   createDraftControl,
   DraftControlInputError,
   getControlDetail,
   listControlProposedUpdates,
+  listControlPublishRequests,
   listControls,
   listDraftControls,
   normalizeControlArchiveBody,
@@ -32,6 +34,8 @@ import {
   publishControlProposedUpdate,
   publishDraftControl,
   setControlArchivedForMembership,
+  submitControlProposedUpdatePublishRequest,
+  submitDraftControlPublishRequest,
 } from './lib/controls';
 import {
   canManageProjects,
@@ -283,6 +287,27 @@ app.get('/api/organizations/:organizationSlug/controls/proposed-updates', async 
   return c.json({ proposedUpdates: await listControlProposedUpdates(membership) });
 });
 
+app.get('/api/organizations/:organizationSlug/controls/publish-requests', async (c) => {
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const membership = await getOrganizationMembership(
+    c.req.param('organizationSlug'),
+    session.user.id,
+  );
+
+  if (!membership) {
+    return c.json({ error: 'Organization not found' }, 404);
+  }
+
+  return c.json({ publishRequests: await listControlPublishRequests(membership) });
+});
+
 app.get('/api/organizations/:organizationSlug/controls/:controlId', async (c) => {
   const session = await auth.api.getSession({
     headers: c.req.raw.headers,
@@ -429,6 +454,48 @@ app.post(
   },
 );
 
+app.post(
+  '/api/organizations/:organizationSlug/controls/drafts/:draftControlId/publish-requests',
+  async (c) => {
+    const session = await auth.api.getSession({
+      headers: c.req.raw.headers,
+    });
+
+    if (!session) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const membership = await getOrganizationMembership(
+      c.req.param('organizationSlug'),
+      session.user.id,
+    );
+
+    if (!membership) {
+      return c.json({ error: 'Draft Control unavailable' }, 404);
+    }
+
+    try {
+      const publishRequest = await submitDraftControlPublishRequest(
+        membership,
+        c.req.param('draftControlId'),
+        normalizeDraftControlPublishBody(await c.req.json().catch(() => null)),
+      );
+
+      if (!publishRequest) {
+        return c.json({ error: 'Draft Control unavailable' }, 404);
+      }
+
+      return c.json({ publishRequest }, 201);
+    } catch (caughtError) {
+      if (caughtError instanceof ControlPublishRequestInputError) {
+        return c.json({ error: caughtError.message }, 400);
+      }
+
+      throw caughtError;
+    }
+  },
+);
+
 app.delete('/api/organizations/:organizationSlug/controls/drafts/:draftControlId', async (c) => {
   const session = await auth.api.getSession({
     headers: c.req.raw.headers,
@@ -502,6 +569,52 @@ app.post(
       return c.json({ control }, 201);
     } catch (caughtError) {
       if (caughtError instanceof ControlProposedUpdateInputError) {
+        return c.json({ error: caughtError.message }, 400);
+      }
+
+      if (caughtError instanceof ControlPublishInputError) {
+        return c.json({ error: caughtError.message }, 400);
+      }
+
+      throw caughtError;
+    }
+  },
+);
+
+app.post(
+  '/api/organizations/:organizationSlug/controls/:controlId/proposed-updates/:proposedUpdateId/publish-requests',
+  async (c) => {
+    const session = await auth.api.getSession({
+      headers: c.req.raw.headers,
+    });
+
+    if (!session) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const membership = await getOrganizationMembership(
+      c.req.param('organizationSlug'),
+      session.user.id,
+    );
+
+    if (!membership) {
+      return c.json({ error: 'Proposed update unavailable' }, 404);
+    }
+
+    try {
+      const publishRequest = await submitControlProposedUpdatePublishRequest(
+        membership,
+        c.req.param('controlId'),
+        c.req.param('proposedUpdateId'),
+      );
+
+      if (!publishRequest) {
+        return c.json({ error: 'Proposed update unavailable' }, 404);
+      }
+
+      return c.json({ publishRequest }, 201);
+    } catch (caughtError) {
+      if (caughtError instanceof ControlPublishRequestInputError) {
         return c.json({ error: caughtError.message }, 400);
       }
 

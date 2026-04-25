@@ -7,15 +7,20 @@ import {
   cancelDraftControl,
   createControlProposedUpdate,
   createDraftControl,
+  getControlApprovalPolicy,
   getMembershipResolution,
   listControlProposedUpdates,
+  listControlPublishRequests,
   listControls,
   listDraftControls,
   publishControlProposedUpdate,
   publishDraftControl,
   restoreControl,
+  submitControlProposedUpdatePublishRequest,
+  submitDraftControlPublishRequest,
   type ControlListItem,
   type ControlProposedUpdateListItem,
+  type ControlPublishRequestListItem,
   type DraftControlListItem,
 } from '../../features/auth/auth-api';
 import { humanizeAuthError } from '../../features/auth/auth-errors';
@@ -46,7 +51,9 @@ export function ControlsPage() {
   const [controls, setControls] = useState<ControlListItem[]>([]);
   const [draftControls, setDraftControls] = useState<DraftControlListItem[]>([]);
   const [proposedUpdates, setProposedUpdates] = useState<ControlProposedUpdateListItem[]>([]);
+  const [publishRequests, setPublishRequests] = useState<ControlPublishRequestListItem[]>([]);
   const [currentRole, setCurrentRole] = useState<string | null>(null);
+  const [approvalPolicyEnabled, setApprovalPolicyEnabled] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [publishingDraftId, setPublishingDraftId] = useState<string | null>(null);
@@ -80,7 +87,14 @@ export function ControlsPage() {
       setIsLoading(true);
       setError(null);
       try {
-        const [controlResponse, draftResponse, proposalResponse, resolution] = await Promise.all([
+        const [
+          controlResponse,
+          draftResponse,
+          proposalResponse,
+          publishRequestResponse,
+          policyResponse,
+          resolution,
+        ] = await Promise.all([
           statusFilter === 'draft'
             ? Promise.resolve({ controls: [] })
             : listControls(organizationSlug, {
@@ -96,6 +110,10 @@ export function ControlsPage() {
           archivedView
             ? Promise.resolve({ proposedUpdates: [] })
             : listControlProposedUpdates(organizationSlug),
+          archivedView
+            ? Promise.resolve({ publishRequests: [] })
+            : listControlPublishRequests(organizationSlug),
+          getControlApprovalPolicy(organizationSlug),
           getMembershipResolution(),
         ]);
         const organization = resolution.organizations.find((org) => org.slug === organizationSlug);
@@ -103,6 +121,8 @@ export function ControlsPage() {
         setControls(controlResponse.controls);
         setDraftControls(draftResponse.draftControls);
         setProposedUpdates(proposalResponse.proposedUpdates);
+        setPublishRequests(publishRequestResponse.publishRequests);
+        setApprovalPolicyEnabled(policyResponse.policy.enabled);
         setCurrentRole(organization?.role ?? null);
       } catch (caughtError) {
         const rawMessage =
@@ -184,13 +204,26 @@ export function ControlsPage() {
     setError(null);
     setStatus(null);
     try {
-      const response = await publishDraftControl(organizationSlug, draftControl.id, {
+      const payload = {
         acceptedEvidenceTypes,
         applicabilityConditions: String(formData.get('applicabilityConditions') ?? ''),
         businessMeaning: String(formData.get('businessMeaning') ?? ''),
         releaseImpact: String(formData.get('releaseImpact') ?? ''),
         verificationMethod: String(formData.get('verificationMethod') ?? ''),
-      });
+      };
+
+      if (approvalPolicyEnabled) {
+        const response = await submitDraftControlPublishRequest(
+          organizationSlug,
+          draftControl.id,
+          payload,
+        );
+        setPublishRequests((currentRequests) => [...currentRequests, response.publishRequest]);
+        setStatus('Control Publish Request submitted.');
+        return;
+      }
+
+      const response = await publishDraftControl(organizationSlug, draftControl.id, payload);
 
       if ((statusFilter === 'all' || statusFilter === 'active') && !hasActiveControlFilters) {
         setControls((currentControls) => [...currentControls, response.control]);
@@ -323,7 +356,36 @@ export function ControlsPage() {
     }
   };
 
+  const handleSubmitControlProposedUpdate = async (
+    proposedUpdate: ControlProposedUpdateListItem,
+  ) => {
+    if (!organizationSlug) return;
+
+    setPublishingProposalId(proposedUpdate.id);
+    setError(null);
+    setStatus(null);
+    try {
+      const response = await submitControlProposedUpdatePublishRequest(
+        organizationSlug,
+        proposedUpdate.controlId,
+        proposedUpdate.id,
+      );
+
+      setPublishRequests((currentRequests) => [...currentRequests, response.publishRequest]);
+      setStatus('Control Publish Request submitted.');
+    } catch (caughtError) {
+      const rawMessage =
+        caughtError instanceof Error
+          ? caughtError.message
+          : 'Unable to submit Control Publish Request.';
+      setError(humanizeAuthError(null, rawMessage, 'Unable to submit Control Publish Request.'));
+    } finally {
+      setPublishingProposalId(null);
+    }
+  };
+
   const canPublish = canPublishControls(currentRole);
+  const canCompleteDrafts = canPublish || approvalPolicyEnabled;
   const emptyTitle = archivedView ? 'No archived Controls' : 'No active Controls yet';
   const emptyDescription = archivedView
     ? 'Archived Controls will appear here after they are hidden from active use.'
@@ -558,7 +620,27 @@ export function ControlsPage() {
                             Author: {proposedUpdate.author.name} ({proposedUpdate.author.email})
                           </p>
                         </div>
-                        {canPublish ? (
+                        {approvalPolicyEnabled ? (
+                          <Button
+                            type="button"
+                            disabled={
+                              publishingProposalId === proposedUpdate.id ||
+                              publishRequests.some(
+                                (request) => request.proposedUpdateId === proposedUpdate.id,
+                              )
+                            }
+                            onClick={() => void handleSubmitControlProposedUpdate(proposedUpdate)}
+                          >
+                            <CheckCircle2 />
+                            {publishRequests.some(
+                              (request) => request.proposedUpdateId === proposedUpdate.id,
+                            )
+                              ? 'Request Submitted'
+                              : publishingProposalId === proposedUpdate.id
+                                ? 'Submitting...'
+                                : 'Submit for Review'}
+                          </Button>
+                        ) : canPublish ? (
                           <Button
                             type="button"
                             disabled={publishingProposalId === proposedUpdate.id}
@@ -771,7 +853,7 @@ export function ControlsPage() {
                   </Button>
                 </div>
               </div>
-              {canPublish ? (
+              {canCompleteDrafts ? (
                 <form
                   className="mt-5 grid gap-4"
                   onSubmit={(event) => handlePublishDraftControl(event, draftControl)}
@@ -836,14 +918,63 @@ export function ControlsPage() {
                       required
                     />
                   </div>
-                  <Button type="submit" disabled={publishingDraftId === draftControl.id}>
+                  <Button
+                    type="submit"
+                    disabled={
+                      publishingDraftId === draftControl.id ||
+                      publishRequests.some((request) => request.draftControlId === draftControl.id)
+                    }
+                  >
                     <CheckCircle2 />
-                    {publishingDraftId === draftControl.id ? 'Publishing...' : 'Publish Control'}
+                    {publishRequests.some((request) => request.draftControlId === draftControl.id)
+                      ? 'Request Submitted'
+                      : publishingDraftId === draftControl.id
+                        ? approvalPolicyEnabled
+                          ? 'Submitting...'
+                          : 'Publishing...'
+                        : approvalPolicyEnabled
+                          ? 'Submit for Review'
+                          : 'Publish Control'}
                   </Button>
                 </form>
               ) : null}
             </article>
           ))}
+        </section>
+      ) : null}
+
+      {!archivedView && publishRequests.length > 0 ? (
+        <section className="space-y-3">
+          <div className="space-y-1">
+            <h2 className="text-lg font-semibold">Control Publish Requests</h2>
+            <p className="text-sm text-muted-foreground">
+              Submitted requests wait for approvals before the Control can be published.
+            </p>
+          </div>
+          <div className="grid gap-3">
+            {publishRequests.map((request) => (
+              <article key={request.id} className="rounded-xl border bg-card p-5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                      {request.controlCode} ·{' '}
+                      {request.requestType === 'draft_control' ? 'New Control' : 'Control update'}
+                    </p>
+                    <h3 className="text-base font-semibold">{request.title}</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Author: {request.author.name} ({request.author.email})
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      Approvals: {request.approvalCount} of {request.requiredApprovalCount}
+                    </p>
+                  </div>
+                  <p className="shrink-0 text-xs text-muted-foreground">
+                    Submitted {formatDate(request.submittedAt)}
+                  </p>
+                </div>
+              </article>
+            ))}
+          </div>
         </section>
       ) : null}
     </div>

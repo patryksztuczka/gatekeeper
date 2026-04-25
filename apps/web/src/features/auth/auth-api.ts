@@ -109,6 +109,22 @@ export type ControlProposedUpdateListItem = ControlVersionResponse & {
   controlId: string;
 };
 
+export type ControlPublishRequestListItem = ControlVersionResponse & {
+  approvalCount: number;
+  author: {
+    email: string;
+    id: string;
+    name: string;
+  };
+  controlId: string | null;
+  draftControlId: string | null;
+  proposedUpdateId: string | null;
+  requestType: 'draft_control' | 'proposed_update';
+  requiredApprovalCount: number;
+  status: 'submitted';
+  submittedAt: string;
+};
+
 export type ControlListFilters = {
   acceptedEvidenceType?: string;
   releaseImpact?: string;
@@ -344,6 +360,15 @@ export function listControlProposedUpdates(organizationSlug: string) {
   );
 }
 
+export function listControlPublishRequests(organizationSlug: string) {
+  return request<{ publishRequests: ControlPublishRequestListItem[] }>(
+    `/api/organizations/${organizationSlug}/controls/publish-requests`,
+    {
+      method: 'GET',
+    },
+  );
+}
+
 export function createDraftControl(
   organizationSlug: string,
   input: {
@@ -373,6 +398,26 @@ export function publishDraftControl(
 ) {
   return request<{ control: ControlListItem }>(
     `/api/organizations/${organizationSlug}/controls/drafts/${draftControlId}/publish`,
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function submitDraftControlPublishRequest(
+  organizationSlug: string,
+  draftControlId: string,
+  input: {
+    acceptedEvidenceTypes: string[];
+    applicabilityConditions: string;
+    businessMeaning: string;
+    releaseImpact: string;
+    verificationMethod: string;
+  },
+) {
+  return request<{ publishRequest: ControlPublishRequestListItem }>(
+    `/api/organizations/${organizationSlug}/controls/drafts/${draftControlId}/publish-requests`,
     {
       method: 'POST',
       body: JSON.stringify(input),
@@ -441,6 +486,19 @@ export function publishControlProposedUpdate(
 ) {
   return request<{ control: ControlListItem }>(
     `/api/organizations/${organizationSlug}/controls/${controlId}/proposed-updates/${proposedUpdateId}/publish`,
+    {
+      method: 'POST',
+    },
+  );
+}
+
+export function submitControlProposedUpdatePublishRequest(
+  organizationSlug: string,
+  controlId: string,
+  proposedUpdateId: string,
+) {
+  return request<{ publishRequest: ControlPublishRequestListItem }>(
+    `/api/organizations/${organizationSlug}/controls/${controlId}/proposed-updates/${proposedUpdateId}/publish-requests`,
     {
       method: 'POST',
     },
