@@ -1,0 +1,60 @@
+apps/web/src/components/pages/settings.tsx
+  d6fcd078a7e0fbb5 6,8-9,34-40,61-97,133-178,190-273
+apps/backend-hono/test/control-approval-policy.spec.ts
+  d6fcd078a7e0fbb5 1-298
+apps/backend-hono/src/index.ts
+  d6fcd078a7e0fbb5 7-14,16-18,23,26,28,32,34,122-181,252,254-259,265-285,347-385,432-512,668-713
+apps/backend-hono/test/draft-controls.spec.ts
+  d6fcd078a7e0fbb5 206-264,277-329,636,743-779,781-893,895-1011
+apps/web/src/features/auth/auth-api.ts
+  d6fcd078a7e0fbb5 74-75,78,82-109,127-132,248-269,338-346,382-445
+apps/backend-hono/drizzle/migrations/0005_control_proposed_updates.sql
+  d6fcd078a7e0fbb5 1-23
+apps/backend-hono/src/lib/controls.ts
+  d127b7151fcb60ee 147-149
+  d6fcd078a7e0fbb5 1,3-10,40-41,48-57,94-102,105,110,116-119,127-128,144-146,150-151,156,166-167,187-235,284,291,301-316,320,333-361,432-648,699-721,754-758,860,862-863,876-878,880-881,884-885,889-890,892,896,900-940
+apps/backend-hono/src/db/schema.ts
+  d6fcd078a7e0fbb5 29-32,228-232,243,276-309
+apps/web/src/components/pages/controls.tsx
+  d6fcd078a7e0fbb5 3,6-8,11,14,16,18,48,53-54,105,119,211-325,327-330,334-360,378-384,386-416,420-422,424-426,500,502,507-528,531-731,736,738,745,759-772,848
+  d127b7151fcb60ee 96-98
+apps/backend-hono/drizzle/migrations/0005_archived_controls.sql
+  d6fcd078a7e0fbb5 1-4
+apps/backend-hono/drizzle/migrations/0005_control_approval_policy.sql
+  d6fcd078a7e0fbb5 1-2
+apps/backend-hono/src/lib/control-approval-policy.ts
+  d6fcd078a7e0fbb5 1-120
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "8b3e6da5ad205a77ee695bb73e292e04d76e3414",
+  "prompts": {
+    "d127b7151fcb60ee": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_2395034ffffekDPZPIAF7qZUs1",
+        "model": "openai/gpt-5.5"
+      },
+      "human_author": "Patryk Sztuczka",
+      "messages": [],
+      "total_additions": 6,
+      "total_deletions": 2,
+      "accepted_lines": 6,
+      "overriden_lines": 0
+    },
+    "d6fcd078a7e0fbb5": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_23aab4bf1ffeAo7VhSqrgLRrzR",
+        "model": "openai/gpt-5.5"
+      },
+      "human_author": "Patryk Sztuczka",
+      "messages": [],
+      "total_additions": 2414,
+      "total_deletions": 102,
+      "accepted_lines": 2354,
+      "overriden_lines": 8
+    }
+  }
+}
