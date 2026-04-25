@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { AlertCircle, CheckCircle2, Plus } from 'lucide-react';
-import { Link, useNavigate, useParams } from 'react-router';
+import { AlertCircle, Archive, CheckCircle2, Plus, RotateCcw } from 'lucide-react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import {
   createProject,
   getMembershipResolution,
@@ -12,6 +12,7 @@ import {
 } from '../../features/auth/auth-api';
 import { humanizeAuthError } from '../../features/auth/auth-errors';
 import { buildOrganizationPath, slugifyProjectName } from '../../features/auth/auth-routing';
+import { archiveProject, restoreProject } from '@/features/projects/project-api';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -29,9 +30,14 @@ function canCreateProjects(role: string | null): boolean {
   return role === 'owner' || role === 'admin';
 }
 
+function isArchivedView(value: string | null): boolean {
+  return value === 'archived';
+}
+
 export function ProjectsPage() {
   const { organizationSlug } = useParams();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
   const [members, setMembers] = useState<OrganizationMemberListItem[]>([]);
   const [currentRole, setCurrentRole] = useState<string | null>(null);
@@ -44,6 +50,7 @@ export function ProjectsPage() {
   const [description, setDescription] = useState('');
   const [slug, setSlug] = useState('');
   const [projectOwnerMemberId, setProjectOwnerMemberId] = useState('');
+  const archivedView = isArchivedView(searchParams.get('status'));
 
   useEffect(() => {
     const refresh = async () => {
@@ -53,7 +60,7 @@ export function ProjectsPage() {
       setError(null);
       try {
         const [projectResponse, memberResponse, resolution] = await Promise.all([
-          listProjects(organizationSlug),
+          listProjects(organizationSlug, archivedView ? 'archived' : 'active'),
           listOrganizationMembers(organizationSlug),
           getMembershipResolution(),
         ]);
@@ -72,7 +79,7 @@ export function ProjectsPage() {
     };
 
     void refresh();
-  }, [organizationSlug]);
+  }, [archivedView, organizationSlug]);
 
   const resetForm = () => {
     setName('');
@@ -108,7 +115,34 @@ export function ProjectsPage() {
     }
   };
 
+  const handleArchiveStateChange = async (project: ProjectListItem) => {
+    if (!organizationSlug) return;
+
+    setError(null);
+    setStatus(null);
+    try {
+      if (archivedView) {
+        await restoreProject({ organizationSlug, projectSlug: project.slug });
+        setProjects((currentProjects) => currentProjects.filter(({ id }) => id !== project.id));
+        setStatus('Project restored.');
+      } else {
+        await archiveProject({ organizationSlug, projectSlug: project.slug });
+        setProjects((currentProjects) => currentProjects.filter(({ id }) => id !== project.id));
+        setStatus('Project archived.');
+      }
+    } catch (caughtError) {
+      const action = archivedView ? 'restore' : 'archive';
+      const rawMessage =
+        caughtError instanceof Error ? caughtError.message : `Unable to ${action} Project.`;
+      setError(humanizeAuthError(null, rawMessage, `Unable to ${action} Project.`));
+    }
+  };
+
   const canCreate = canCreateProjects(currentRole);
+  const emptyTitle = archivedView ? 'No archived Projects' : 'No active Projects yet';
+  const emptyDescription = archivedView
+    ? 'Archived Projects will appear here after they are hidden from active work.'
+    : 'Create the first Project to start organizing governance work for this Organization.';
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6">
@@ -116,15 +150,33 @@ export function ProjectsPage() {
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold tracking-tight">Projects</h1>
           <p className="text-sm text-muted-foreground">
-            Track active governance work for this Organization.
+            {archivedView
+              ? 'Review Archived Projects hidden from active work.'
+              : 'Track active governance work for this Organization.'}
           </p>
         </div>
-        {canCreate ? (
-          <Button type="button" onClick={() => setIsModalOpen(true)}>
-            <Plus />
-            Create Project
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant={archivedView ? 'outline' : 'default'}
+            onClick={() => setSearchParams({})}
+          >
+            Active
           </Button>
-        ) : null}
+          <Button
+            type="button"
+            variant={archivedView ? 'default' : 'outline'}
+            onClick={() => setSearchParams({ status: 'archived' })}
+          >
+            Archived
+          </Button>
+          {canCreate && !archivedView ? (
+            <Button type="button" onClick={() => setIsModalOpen(true)}>
+              <Plus />
+              Create Project
+            </Button>
+          ) : null}
+        </div>
       </header>
 
       {error ? (
@@ -146,11 +198,9 @@ export function ProjectsPage() {
         <p className="text-sm text-muted-foreground">Loading Projects...</p>
       ) : projects.length === 0 ? (
         <section className="rounded-xl border border-dashed p-8 text-center">
-          <h2 className="text-lg font-medium">No active Projects yet</h2>
-          <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
-            Create the first Project to start organizing governance work for this Organization.
-          </p>
-          {canCreate ? (
+          <h2 className="text-lg font-medium">{emptyTitle}</h2>
+          <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">{emptyDescription}</p>
+          {canCreate && !archivedView ? (
             <Button className="mt-4" type="button" onClick={() => setIsModalOpen(true)}>
               Create Project
             </Button>
@@ -159,31 +209,47 @@ export function ProjectsPage() {
       ) : (
         <section className="grid gap-3">
           {projects.map((project) => (
-            <Link
-              key={project.id}
-              to={
-                organizationSlug
-                  ? buildOrganizationPath(organizationSlug, `/p/${project.slug}`)
-                  : '#'
-              }
-              className="rounded-xl border bg-card p-5 transition-colors hover:bg-muted/40"
-            >
+            <article key={project.id} className="rounded-xl border bg-card p-5">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="space-y-1">
-                  <h2 className="text-base font-semibold">{project.name}</h2>
+                  <Link
+                    to={
+                      organizationSlug
+                        ? buildOrganizationPath(organizationSlug, `/p/${project.slug}`)
+                        : '#'
+                    }
+                    className="text-base font-semibold hover:underline"
+                  >
+                    {project.name}
+                  </Link>
                   <p className="text-sm text-muted-foreground">{project.description}</p>
                 </div>
                 <p className="shrink-0 text-xs text-muted-foreground">
-                  Created {formatDate(project.createdAt)}
+                  {archivedView && project.archivedAt
+                    ? `Archived ${formatDate(project.archivedAt)}`
+                    : `Created ${formatDate(project.createdAt)}`}
                 </p>
               </div>
-              <p className="mt-3 text-xs text-muted-foreground">
-                Project Owner:{' '}
-                {project.projectOwner
-                  ? `${project.projectOwner.name} (${project.projectOwner.email})`
-                  : 'Not assigned'}
-              </p>
-            </Link>
+              <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs text-muted-foreground">
+                  Project Owner:{' '}
+                  {project.projectOwner
+                    ? `${project.projectOwner.name} (${project.projectOwner.email})`
+                    : 'Not assigned'}
+                </p>
+                {canCreate ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleArchiveStateChange(project)}
+                  >
+                    {archivedView ? <RotateCcw /> : <Archive />}
+                    {archivedView ? 'Restore' : 'Archive'}
+                  </Button>
+                ) : null}
+              </div>
+            </article>
           ))}
         </section>
       )}

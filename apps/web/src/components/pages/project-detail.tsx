@@ -1,7 +1,19 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
-import { AlertCircle, CalendarDays, FolderKanban, UserRound } from 'lucide-react';
-import { getProjectDetail, type ProjectDetail } from '@/features/projects/project-api';
+import {
+  AlertCircle,
+  Archive,
+  CalendarDays,
+  FolderKanban,
+  RotateCcw,
+  UserRound,
+} from 'lucide-react';
+import { getMembershipResolution } from '@/features/auth/auth-api';
+import {
+  getProjectDetail,
+  restoreProject,
+  type ProjectDetail,
+} from '@/features/projects/project-api';
 import { buildProjectSettingsPath, buildProjectsPath } from '@/features/projects/project-routing';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -23,6 +35,8 @@ function formatDate(value: string): string {
 export function ProjectDetailPage() {
   const { organizationSlug = '', projectSlug = '' } = useParams();
   const [state, setState] = useState<ProjectDetailState>({ status: 'loading' });
+  const [currentRole, setCurrentRole] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const projectsPath = organizationSlug ? buildProjectsPath(organizationSlug) : '/';
 
   useEffect(() => {
@@ -35,10 +49,16 @@ export function ProjectDetailPage() {
       }
 
       setState({ status: 'loading' });
+      setActionError(null);
 
       try {
-        const result = await getProjectDetail({ organizationSlug, projectSlug });
+        const [result, resolution] = await Promise.all([
+          getProjectDetail({ organizationSlug, projectSlug }),
+          getMembershipResolution(),
+        ]);
+        const organization = resolution.organizations.find((org) => org.slug === organizationSlug);
         if (!cancelled) setState(result);
+        if (!cancelled) setCurrentRole(organization?.role ?? null);
       } catch {
         if (!cancelled) setState({ status: 'error' });
       }
@@ -82,9 +102,41 @@ export function ProjectDetailPage() {
   const settingsPath = organizationSlug
     ? buildProjectSettingsPath(organizationSlug, project.slug)
     : projectsPath;
+  const canManage = currentRole === 'owner' || currentRole === 'admin';
+
+  const handleRestore = async () => {
+    if (!organizationSlug || !projectSlug || !canManage) return;
+
+    setActionError(null);
+    try {
+      const restoredProject = await restoreProject({ organizationSlug, projectSlug });
+      setState({ status: 'available', project: restoredProject });
+    } catch (caughtError) {
+      setActionError(
+        caughtError instanceof Error ? caughtError.message : 'Unable to restore Project.',
+      );
+    }
+  };
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6">
+      {project.archivedAt ? (
+        <Alert>
+          <Archive className="size-4" />
+          <AlertTitle>Archived Project</AlertTitle>
+          <AlertDescription>
+            This Project is hidden from active work. Its URL remains available for Organization
+            members.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {actionError ? (
+        <Alert variant="destructive">
+          <AlertCircle className="size-4" />
+          <AlertTitle>Unable to restore</AlertTitle>
+          <AlertDescription>{actionError}</AlertDescription>
+        </Alert>
+      ) : null}
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
@@ -102,6 +154,12 @@ export function ProjectDetailPage() {
           <Button asChild variant="outline">
             <Link to={projectsPath}>All Projects</Link>
           </Button>
+          {project.archivedAt && canManage ? (
+            <Button type="button" variant="outline" onClick={() => void handleRestore()}>
+              <RotateCcw />
+              Restore
+            </Button>
+          ) : null}
           <Button asChild>
             <Link to={settingsPath}>Project settings</Link>
           </Button>

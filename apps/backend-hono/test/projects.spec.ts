@@ -98,6 +98,55 @@ async function createProjectRequest(
   };
 }
 
+async function archiveProjectRequest(
+  organizationSlug: string,
+  projectSlug: string,
+  headers: Headers,
+) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/projects/${projectSlug}/archive`,
+    { headers, method: 'PATCH' },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+async function restoreProjectRequest(
+  organizationSlug: string,
+  projectSlug: string,
+  headers: Headers,
+) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/projects/${projectSlug}/restore`,
+    { headers, method: 'PATCH' },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+async function listProjectsRequest(
+  organizationSlug: string,
+  headers: Headers,
+  status: 'active' | 'archived' = 'active',
+) {
+  const query = status === 'archived' ? '?status=archived' : '';
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/projects${query}`,
+    { headers },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
 beforeEach(() => {
   const originalFetch = globalThis.fetch;
 
@@ -310,5 +359,98 @@ describe('organization projects', () => {
     );
 
     expect(archivedSlugResponse.status).toBe(400);
+  });
+
+  it('lets Organization owners archive and restore Projects from active and archived lists', async () => {
+    const { headers, organization } = await createSignedInOwner('project-archive-owner');
+
+    await createProjectRequest(organization.slug, headers, {
+      description: 'Archive-ready governance work.',
+      name: 'Archive Ready',
+      slug: 'archive-ready',
+    });
+
+    const archiveResponse = await archiveProjectRequest(
+      organization.slug,
+      'archive-ready',
+      headers,
+    );
+
+    expect(archiveResponse.status).toBe(200);
+    expect(archiveResponse.body.project).toMatchObject({ slug: 'archive-ready' });
+    expect((archiveResponse.body.project as { archivedAt?: string }).archivedAt).toBeTruthy();
+
+    await expect(listProjectsRequest(organization.slug, headers)).resolves.toMatchObject({
+      body: { projects: [] },
+      status: 200,
+    });
+    await expect(
+      listProjectsRequest(organization.slug, headers, 'archived'),
+    ).resolves.toMatchObject({
+      body: { projects: [{ slug: 'archive-ready' }] },
+      status: 200,
+    });
+
+    const restoreResponse = await restoreProjectRequest(
+      organization.slug,
+      'archive-ready',
+      headers,
+    );
+
+    expect(restoreResponse.status).toBe(200);
+    expect(restoreResponse.body.project).toMatchObject({
+      archivedAt: null,
+      slug: 'archive-ready',
+    });
+    await expect(listProjectsRequest(organization.slug, headers)).resolves.toMatchObject({
+      body: { projects: [{ slug: 'archive-ready' }] },
+      status: 200,
+    });
+  });
+
+  it('prevents members from archiving and restoring Projects while allowing archived list access', async () => {
+    const { headers: ownerHeaders, organization } = await createSignedInOwner(
+      'project-archive-member-owner',
+    );
+    const member = createCredentials('project-archive-member');
+
+    await signUpUser(member);
+
+    const invitation = await auth.api.createInvitation({
+      body: {
+        email: member.email,
+        organizationId: organization.id,
+        role: 'member',
+      },
+      headers: ownerHeaders,
+    });
+    const memberHeaders = await signInUser(member);
+
+    await auth.api.acceptInvitation({
+      body: { invitationId: invitation.id },
+      headers: memberHeaders,
+    });
+
+    await createProjectRequest(organization.slug, ownerHeaders, {
+      description: 'Member-visible archived work.',
+      name: 'Member Visible',
+      slug: 'member-visible',
+    });
+
+    await expect(
+      archiveProjectRequest(organization.slug, 'member-visible', memberHeaders),
+    ).resolves.toMatchObject({ status: 403 });
+
+    await archiveProjectRequest(organization.slug, 'member-visible', ownerHeaders);
+
+    await expect(
+      listProjectsRequest(organization.slug, memberHeaders, 'archived'),
+    ).resolves.toMatchObject({
+      body: { projects: [{ slug: 'member-visible' }] },
+      status: 200,
+    });
+    await expect(
+      restoreProjectRequest(organization.slug, 'member-visible', memberHeaders),
+    ).resolves.toMatchObject({ status: 403 });
   });
 });

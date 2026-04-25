@@ -227,6 +227,34 @@ describe('Project detail API', () => {
     expect(response.body.project?.archivedAt).toBeNull();
   });
 
+  it('keeps archived Project detail URLs reachable for Organization members', async () => {
+    const owner = await createSignedInOwner('project-detail-archived-owner');
+    const member = await addMemberToOrganization(
+      owner.organization.id,
+      'project-detail-archived-member',
+    );
+    const projectId = await createProject({
+      organizationId: owner.organization.id,
+      projectOwnerMemberId: null,
+      slug: 'archived-project',
+    });
+    const archivedAt = new Date();
+
+    await db.update(projects).set({ archivedAt }).where(eq(projects.id, projectId));
+
+    const response = await getProjectDetail(
+      member.headers,
+      owner.organization.slug,
+      'archived-project',
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.project).toMatchObject({
+      archivedAt: archivedAt.toISOString(),
+      slug: 'archived-project',
+    });
+  });
+
   it('hides missing, inaccessible, and wrong-Organization Projects behind not found', async () => {
     const owner = await createSignedInOwner('project-detail-hidden-owner');
     const outsider = await createSignedInOwner('project-detail-outsider');
