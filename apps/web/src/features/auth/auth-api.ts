@@ -119,6 +119,7 @@ export type ControlPublishRequestListItem = ControlVersionResponse & {
   };
   controlId: string | null;
   draftControlId: string | null;
+  isPublishable: boolean;
   proposedUpdateId: string | null;
   rejectionComment: string | null;
   requestType: 'draft_control' | 'proposed_update';
@@ -397,6 +398,15 @@ export function rejectControlPublishRequest(
 export function withdrawControlPublishRequest(organizationSlug: string, publishRequestId: string) {
   return request<{ publishRequest: ControlPublishRequestListItem }>(
     `/api/organizations/${organizationSlug}/controls/publish-requests/${publishRequestId}/withdraw`,
+    {
+      method: 'POST',
+    },
+  );
+}
+
+export function publishControlPublishRequest(organizationSlug: string, publishRequestId: string) {
+  return request<{ control: ControlListItem }>(
+    `/api/organizations/${organizationSlug}/controls/publish-requests/${publishRequestId}/publish`,
     {
       method: 'POST',
     },

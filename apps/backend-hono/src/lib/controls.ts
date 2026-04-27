@@ -69,6 +69,7 @@ export type ControlPublishRequestListItem = ControlVersionResponse & {
   };
   controlId: string | null;
   draftControlId: string | null;
+  isPublishable: boolean;
   proposedUpdateId: string | null;
   rejectionComment: string | null;
   requestType: 'draft_control' | 'proposed_update';
@@ -263,6 +264,7 @@ export async function listControlProposedUpdates(
 export async function listControlPublishRequests(
   membership: OrganizationMembership,
 ): Promise<ControlPublishRequestListItem[]> {
+  const policy = await getApprovalPolicy(membership.organizationId);
   const rows = await db
     .select({
       acceptedEvidenceTypes: controlPublishRequests.acceptedEvidenceTypes,
@@ -326,6 +328,8 @@ export async function listControlPublishRequests(
       },
       controlId,
       draftControlId,
+      isPublishable:
+        status === 'submitted' && (!policy.enabled || approvalCount >= policy.requiredApprovals),
       proposedUpdateId,
       rejectionComment,
       requestType: requestType as 'draft_control' | 'proposed_update',
@@ -334,6 +338,47 @@ export async function listControlPublishRequests(
       submittedAt: submittedAt.toISOString(),
     }),
   );
+}
+
+export async function publishControlPublishRequest(
+  membership: OrganizationMembership,
+  publishRequestId: string,
+): Promise<ControlListItem | null> {
+  const request = await db
+    .select()
+    .from(controlPublishRequests)
+    .where(
+      and(
+        eq(controlPublishRequests.id, publishRequestId),
+        eq(controlPublishRequests.organizationId, membership.organizationId),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (!request) {
+    return null;
+  }
+
+  if (!publishControlRoles.has(membership.role)) {
+    throw new ControlPublishInputError(
+      'Only Organization owners and admins can publish Control Publish Requests.',
+    );
+  }
+
+  if (request.status !== 'submitted') {
+    throw new ControlPublishInputError('Only submitted Control Publish Requests can be published.');
+  }
+
+  if (request.requestType === 'draft_control' && request.draftControlId) {
+    return publishDraftControl(membership, request.draftControlId, toPublishInput(request));
+  }
+
+  if (request.requestType === 'proposed_update' && request.controlId && request.proposedUpdateId) {
+    return publishControlProposedUpdate(membership, request.controlId, request.proposedUpdateId);
+  }
+
+  return null;
 }
 
 export async function listDraftControls(
@@ -1401,6 +1446,21 @@ async function updateControlPublishRequestApprovalCount(requestId: string) {
     .update(controlPublishRequests)
     .set({ approvalCount: approvals.length })
     .where(eq(controlPublishRequests.id, requestId));
+}
+
+function toPublishInput(
+  request: typeof controlPublishRequests.$inferSelect,
+): PublishDraftControlInput {
+  return {
+    acceptedEvidenceTypes: JSON.parse(request.acceptedEvidenceTypes) as string[],
+    applicabilityConditions: request.applicabilityConditions,
+    businessMeaning: request.businessMeaning,
+    externalStandardsMappings: JSON.parse(
+      request.externalStandardsMappings,
+    ) as ExternalStandardsMapping[],
+    releaseImpact: request.releaseImpact as ReleaseImpact,
+    verificationMethod: request.verificationMethod,
+  };
 }
 
 function toControlVersionResponse(row: {
