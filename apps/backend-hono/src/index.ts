@@ -33,6 +33,7 @@ import {
   normalizeDraftControlListFilters,
   normalizeDraftControlCreateBody,
   normalizeDraftControlPublishBody,
+  publishControlPublishRequest,
   publishControlProposedUpdate,
   publishDraftControl,
   rejectControlPublishRequest,
@@ -352,6 +353,11 @@ app.post(
 app.post(
   '/api/organizations/:organizationSlug/controls/publish-requests/:publishRequestId/withdraw',
   async (c) => reviewControlPublishRequest(c, 'withdraw'),
+);
+
+app.post(
+  '/api/organizations/:organizationSlug/controls/publish-requests/:publishRequestId/publish',
+  async (c) => publishReviewedControlPublishRequest(c),
 );
 
 app.post('/api/organizations/:organizationSlug/controls/drafts', async (c) => {
@@ -886,6 +892,48 @@ async function reviewControlPublishRequest(c: Context, action: 'approve' | 'reje
     return c.json({ publishRequest });
   } catch (caughtError) {
     if (caughtError instanceof ControlPublishRequestInputError) {
+      return c.json({ error: caughtError.message }, 400);
+    }
+
+    throw caughtError;
+  }
+}
+
+async function publishReviewedControlPublishRequest(c: Context) {
+  const organizationSlug = c.req.param('organizationSlug');
+  const publishRequestId = c.req.param('publishRequestId');
+
+  if (!organizationSlug || !publishRequestId) {
+    return c.json({ error: 'Control Publish Request unavailable' }, 404);
+  }
+
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const membership = await getOrganizationMembership(organizationSlug, session.user.id);
+
+  if (!membership) {
+    return c.json({ error: 'Control Publish Request unavailable' }, 404);
+  }
+
+  try {
+    const control = await publishControlPublishRequest(membership, publishRequestId);
+
+    if (!control) {
+      return c.json({ error: 'Control Publish Request unavailable' }, 404);
+    }
+
+    return c.json({ control }, 201);
+  } catch (caughtError) {
+    if (
+      caughtError instanceof ControlPublishInputError ||
+      caughtError instanceof ControlProposedUpdateInputError
+    ) {
       return c.json({ error: caughtError.message }, 400);
     }
 

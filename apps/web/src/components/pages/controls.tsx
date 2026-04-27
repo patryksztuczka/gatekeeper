@@ -14,6 +14,7 @@ import {
   listControlPublishRequests,
   listControls,
   listDraftControls,
+  publishControlPublishRequest,
   publishControlProposedUpdate,
   publishDraftControl,
   rejectControlPublishRequest,
@@ -471,6 +472,41 @@ export function ControlsPage() {
           ? caughtError.message
           : 'Unable to withdraw Control Publish Request.';
       setError(humanizeAuthError(null, rawMessage, 'Unable to withdraw Control Publish Request.'));
+    } finally {
+      setReviewingRequestId(null);
+    }
+  };
+
+  const handlePublishControlPublishRequest = async (request: ControlPublishRequestListItem) => {
+    if (!organizationSlug) return;
+
+    setReviewingRequestId(request.id);
+    setError(null);
+    setStatus(null);
+    try {
+      const response = await publishControlPublishRequest(organizationSlug, request.id);
+
+      setControls((currentControls) => upsertControl(currentControls, response.control));
+      setDraftControls((currentDrafts) =>
+        request.draftControlId
+          ? currentDrafts.filter((draft) => draft.id !== request.draftControlId)
+          : currentDrafts,
+      );
+      setProposedUpdates((currentUpdates) =>
+        request.proposedUpdateId
+          ? currentUpdates.filter((update) => update.id !== request.proposedUpdateId)
+          : currentUpdates,
+      );
+      setPublishRequests((currentRequests) =>
+        currentRequests.filter((currentRequest) => currentRequest.id !== request.id),
+      );
+      setStatus('Control Publish Request published.');
+    } catch (caughtError) {
+      const rawMessage =
+        caughtError instanceof Error
+          ? caughtError.message
+          : 'Unable to publish Control Publish Request.';
+      setError(humanizeAuthError(null, rawMessage, 'Unable to publish Control Publish Request.'));
     } finally {
       setReviewingRequestId(null);
     }
@@ -1119,6 +1155,16 @@ export function ControlsPage() {
                         </Button>
                       </>
                     ) : null}
+                    {canPublish ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={reviewingRequestId === request.id || !request.isPublishable}
+                        onClick={() => void handlePublishControlPublishRequest(request)}
+                      >
+                        Publish
+                      </Button>
+                    ) : null}
                   </div>
                 ) : null}
                 {rejectingRequestId === request.id ? (
@@ -1170,4 +1216,10 @@ function upsertPublishRequest(
   return requests.some((request) => request.id === nextRequest.id)
     ? requests.map((request) => (request.id === nextRequest.id ? nextRequest : request))
     : [...requests, nextRequest];
+}
+
+function upsertControl(controls: ControlListItem[], nextControl: ControlListItem) {
+  return controls.some((control) => control.id === nextControl.id)
+    ? controls.map((control) => (control.id === nextControl.id ? nextControl : control))
+    : [nextControl, ...controls];
 }
