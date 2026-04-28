@@ -1,0 +1,31 @@
+apps/backend-hono/src/lib/project-checklists.ts
+  f893595f2f12b6bb 1,11,51,53,58-69,82-88,249-353,399,431-456,473-485,487,539-540
+apps/backend-hono/src/db/schema.ts
+  f893595f2f12b6bb 533,583-608
+apps/backend-hono/drizzle/migrations/0013_project_checklist_verification_history.sql
+  f893595f2f12b6bb 1-17
+apps/backend-hono/src/index.ts
+  f893595f2f12b6bb 90,92,1403-1444
+apps/backend-hono/test/project-checklists.spec.ts
+  f893595f2f12b6bb 15,336-359,846-1165
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "21d722613b0a3466985ad5b14d8ec4d64559b3ae",
+  "prompts": {
+    "f893595f2f12b6bb": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_22a22e12affeyeEZuWK1b4k5Ma",
+        "model": "openai/gpt-5.5"
+      },
+      "human_author": "Patryk Sztuczka",
+      "messages": [],
+      "total_additions": 790,
+      "total_deletions": 180,
+      "accepted_lines": 614,
+      "overriden_lines": 0
+    }
+  }
+}
