@@ -41,6 +41,7 @@ export type ProjectChecklistItemResponse = {
   };
   controlVersion: {
     id: string;
+    isLatest: boolean;
     versionNumber: number;
   };
   displayOrder: number;
@@ -389,6 +390,7 @@ export async function getProjectChecklistForMembership(input: {
     .select({
       controlCode: controlVersions.controlCode,
       controlId: projectChecklistItems.controlId,
+      currentVersionId: controls.currentVersionId,
       controlVersionId: projectChecklistItems.controlVersionId,
       displayOrder: projectChecklistItems.displayOrder,
       id: projectChecklistItems.id,
@@ -416,6 +418,7 @@ export async function getProjectChecklistForMembership(input: {
       eq(checklistTemplateItems.sectionId, checklistTemplateSections.id),
     )
     .innerJoin(controlVersions, eq(projectChecklistItems.controlVersionId, controlVersions.id))
+    .innerJoin(controls, eq(projectChecklistItems.controlId, controls.id))
     .innerJoin(
       projectChecklistVerificationRecords,
       eq(projectChecklistItems.verificationRecordId, projectChecklistVerificationRecords.id),
@@ -463,6 +466,7 @@ export async function getProjectChecklistForMembership(input: {
     },
     controlVersion: {
       id: item.controlVersionId,
+      isLatest: item.controlVersionId === item.currentVersionId,
       versionNumber: item.versionNumber,
     },
     displayOrder: item.displayOrder,
