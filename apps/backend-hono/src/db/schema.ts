@@ -472,6 +472,7 @@ export const checklistTemplateItems = sqliteTable(
       onDelete: 'set null',
     }),
     displayOrder: integer('display_order').default(0).notNull(),
+    removedAt: integer('removed_at', { mode: 'timestamp_ms' }),
     createdAt: integer('created_at', { mode: 'timestamp_ms' })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),
@@ -562,6 +563,7 @@ export const projectChecklistItems = sqliteTable(
       .notNull()
       .references(() => projectChecklistVerificationRecords.id, { onDelete: 'restrict' }),
     displayOrder: integer('display_order').default(0).notNull(),
+    removedFromTemplateAt: integer('removed_from_template_at', { mode: 'timestamp_ms' }),
     createdAt: integer('created_at', { mode: 'timestamp_ms' })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),

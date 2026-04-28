@@ -46,6 +46,7 @@ export type ProjectChecklistItemResponse = {
   };
   displayOrder: number;
   id: string;
+  removedFromTemplateAt: string | null;
   sectionId: string | null;
   templateItemId: string;
   verificationRecord: {
@@ -170,6 +171,7 @@ export async function applyChecklistTemplateToProjectComponent(input: {
     .where(
       and(
         eq(checklistTemplateItems.templateId, template.id),
+        isNull(checklistTemplateItems.removedAt),
         eq(controls.organizationId, input.membership.organizationId),
         isNull(controls.archivedAt),
       ),
@@ -183,7 +185,12 @@ export async function applyChecklistTemplateToProjectComponent(input: {
   const allTemplateItemIds = await db
     .select({ id: checklistTemplateItems.id })
     .from(checklistTemplateItems)
-    .where(eq(checklistTemplateItems.templateId, template.id));
+    .where(
+      and(
+        eq(checklistTemplateItems.templateId, template.id),
+        isNull(checklistTemplateItems.removedAt),
+      ),
+    );
 
   if (templateItems.length !== allTemplateItemIds.length) {
     throw new ProjectChecklistInputError(
@@ -229,6 +236,7 @@ export async function applyChecklistTemplateToProjectComponent(input: {
       displayOrder,
       id: crypto.randomUUID(),
       projectChecklistId: checklistId,
+      removedFromTemplateAt: null,
       templateItemId: item.templateItemId,
       verificationRecordId,
     });
@@ -421,6 +429,7 @@ export async function setProjectChecklistArchivedForMembership(input: {
 export async function getProjectChecklistForMembership(input: {
   checklistId: string;
   componentId?: string;
+  includeRemovedFromTemplate?: boolean;
   membership: OrganizationMembership;
   projectSlug?: string;
 }): Promise<ProjectChecklistResponse | null> {
@@ -461,6 +470,7 @@ export async function getProjectChecklistForMembership(input: {
       displayOrder: projectChecklistItems.displayOrder,
       id: projectChecklistItems.id,
       releaseImpact: controlVersions.releaseImpact,
+      removedFromTemplateAt: projectChecklistItems.removedFromTemplateAt,
       sectionDisplayOrder: checklistTemplateSections.displayOrder,
       sectionId: checklistTemplateItems.sectionId,
       sectionName: checklistTemplateSections.name,
@@ -489,7 +499,14 @@ export async function getProjectChecklistForMembership(input: {
       projectChecklistVerificationRecords,
       eq(projectChecklistItems.verificationRecordId, projectChecklistVerificationRecords.id),
     )
-    .where(eq(projectChecklistItems.projectChecklistId, checklist.id))
+    .where(
+      and(
+        eq(projectChecklistItems.projectChecklistId, checklist.id),
+        input.includeRemovedFromTemplate
+          ? undefined
+          : isNull(projectChecklistItems.removedFromTemplateAt),
+      ),
+    )
     .orderBy(
       asc(checklistTemplateSections.displayOrder),
       asc(checklistTemplateItems.sectionId),
@@ -537,6 +554,7 @@ export async function getProjectChecklistForMembership(input: {
     },
     displayOrder: item.displayOrder,
     id: item.id,
+    removedFromTemplateAt: item.removedFromTemplateAt?.toISOString() ?? null,
     sectionId: item.sectionId,
     templateItemId: item.templateItemId,
     verificationRecord: {
@@ -558,7 +576,8 @@ export async function getProjectChecklistForMembership(input: {
       status: item.status,
     },
   }));
-  const completedItems = items.filter((item) =>
+  const completionItems = items.filter((item) => !item.removedFromTemplateAt);
+  const completedItems = completionItems.filter((item) =>
     isCompleteVerificationStatus(item.verificationRecord.status),
   ).length;
   const sections = itemRows.reduce<ProjectChecklistSectionResponse[]>((result, row) => {
@@ -592,7 +611,7 @@ export async function getProjectChecklistForMembership(input: {
     archivedAt: checklist.archivedAt?.toISOString() ?? null,
     completion: {
       completedItems,
-      totalItems: items.length,
+      totalItems: completionItems.length,
     },
     createdAt: checklist.createdAt.toISOString(),
     items,

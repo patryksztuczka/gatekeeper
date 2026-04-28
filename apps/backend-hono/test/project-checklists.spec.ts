@@ -319,12 +319,55 @@ async function openChecklist(input: {
   checklistId: string;
   componentId: string;
   headers: Headers;
+  includeRemovedFromTemplate?: boolean;
   organizationSlug: string;
   projectSlug: string;
 }) {
+  const query = input.includeRemovedFromTemplate ? '?includeRemovedFromTemplate=true' : '';
   const response = await app.request(
-    `http://example.com/api/organizations/${input.organizationSlug}/projects/${input.projectSlug}/components/${input.componentId}/checklists/${input.checklistId}`,
+    `http://example.com/api/organizations/${input.organizationSlug}/projects/${input.projectSlug}/components/${input.componentId}/checklists/${input.checklistId}${query}`,
     { headers: input.headers },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+async function addChecklistTemplateItem(input: {
+  controlId: string;
+  headers: Headers;
+  organizationSlug: string;
+  templateId: string;
+}) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${input.organizationSlug}/checklist-templates/${input.templateId}/items`,
+    {
+      body: JSON.stringify({ controlId: input.controlId }),
+      headers: input.headers,
+      method: 'POST',
+    },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+async function removeChecklistTemplateItem(input: {
+  headers: Headers;
+  itemId: string;
+  organizationSlug: string;
+  templateId: string;
+}) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${input.organizationSlug}/checklist-templates/${input.templateId}/items/${input.itemId}`,
+    {
+      headers: input.headers,
+      method: 'DELETE',
+    },
   );
 
   return {
@@ -683,6 +726,196 @@ describe('Project Checklists API', () => {
         .map(({ id }) => id)
         .sort(),
     );
+  });
+
+  it('propagates active Checklist Template item add, remove, and re-add without duplicating Project Checklist Items', async () => {
+    const owner = await createSignedInOwner('project-checklist-template-propagation');
+    const projectId = await createProject({
+      organizationId: owner.organization.id,
+      projectOwnerMemberId: null,
+      slug: 'vendor-risk',
+    });
+    const firstComponentId = await createComponent(projectId, 'API');
+    const secondComponentId = await createComponent(projectId, 'Worker');
+    const existingControl = await createActiveControl({
+      controlCode: 'AUTH-351',
+      organizationId: owner.organization.id,
+      title: 'Require MFA',
+    });
+    const propagatedControl = await createActiveControl({
+      controlCode: 'LOG-351',
+      organizationId: owner.organization.id,
+      title: 'Require logging',
+    });
+    const templateId = await createTemplate({
+      controlIds: [existingControl.controlId],
+      organizationId: owner.organization.id,
+    });
+    const firstApplyResponse = await applyTemplate({
+      body: { templateId },
+      componentId: firstComponentId,
+      headers: owner.headers,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'vendor-risk',
+    });
+    const secondApplyResponse = await applyTemplate({
+      body: { templateId },
+      componentId: secondComponentId,
+      headers: owner.headers,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'vendor-risk',
+    });
+    const firstChecklist = firstApplyResponse.body.projectChecklist as { id: string };
+    const secondChecklist = secondApplyResponse.body.projectChecklist as { id: string };
+
+    await expect(
+      addChecklistTemplateItem({
+        controlId: propagatedControl.controlId,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        templateId,
+      }),
+    ).resolves.toMatchObject({ status: 201 });
+
+    const firstAfterAdd = await openChecklist({
+      checklistId: firstChecklist.id,
+      componentId: firstComponentId,
+      headers: owner.headers,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'vendor-risk',
+    });
+    const propagatedTemplateItem = await db
+      .select({ id: checklistTemplateItems.id })
+      .from(checklistTemplateItems)
+      .where(
+        and(
+          eq(checklistTemplateItems.templateId, templateId),
+          eq(checklistTemplateItems.controlId, propagatedControl.controlId),
+        ),
+      )
+      .limit(1)
+      .then((rows) => rows[0]!);
+    const firstPropagatedItem = (
+      firstAfterAdd.body.projectChecklist as {
+        items: Array<{
+          control: { id: string };
+          id: string;
+          verificationRecord: { status: string };
+        }>;
+      }
+    ).items.find(({ control }) => control.id === propagatedControl.controlId)!;
+
+    expect(firstAfterAdd.body.projectChecklist).toMatchObject({
+      completion: { completedItems: 0, totalItems: 2 },
+      items: [
+        { control: { controlCode: 'AUTH-351' } },
+        { control: { controlCode: 'LOG-351' }, verificationRecord: { status: 'unchecked' } },
+      ],
+    });
+    await expect(
+      openChecklist({
+        checklistId: secondChecklist.id,
+        componentId: secondComponentId,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({
+      body: { projectChecklist: { completion: { completedItems: 0, totalItems: 2 } } },
+      status: 200,
+    });
+
+    await expect(
+      updateChecklistItemVerification({
+        body: { status: 'checked' },
+        checklistId: firstChecklist.id,
+        componentId: firstComponentId,
+        headers: owner.headers,
+        itemId: firstPropagatedItem.id,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      removeChecklistTemplateItem({
+        headers: owner.headers,
+        itemId: propagatedTemplateItem.id,
+        organizationSlug: owner.organization.slug,
+        templateId,
+      }),
+    ).resolves.toMatchObject({ status: 200 });
+
+    const firstAfterRemove = await openChecklist({
+      checklistId: firstChecklist.id,
+      componentId: firstComponentId,
+      headers: owner.headers,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'vendor-risk',
+    });
+    const firstWithRemoved = await openChecklist({
+      checklistId: firstChecklist.id,
+      componentId: firstComponentId,
+      headers: owner.headers,
+      includeRemovedFromTemplate: true,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'vendor-risk',
+    });
+    const removedItem = (
+      firstWithRemoved.body.projectChecklist as {
+        items: Array<{
+          control: { id: string };
+          id: string;
+          removedFromTemplateAt: string | null;
+          verificationRecord: { history: unknown[]; status: string };
+        }>;
+      }
+    ).items.find(({ control }) => control.id === propagatedControl.controlId)!;
+
+    expect(firstAfterRemove.body.projectChecklist).toMatchObject({
+      completion: { completedItems: 0, totalItems: 1 },
+      items: [{ control: { controlCode: 'AUTH-351' } }],
+    });
+    expect(removedItem).toMatchObject({
+      id: firstPropagatedItem.id,
+      verificationRecord: { status: 'checked' },
+    });
+    expect(removedItem.removedFromTemplateAt).toEqual(expect.any(String));
+    expect(removedItem.verificationRecord.history).toHaveLength(1);
+
+    await expect(
+      addChecklistTemplateItem({
+        controlId: propagatedControl.controlId,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        templateId,
+      }),
+    ).resolves.toMatchObject({ status: 201 });
+
+    const firstAfterReadd = await openChecklist({
+      checklistId: firstChecklist.id,
+      componentId: firstComponentId,
+      headers: owner.headers,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'vendor-risk',
+    });
+    const projectChecklistItemsForTemplate = await db
+      .select({ id: projectChecklistItems.id })
+      .from(projectChecklistItems)
+      .where(eq(projectChecklistItems.templateItemId, propagatedTemplateItem.id));
+
+    expect(firstAfterReadd.body.projectChecklist).toMatchObject({
+      completion: { completedItems: 1, totalItems: 2 },
+      items: [
+        { control: { controlCode: 'AUTH-351' } },
+        {
+          control: { controlCode: 'LOG-351' },
+          id: firstPropagatedItem.id,
+          removedFromTemplateAt: null,
+          verificationRecord: { status: 'checked' },
+        },
+      ],
+    });
+    expect(projectChecklistItemsForTemplate).toHaveLength(2);
   });
 
   it('lets Organization members open Project Checklists with Control Versions, Release Impact, grouping, and completion', async () => {

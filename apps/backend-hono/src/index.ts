@@ -1389,6 +1389,7 @@ app.get(
     const projectChecklist = await getProjectChecklistForMembership({
       checklistId: c.req.param('checklistId'),
       componentId: c.req.param('componentId'),
+      includeRemovedFromTemplate: c.req.query('includeRemovedFromTemplate') === 'true',
       membership,
       projectSlug: c.req.param('projectSlug'),
     });

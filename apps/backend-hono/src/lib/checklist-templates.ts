@@ -7,6 +7,11 @@ import {
   controls,
   controlVersions,
   members,
+  projectChecklistItems,
+  projectChecklists,
+  projectChecklistVerificationRecords,
+  projectComponents,
+  projects,
   users,
 } from '../db/schema';
 import type { OrganizationMembership } from './projects';
@@ -275,7 +280,7 @@ export async function addChecklistTemplateItem(
   }
 
   const template = await db
-    .select({ id: checklistTemplates.id })
+    .select({ id: checklistTemplates.id, status: checklistTemplates.status })
     .from(checklistTemplates)
     .where(
       and(
@@ -293,7 +298,7 @@ export async function addChecklistTemplateItem(
   const sectionId = await validateChecklistTemplateItemSection(template.id, input.sectionId);
 
   const control = await db
-    .select({ id: controls.id })
+    .select({ currentVersionId: controls.currentVersionId, id: controls.id })
     .from(controls)
     .where(
       and(
@@ -311,8 +316,14 @@ export async function addChecklistTemplateItem(
     );
   }
 
+  if (!control.currentVersionId) {
+    throw new ChecklistTemplateInputError(
+      'Only active, non-archived Controls can be added to Checklist Templates.',
+    );
+  }
+
   const existingItem = await db
-    .select({ id: checklistTemplateItems.id })
+    .select({ id: checklistTemplateItems.id, removedAt: checklistTemplateItems.removedAt })
     .from(checklistTemplateItems)
     .where(
       and(
@@ -323,20 +334,42 @@ export async function addChecklistTemplateItem(
     .limit(1)
     .then((rows) => rows[0] ?? null);
 
-  if (existingItem) {
+  if (existingItem && !existingItem.removedAt) {
     throw new ChecklistTemplateInputError(
       'Control is already included in this Checklist Template.',
     );
   }
 
-  await db.insert(checklistTemplateItems).values({
-    controlId: control.id,
-    createdAt: new Date(),
-    displayOrder: await nextChecklistTemplateItemDisplayOrder(template.id, sectionId),
-    id: crypto.randomUUID(),
-    sectionId,
-    templateId: template.id,
-  });
+  const now = new Date();
+  const displayOrder = await nextChecklistTemplateItemDisplayOrder(template.id, sectionId);
+  const itemId = existingItem?.id ?? crypto.randomUUID();
+
+  if (existingItem) {
+    await db
+      .update(checklistTemplateItems)
+      .set({ displayOrder, removedAt: null, sectionId })
+      .where(eq(checklistTemplateItems.id, existingItem.id));
+  } else {
+    await db.insert(checklistTemplateItems).values({
+      controlId: control.id,
+      createdAt: now,
+      displayOrder,
+      id: itemId,
+      removedAt: null,
+      sectionId,
+      templateId: template.id,
+    });
+  }
+
+  if (template.status === 'active') {
+    await propagateChecklistTemplateItemAdded({
+      controlId: control.id,
+      controlVersionId: control.currentVersionId,
+      displayOrder,
+      templateId: template.id,
+      templateItemId: itemId,
+    });
+  }
 
   return (await listChecklistTemplates(membership)).find(({ id }) => id === template.id)!;
 }
@@ -533,7 +566,7 @@ export async function removeChecklistTemplateItem(
   }
 
   const item = await db
-    .select({ id: checklistTemplateItems.id })
+    .select({ id: checklistTemplateItems.id, templateStatus: checklistTemplates.status })
     .from(checklistTemplateItems)
     .innerJoin(checklistTemplates, eq(checklistTemplateItems.templateId, checklistTemplates.id))
     .where(
@@ -541,6 +574,7 @@ export async function removeChecklistTemplateItem(
         eq(checklistTemplates.id, templateId),
         eq(checklistTemplates.organizationId, membership.organizationId),
         eq(checklistTemplateItems.id, itemId),
+        isNull(checklistTemplateItems.removedAt),
       ),
     )
     .limit(1)
@@ -550,7 +584,20 @@ export async function removeChecklistTemplateItem(
     return null;
   }
 
-  await db.delete(checklistTemplateItems).where(eq(checklistTemplateItems.id, item.id));
+  const now = new Date();
+
+  await db
+    .update(checklistTemplateItems)
+    .set({ removedAt: now })
+    .where(eq(checklistTemplateItems.id, item.id));
+
+  if (item.templateStatus === 'active') {
+    await propagateChecklistTemplateItemRemoved({
+      removedAt: now,
+      templateId,
+      templateItemId: item.id,
+    });
+  }
 
   return (await listChecklistTemplates(membership)).find(({ id }) => id === templateId)!;
 }
@@ -723,6 +770,7 @@ async function listChecklistTemplateItems(
       and(
         eq(checklistTemplates.organizationId, organizationId),
         inArray(checklistTemplateItems.templateId, templateIds),
+        isNull(checklistTemplateItems.removedAt),
       ),
     )
     .orderBy(
@@ -855,7 +903,12 @@ async function listItemIds(templateId: string): Promise<string[]> {
   return db
     .select({ id: checklistTemplateItems.id })
     .from(checklistTemplateItems)
-    .where(eq(checklistTemplateItems.templateId, templateId))
+    .where(
+      and(
+        eq(checklistTemplateItems.templateId, templateId),
+        isNull(checklistTemplateItems.removedAt),
+      ),
+    )
     .then((rows) => rows.map(({ id }) => id));
 }
 
@@ -875,13 +928,110 @@ async function nextChecklistTemplateItemDisplayOrder(
         ? and(
             eq(checklistTemplateItems.templateId, templateId),
             eq(checklistTemplateItems.sectionId, sectionId),
+            isNull(checklistTemplateItems.removedAt),
           )
         : and(
             eq(checklistTemplateItems.templateId, templateId),
             isNull(checklistTemplateItems.sectionId),
+            isNull(checklistTemplateItems.removedAt),
           ),
     )
     .then((rows) => rows.length);
+}
+
+async function propagateChecklistTemplateItemAdded(input: {
+  controlId: string;
+  controlVersionId: string;
+  displayOrder: number;
+  templateId: string;
+  templateItemId: string;
+}) {
+  const checklists = await listActiveProjectChecklistsForTemplate(input.templateId);
+
+  for (const checklist of checklists) {
+    const existingItem = await db
+      .select({ id: projectChecklistItems.id })
+      .from(projectChecklistItems)
+      .where(
+        and(
+          eq(projectChecklistItems.projectChecklistId, checklist.id),
+          eq(projectChecklistItems.templateItemId, input.templateItemId),
+        ),
+      )
+      .limit(1)
+      .then((rows) => rows[0] ?? null);
+
+    if (existingItem) {
+      await db
+        .update(projectChecklistItems)
+        .set({ displayOrder: input.displayOrder, removedFromTemplateAt: null })
+        .where(eq(projectChecklistItems.id, existingItem.id));
+      continue;
+    }
+
+    const now = new Date();
+    const verificationRecordId = crypto.randomUUID();
+
+    await db.insert(projectChecklistVerificationRecords).values({
+      controlVersionId: input.controlVersionId,
+      createdAt: now,
+      id: verificationRecordId,
+      status: 'unchecked',
+      updatedAt: now,
+    });
+    await db.insert(projectChecklistItems).values({
+      controlId: input.controlId,
+      controlVersionId: input.controlVersionId,
+      createdAt: now,
+      displayOrder: input.displayOrder,
+      id: crypto.randomUUID(),
+      projectChecklistId: checklist.id,
+      removedFromTemplateAt: null,
+      templateItemId: input.templateItemId,
+      verificationRecordId,
+    });
+  }
+}
+
+async function propagateChecklistTemplateItemRemoved(input: {
+  removedAt: Date;
+  templateId: string;
+  templateItemId: string;
+}) {
+  const checklists = await listActiveProjectChecklistsForTemplate(input.templateId);
+
+  if (checklists.length === 0) {
+    return;
+  }
+
+  await db
+    .update(projectChecklistItems)
+    .set({ removedFromTemplateAt: input.removedAt })
+    .where(
+      and(
+        eq(projectChecklistItems.templateItemId, input.templateItemId),
+        inArray(
+          projectChecklistItems.projectChecklistId,
+          checklists.map(({ id }) => id),
+        ),
+      ),
+    );
+}
+
+async function listActiveProjectChecklistsForTemplate(templateId: string) {
+  return db
+    .select({ id: projectChecklists.id })
+    .from(projectChecklists)
+    .innerJoin(projectComponents, eq(projectChecklists.componentId, projectComponents.id))
+    .innerJoin(projects, eq(projectComponents.projectId, projects.id))
+    .where(
+      and(
+        eq(projectChecklists.templateId, templateId),
+        isNull(projectChecklists.archivedAt),
+        isNull(projectComponents.archivedAt),
+        isNull(projects.archivedAt),
+      ),
+    );
 }
 
 function firstQueryValue(value: string | string[] | undefined): string {
