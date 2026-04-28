@@ -2,6 +2,7 @@ import { and, asc, eq, isNull } from 'drizzle-orm';
 import { db } from '../db/client';
 import {
   checklistTemplateItems,
+  checklistTemplateSections,
   checklistTemplates,
   controls,
   controlVersions,
@@ -18,9 +19,15 @@ export type ProjectChecklistResponse = {
   componentId: string;
   createdAt: string;
   displayName: string;
+  completion: {
+    completedItems: number;
+    totalItems: number;
+  };
   id: string;
   items: ProjectChecklistItemResponse[];
+  sections: ProjectChecklistSectionResponse[];
   templateId: string;
+  unsectionedItems: ProjectChecklistItemResponse[];
   updatedAt: string;
 };
 
@@ -28,6 +35,7 @@ export type ProjectChecklistItemResponse = {
   control: {
     controlCode: string;
     id: string;
+    releaseImpact: string;
     title: string;
   };
   controlVersion: {
@@ -36,11 +44,19 @@ export type ProjectChecklistItemResponse = {
   };
   displayOrder: number;
   id: string;
+  sectionId: string | null;
   templateItemId: string;
   verificationRecord: {
     id: string;
     status: string;
   };
+};
+
+export type ProjectChecklistSectionResponse = {
+  displayOrder: number;
+  id: string;
+  items: ProjectChecklistItemResponse[];
+  name: string;
 };
 
 type ApplyChecklistTemplateInput = {
@@ -195,7 +211,7 @@ export async function applyChecklistTemplateToProjectComponent(input: {
     });
   }
 
-  return getProjectChecklistForMembership(input.membership, checklistId);
+  return getProjectChecklistForMembership({ checklistId, membership: input.membership });
 }
 
 export function normalizeApplyChecklistTemplateBody(body: unknown): ApplyChecklistTemplateInput {
@@ -208,10 +224,12 @@ export function normalizeApplyChecklistTemplateBody(body: unknown): ApplyCheckli
   };
 }
 
-async function getProjectChecklistForMembership(
-  membership: OrganizationMembership,
-  checklistId: string,
-): Promise<ProjectChecklistResponse | null> {
+export async function getProjectChecklistForMembership(input: {
+  checklistId: string;
+  componentId?: string;
+  membership: OrganizationMembership;
+  projectSlug?: string;
+}): Promise<ProjectChecklistResponse | null> {
   const checklist = await db
     .select({
       archivedAt: projectChecklists.archivedAt,
@@ -227,8 +245,10 @@ async function getProjectChecklistForMembership(
     .innerJoin(projects, eq(projectComponents.projectId, projects.id))
     .where(
       and(
-        eq(projectChecklists.id, checklistId),
-        eq(projects.organizationId, membership.organizationId),
+        eq(projectChecklists.id, input.checklistId),
+        eq(projects.organizationId, input.membership.organizationId),
+        input.componentId ? eq(projectChecklists.componentId, input.componentId) : undefined,
+        input.projectSlug ? eq(projects.slug, input.projectSlug) : undefined,
       ),
     )
     .limit(1)
@@ -245,6 +265,10 @@ async function getProjectChecklistForMembership(
       controlVersionId: projectChecklistItems.controlVersionId,
       displayOrder: projectChecklistItems.displayOrder,
       id: projectChecklistItems.id,
+      releaseImpact: controlVersions.releaseImpact,
+      sectionDisplayOrder: checklistTemplateSections.displayOrder,
+      sectionId: checklistTemplateItems.sectionId,
+      sectionName: checklistTemplateSections.name,
       status: projectChecklistVerificationRecords.status,
       templateItemId: projectChecklistItems.templateItemId,
       title: controlVersions.title,
@@ -252,38 +276,96 @@ async function getProjectChecklistForMembership(
       versionNumber: controlVersions.versionNumber,
     })
     .from(projectChecklistItems)
+    .innerJoin(
+      checklistTemplateItems,
+      and(
+        eq(projectChecklistItems.templateItemId, checklistTemplateItems.id),
+        eq(checklistTemplateItems.templateId, checklist.templateId),
+      ),
+    )
+    .leftJoin(
+      checklistTemplateSections,
+      eq(checklistTemplateItems.sectionId, checklistTemplateSections.id),
+    )
     .innerJoin(controlVersions, eq(projectChecklistItems.controlVersionId, controlVersions.id))
     .innerJoin(
       projectChecklistVerificationRecords,
       eq(projectChecklistItems.verificationRecordId, projectChecklistVerificationRecords.id),
     )
     .where(eq(projectChecklistItems.projectChecklistId, checklist.id))
-    .orderBy(asc(projectChecklistItems.displayOrder), asc(projectChecklistItems.createdAt));
+    .orderBy(
+      asc(checklistTemplateSections.displayOrder),
+      asc(checklistTemplateItems.sectionId),
+      asc(projectChecklistItems.displayOrder),
+      asc(projectChecklistItems.createdAt),
+    );
+
+  const items = itemRows.map((item) => ({
+    control: {
+      controlCode: item.controlCode,
+      id: item.controlId,
+      releaseImpact: item.releaseImpact,
+      title: item.title,
+    },
+    controlVersion: {
+      id: item.controlVersionId,
+      versionNumber: item.versionNumber,
+    },
+    displayOrder: item.displayOrder,
+    id: item.id,
+    sectionId: item.sectionId,
+    templateItemId: item.templateItemId,
+    verificationRecord: {
+      id: item.verificationRecordId,
+      status: item.status,
+    },
+  }));
+  const completedItems = items.filter((item) =>
+    isCompleteVerificationStatus(item.verificationRecord.status),
+  ).length;
+  const sections = itemRows.reduce<ProjectChecklistSectionResponse[]>((result, row) => {
+    if (!row.sectionId || !row.sectionName || row.sectionDisplayOrder === null) {
+      return result;
+    }
+
+    let section = result.find(({ id }) => id === row.sectionId);
+
+    if (!section) {
+      section = {
+        displayOrder: row.sectionDisplayOrder,
+        id: row.sectionId,
+        items: [],
+        name: row.sectionName,
+      };
+      result.push(section);
+    }
+
+    const item = items.find(({ templateItemId }) => templateItemId === row.templateItemId);
+
+    if (item) {
+      section.items.push(item);
+    }
+
+    return result;
+  }, []);
 
   return {
     ...checklist,
     archivedAt: checklist.archivedAt?.toISOString() ?? null,
+    completion: {
+      completedItems,
+      totalItems: items.length,
+    },
     createdAt: checklist.createdAt.toISOString(),
-    items: itemRows.map((item) => ({
-      control: {
-        controlCode: item.controlCode,
-        id: item.controlId,
-        title: item.title,
-      },
-      controlVersion: {
-        id: item.controlVersionId,
-        versionNumber: item.versionNumber,
-      },
-      displayOrder: item.displayOrder,
-      id: item.id,
-      templateItemId: item.templateItemId,
-      verificationRecord: {
-        id: item.verificationRecordId,
-        status: item.status,
-      },
-    })),
+    items,
+    sections,
+    unsectionedItems: items.filter(({ sectionId }) => !sectionId),
     updatedAt: checklist.updatedAt.toISOString(),
   };
+}
+
+function isCompleteVerificationStatus(status: string): boolean {
+  return status === 'checked' || status === 'not-applicable' || status === 'not_applicable';
 }
 
 async function assertProjectChecklistIsUnique(input: {

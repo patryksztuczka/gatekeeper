@@ -5,6 +5,7 @@ import app from '../src/index';
 import { db } from '../src/db/client';
 import {
   checklistTemplateItems,
+  checklistTemplateSections,
   checklistTemplates,
   controlVersions,
   controls,
@@ -192,6 +193,7 @@ async function createComponent(projectId: string, name = 'Payments Platform', ar
 async function createActiveControl(input: {
   controlCode: string;
   organizationId: string;
+  releaseImpact?: string;
   title: string;
 }) {
   const controlId = crypto.randomUUID();
@@ -218,7 +220,7 @@ async function createActiveControl(input: {
     createdAt: now,
     externalStandardsMappings: JSON.stringify([]),
     id: versionId,
-    releaseImpact: 'blocking',
+    releaseImpact: input.releaseImpact ?? 'blocking',
     title: input.title,
     verificationMethod: 'Review evidence.',
     versionNumber: 1,
@@ -304,6 +306,24 @@ async function applyTemplate(input: {
       headers: input.headers,
       method: 'POST',
     },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+async function openChecklist(input: {
+  checklistId: string;
+  componentId: string;
+  headers: Headers;
+  organizationSlug: string;
+  projectSlug: string;
+}) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${input.organizationSlug}/projects/${input.projectSlug}/components/${input.componentId}/checklists/${input.checklistId}`,
+    { headers: input.headers },
   );
 
   return {
@@ -474,6 +494,328 @@ describe('Project Checklists API', () => {
         .map(({ id }) => id)
         .sort(),
     );
+  });
+
+  it('lets Organization members open Project Checklists with Control Versions, Release Impact, grouping, and completion', async () => {
+    const owner = await createSignedInOwner('project-checklist-read-owner');
+    const member = await addMemberToOrganization(owner.organization.id, 'project-checklist-reader');
+    const outsider = await createSignedInOwner('project-checklist-outsider');
+    const projectId = await createProject({
+      organizationId: owner.organization.id,
+      projectOwnerMemberId: null,
+      slug: 'vendor-risk',
+    });
+    const componentId = await createComponent(projectId);
+    const accessControl = await createActiveControl({
+      controlCode: 'AUTH-548',
+      organizationId: owner.organization.id,
+      releaseImpact: 'blocking',
+      title: 'Require MFA',
+    });
+    const loggingControl = await createActiveControl({
+      controlCode: 'LOG-548',
+      organizationId: owner.organization.id,
+      releaseImpact: 'needs review',
+      title: 'Require logging',
+    });
+    const advisoryControl = await createActiveControl({
+      controlCode: 'DOC-548',
+      organizationId: owner.organization.id,
+      releaseImpact: 'advisory',
+      title: 'Document runbooks',
+    });
+    const latestAccessVersionId = await addLatestControlVersion(
+      accessControl.controlId,
+      'AUTH-548',
+      'Require phishing-resistant MFA',
+    );
+    const templateId = await createTemplate({
+      controlIds: [accessControl.controlId, loggingControl.controlId, advisoryControl.controlId],
+      organizationId: owner.organization.id,
+    });
+    const now = new Date();
+    const accessSectionId = crypto.randomUUID();
+    const operationsSectionId = crypto.randomUUID();
+
+    await db.insert(checklistTemplateSections).values([
+      {
+        createdAt: now,
+        displayOrder: 1,
+        id: operationsSectionId,
+        name: 'Operations',
+        normalizedName: 'operations',
+        templateId,
+        updatedAt: now,
+      },
+      {
+        createdAt: now,
+        displayOrder: 0,
+        id: accessSectionId,
+        name: 'Access',
+        normalizedName: 'access',
+        templateId,
+        updatedAt: now,
+      },
+    ]);
+    await db
+      .update(checklistTemplateItems)
+      .set({ displayOrder: 0, sectionId: accessSectionId })
+      .where(
+        and(
+          eq(checklistTemplateItems.templateId, templateId),
+          eq(checklistTemplateItems.controlId, accessControl.controlId),
+        ),
+      );
+    await db
+      .update(checklistTemplateItems)
+      .set({ displayOrder: 0, sectionId: operationsSectionId })
+      .where(
+        and(
+          eq(checklistTemplateItems.templateId, templateId),
+          eq(checklistTemplateItems.controlId, loggingControl.controlId),
+        ),
+      );
+
+    const applyResponse = await applyTemplate({
+      body: { templateId },
+      componentId,
+      headers: owner.headers,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'vendor-risk',
+    });
+    const projectChecklist = applyResponse.body.projectChecklist as { id: string };
+    const records = await db
+      .select({
+        controlId: projectChecklistItems.controlId,
+        id: projectChecklistVerificationRecords.id,
+      })
+      .from(projectChecklistItems)
+      .innerJoin(
+        projectChecklistVerificationRecords,
+        eq(projectChecklistItems.verificationRecordId, projectChecklistVerificationRecords.id),
+      )
+      .where(eq(projectChecklistItems.projectChecklistId, projectChecklist.id));
+
+    await db
+      .update(projectChecklistVerificationRecords)
+      .set({ status: 'checked' })
+      .where(
+        eq(
+          projectChecklistVerificationRecords.id,
+          records.find(({ controlId }) => controlId === accessControl.controlId)!.id,
+        ),
+      );
+    await db
+      .update(projectChecklistVerificationRecords)
+      .set({ status: 'not-applicable' })
+      .where(
+        eq(
+          projectChecklistVerificationRecords.id,
+          records.find(({ controlId }) => controlId === loggingControl.controlId)!.id,
+        ),
+      );
+
+    const response = await openChecklist({
+      checklistId: projectChecklist.id,
+      componentId,
+      headers: member.headers,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'vendor-risk',
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.projectChecklist).toMatchObject({
+      completion: { completedItems: 2, totalItems: 3 },
+      items: [
+        {
+          control: { controlCode: 'DOC-548', releaseImpact: 'advisory' },
+          sectionId: null,
+          verificationRecord: { status: 'unchecked' },
+        },
+        {
+          control: { controlCode: 'AUTH-548', releaseImpact: 'needs review' },
+          controlVersion: { id: latestAccessVersionId, versionNumber: 2 },
+          sectionId: accessSectionId,
+          verificationRecord: { status: 'checked' },
+        },
+        {
+          control: { controlCode: 'LOG-548', releaseImpact: 'needs review' },
+          controlVersion: { id: loggingControl.versionId, versionNumber: 1 },
+          sectionId: operationsSectionId,
+          verificationRecord: { status: 'not-applicable' },
+        },
+      ],
+      sections: [
+        {
+          displayOrder: 0,
+          id: accessSectionId,
+          items: [{ control: { controlCode: 'AUTH-548' } }],
+          name: 'Access',
+        },
+        {
+          displayOrder: 1,
+          id: operationsSectionId,
+          items: [{ control: { controlCode: 'LOG-548' } }],
+          name: 'Operations',
+        },
+      ],
+      unsectionedItems: [{ control: { controlCode: 'DOC-548' } }],
+    });
+    await expect(
+      openChecklist({
+        checklistId: projectChecklist.id,
+        componentId,
+        headers: outsider.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({ status: 404 });
+  });
+
+  it('hides removed-from-template items by default and excludes them from completion', async () => {
+    const owner = await createSignedInOwner('project-checklist-removed');
+    const projectId = await createProject({
+      organizationId: owner.organization.id,
+      projectOwnerMemberId: null,
+      slug: 'vendor-risk',
+    });
+    const componentId = await createComponent(projectId);
+    const visibleControl = await createActiveControl({
+      controlCode: 'AUTH-648',
+      organizationId: owner.organization.id,
+      title: 'Require MFA',
+    });
+    const removedControl = await createActiveControl({
+      controlCode: 'LOG-648',
+      organizationId: owner.organization.id,
+      title: 'Require logging',
+    });
+    const otherControl = await createActiveControl({
+      controlCode: 'NET-648',
+      organizationId: owner.organization.id,
+      title: 'Segment networks',
+    });
+    const templateId = await createTemplate({
+      controlIds: [visibleControl.controlId, removedControl.controlId],
+      organizationId: owner.organization.id,
+    });
+    const otherTemplateId = await createTemplate({
+      controlIds: [otherControl.controlId],
+      name: 'Other Readiness',
+      organizationId: owner.organization.id,
+    });
+
+    const applyResponse = await applyTemplate({
+      body: { templateId },
+      componentId,
+      headers: owner.headers,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'vendor-risk',
+    });
+    const projectChecklist = applyResponse.body.projectChecklist as { id: string };
+    const removedTemplateItem = await db
+      .select({ id: checklistTemplateItems.id })
+      .from(checklistTemplateItems)
+      .where(
+        and(
+          eq(checklistTemplateItems.templateId, templateId),
+          eq(checklistTemplateItems.controlId, removedControl.controlId),
+        ),
+      )
+      .limit(1)
+      .then((rows) => rows[0]!);
+    const replacementTemplateItem = await db
+      .select({ id: checklistTemplateItems.id })
+      .from(checklistTemplateItems)
+      .where(eq(checklistTemplateItems.templateId, otherTemplateId))
+      .limit(1)
+      .then((rows) => rows[0]!);
+    const removedChecklistItem = await db
+      .select({ verificationRecordId: projectChecklistItems.verificationRecordId })
+      .from(projectChecklistItems)
+      .where(eq(projectChecklistItems.templateItemId, removedTemplateItem.id))
+      .limit(1)
+      .then((rows) => rows[0]!);
+
+    await db
+      .update(projectChecklistItems)
+      .set({ templateItemId: replacementTemplateItem.id })
+      .where(eq(projectChecklistItems.templateItemId, removedTemplateItem.id));
+    await db
+      .update(projectChecklistVerificationRecords)
+      .set({ status: 'checked' })
+      .where(eq(projectChecklistVerificationRecords.id, removedChecklistItem.verificationRecordId));
+
+    const response = await openChecklist({
+      checklistId: projectChecklist.id,
+      componentId,
+      headers: owner.headers,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'vendor-risk',
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.projectChecklist).toMatchObject({
+      completion: { completedItems: 0, totalItems: 1 },
+      items: [{ control: { controlCode: 'AUTH-648' } }],
+    });
+  });
+
+  it('keeps archived Project Checklist completion readable with current non-removed items', async () => {
+    const owner = await createSignedInOwner('project-checklist-archived-read');
+    const projectId = await createProject({
+      organizationId: owner.organization.id,
+      projectOwnerMemberId: null,
+      slug: 'vendor-risk',
+    });
+    const componentId = await createComponent(projectId);
+    const control = await createActiveControl({
+      controlCode: 'AUTH-748',
+      organizationId: owner.organization.id,
+      title: 'Require MFA',
+    });
+    const templateId = await createTemplate({
+      controlIds: [control.controlId],
+      organizationId: owner.organization.id,
+    });
+    const applyResponse = await applyTemplate({
+      body: { templateId },
+      componentId,
+      headers: owner.headers,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'vendor-risk',
+    });
+    const projectChecklist = applyResponse.body.projectChecklist as { id: string };
+    const checklistItem = await db
+      .select({ verificationRecordId: projectChecklistItems.verificationRecordId })
+      .from(projectChecklistItems)
+      .where(eq(projectChecklistItems.projectChecklistId, projectChecklist.id))
+      .limit(1)
+      .then((rows) => rows[0]!);
+
+    await db
+      .update(projectChecklistVerificationRecords)
+      .set({ status: 'checked' })
+      .where(eq(projectChecklistVerificationRecords.id, checklistItem.verificationRecordId));
+    await db
+      .update(projectChecklists)
+      .set({ archivedAt: new Date() })
+      .where(eq(projectChecklists.id, projectChecklist.id));
+
+    const response = await openChecklist({
+      checklistId: projectChecklist.id,
+      componentId,
+      headers: owner.headers,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'vendor-risk',
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.projectChecklist).toMatchObject({
+      archivedAt: expect.any(String),
+      completion: { completedItems: 1, totalItems: 1 },
+      items: [{ control: { controlCode: 'AUTH-748' }, verificationRecord: { status: 'checked' } }],
+    });
   });
 
   it('enforces one active Project Checklist per template and unique display names per component', async () => {

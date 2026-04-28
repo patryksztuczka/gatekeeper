@@ -85,6 +85,7 @@ import {
 import {
   applyChecklistTemplateToProjectComponent,
   canApplyProjectChecklists,
+  getProjectChecklistForMembership,
   normalizeApplyChecklistTemplateBody,
   ProjectChecklistInputError,
 } from './lib/project-checklists';
@@ -1359,6 +1360,41 @@ app.post(
 
       throw caughtError;
     }
+  },
+);
+
+app.get(
+  '/api/organizations/:organizationSlug/projects/:projectSlug/components/:componentId/checklists/:checklistId',
+  async (c) => {
+    const session = await auth.api.getSession({
+      headers: c.req.raw.headers,
+    });
+
+    if (!session) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const membership = await getOrganizationMembership(
+      c.req.param('organizationSlug'),
+      session.user.id,
+    );
+
+    if (!membership) {
+      return c.json({ error: 'Project Checklist unavailable' }, 404);
+    }
+
+    const projectChecklist = await getProjectChecklistForMembership({
+      checklistId: c.req.param('checklistId'),
+      componentId: c.req.param('componentId'),
+      membership,
+      projectSlug: c.req.param('projectSlug'),
+    });
+
+    if (!projectChecklist) {
+      return c.json({ error: 'Project Checklist unavailable' }, 404);
+    }
+
+    return c.json({ projectChecklist });
   },
 );
 
