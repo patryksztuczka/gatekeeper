@@ -1,0 +1,41 @@
+apps/web/src/components/layouts/dashboard-sidebar.tsx
+  56902a17b2a85354 57
+apps/backend-hono/src/lib/checklist-templates.ts
+  56902a17b2a85354 1-219
+apps/backend-hono/src/db/schema.ts
+  56902a17b2a85354 377-408
+apps/backend-hono/src/index.ts
+  56902a17b2a85354 14-21,225-250,432-508
+apps/web/src/features/auth/auth-api.ts
+  56902a17b2a85354 74-86,328-361
+apps/backend-hono/worker-configuration.d.ts
+  56902a17b2a85354 2,10-12
+apps/backend-hono/test/checklist-templates.spec.ts
+  56902a17b2a85354 1-397
+apps/web/src/providers/router.tsx
+  56902a17b2a85354 123-129,146
+apps/backend-hono/drizzle/migrations/0008_checklist_templates.sql
+  56902a17b2a85354 1-17
+apps/web/src/components/pages/checklist-templates.tsx
+  56902a17b2a85354 1-281
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "f3b519c23c568b460b9e63083fea26669335d134",
+  "prompts": {
+    "56902a17b2a85354": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_22a64f4a1ffeDyTr6RTMPVp5Gv",
+        "model": "openai/gpt-5.5"
+      },
+      "human_author": "Patryk Sztuczka",
+      "messages": [],
+      "total_additions": 1157,
+      "total_deletions": 44,
+      "accepted_lines": 1124,
+      "overriden_lines": 0
+    }
+  }
+}
