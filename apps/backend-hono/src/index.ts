@@ -86,6 +86,7 @@ import {
   applyChecklistTemplateToProjectComponent,
   canApplyProjectChecklists,
   getProjectChecklistForMembership,
+  listUncheckedCurrentRequirementsForMembership,
   normalizeApplyChecklistTemplateBody,
   normalizeChecklistItemVerificationBody,
   ProjectChecklistInputError,
@@ -249,6 +250,32 @@ app.get('/api/organizations/:organizationSlug/projects', async (c) => {
 
   return c.json({ projects: await listProjects(membership.organizationId, status) });
 });
+
+app.get(
+  '/api/organizations/:organizationSlug/reports/unchecked-current-requirements',
+  async (c) => {
+    const session = await auth.api.getSession({
+      headers: c.req.raw.headers,
+    });
+
+    if (!session) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const membership = await getOrganizationMembership(
+      c.req.param('organizationSlug'),
+      session.user.id,
+    );
+
+    if (!membership) {
+      return c.json({ error: 'Organization not found' }, 404);
+    }
+
+    return c.json({
+      uncheckedCurrentRequirements: await listUncheckedCurrentRequirementsForMembership(membership),
+    });
+  },
+);
 
 app.get('/api/organizations/:organizationSlug/checklist-templates', async (c) => {
   const session = await auth.api.getSession({
