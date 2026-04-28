@@ -1,0 +1,620 @@
+import { and, eq } from 'drizzle-orm';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import app from '../src/index';
+import { db } from '../src/db/client';
+import {
+  checklistTemplateItems,
+  checklistTemplates,
+  controlVersions,
+  controls,
+  members,
+  projectChecklistItems,
+  projectChecklists,
+  projectChecklistVerificationRecords,
+  projectComponents,
+  projects,
+  users,
+} from '../src/db/schema';
+import { auth } from '../src/lib/auth';
+
+const authHeaders = {
+  origin: 'http://localhost:5173',
+  host: 'localhost:8787',
+};
+const verificationCallbackURL = 'http://localhost:8787/sign-in';
+const mailpitSendUrl = 'http://127.0.0.1:8025/api/v1/send';
+
+function createCredentials(prefix: string) {
+  const token = crypto.randomUUID();
+
+  return {
+    name: `${prefix} user`,
+    email: `${prefix}-${token}@example.com`,
+    password: `Password-${token}`,
+  };
+}
+
+async function signUpUser(credentials: ReturnType<typeof createCredentials>) {
+  await auth.api.signUpEmail({
+    body: {
+      ...credentials,
+      callbackURL: verificationCallbackURL,
+    },
+    headers: authHeaders,
+  });
+
+  await db.update(users).set({ emailVerified: true }).where(eq(users.email, credentials.email));
+}
+
+async function signInUser(credentials: ReturnType<typeof createCredentials>) {
+  const result = await auth.api.signInEmail({
+    body: {
+      email: credentials.email,
+      password: credentials.password,
+    },
+    headers: authHeaders,
+    returnHeaders: true,
+  });
+
+  const sessionCookie = result.headers.get('set-cookie');
+
+  expect(sessionCookie).toBeTruthy();
+
+  if (!sessionCookie) {
+    throw new Error('Expected Better Auth to return a session cookie.');
+  }
+
+  return new Headers({
+    ...authHeaders,
+    cookie: sessionCookie.split(';', 1)[0] ?? sessionCookie,
+  });
+}
+
+async function getUserByEmail(email: string) {
+  const user = await db
+    .select()
+    .from(users)
+    .where(eq(users.email, email))
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  expect(user).toBeTruthy();
+
+  if (!user) {
+    throw new Error('Expected user to exist.');
+  }
+
+  return user;
+}
+
+async function getMember(organizationId: string, userId: string) {
+  const member = await db
+    .select()
+    .from(members)
+    .where(and(eq(members.organizationId, organizationId), eq(members.userId, userId)))
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  expect(member).toBeTruthy();
+
+  if (!member) {
+    throw new Error('Expected organization member to exist.');
+  }
+
+  return member;
+}
+
+async function createSignedInOwner(prefix: string) {
+  const credentials = createCredentials(prefix);
+  await signUpUser(credentials);
+  const headers = await signInUser(credentials);
+  const organization = (await auth.api.listOrganizations({ headers }))[0];
+  const user = await getUserByEmail(credentials.email);
+
+  expect(organization).toBeTruthy();
+
+  if (!organization) {
+    throw new Error('Expected default organization to exist.');
+  }
+
+  return {
+    headers,
+    member: await getMember(organization.id, user.id),
+    organization,
+  };
+}
+
+async function addMemberToOrganization(
+  organizationId: string,
+  prefix: string,
+  role: 'admin' | 'member' = 'member',
+) {
+  const credentials = createCredentials(prefix);
+  await signUpUser(credentials);
+  const user = await getUserByEmail(credentials.email);
+  const memberId = crypto.randomUUID();
+
+  await db.insert(members).values({
+    id: memberId,
+    organizationId,
+    role,
+    userId: user.id,
+  });
+
+  return {
+    headers: await signInUser(credentials),
+    memberId,
+  };
+}
+
+async function createProject(input: {
+  archived?: boolean;
+  organizationId: string;
+  projectOwnerMemberId: string | null;
+  slug: string;
+}) {
+  const now = new Date();
+  const id = crypto.randomUUID();
+
+  await db.insert(projects).values({
+    archivedAt: input.archived ? now : null,
+    createdAt: now,
+    description: 'Governance work for reviewing critical vendor risk.',
+    id,
+    name: 'Vendor Risk Review',
+    organizationId: input.organizationId,
+    projectOwnerMemberId: input.projectOwnerMemberId,
+    slug: input.slug,
+    updatedAt: now,
+  });
+
+  return id;
+}
+
+async function createComponent(projectId: string, name = 'Payments Platform', archived = false) {
+  const now = new Date();
+  const id = crypto.randomUUID();
+
+  await db.insert(projectComponents).values({
+    archivedAt: archived ? now : null,
+    createdAt: now,
+    description: null,
+    id,
+    name,
+    projectId,
+    updatedAt: now,
+  });
+
+  return id;
+}
+
+async function createActiveControl(input: {
+  controlCode: string;
+  organizationId: string;
+  title: string;
+}) {
+  const controlId = crypto.randomUUID();
+  const versionId = crypto.randomUUID();
+  const now = new Date();
+
+  await db.insert(controls).values({
+    archivedAt: null,
+    archivedByMemberId: null,
+    archiveReason: null,
+    createdAt: now,
+    currentControlCode: input.controlCode,
+    currentVersionId: versionId,
+    id: controlId,
+    organizationId: input.organizationId,
+    updatedAt: now,
+  });
+  await db.insert(controlVersions).values({
+    acceptedEvidenceTypes: JSON.stringify(['document']),
+    applicabilityConditions: 'Applies to this component.',
+    businessMeaning: 'Required release assurance.',
+    controlCode: input.controlCode,
+    controlId,
+    createdAt: now,
+    externalStandardsMappings: JSON.stringify([]),
+    id: versionId,
+    releaseImpact: 'blocking',
+    title: input.title,
+    verificationMethod: 'Review evidence.',
+    versionNumber: 1,
+  });
+
+  return { controlId, versionId };
+}
+
+async function addLatestControlVersion(controlId: string, controlCode: string, title: string) {
+  const versionId = crypto.randomUUID();
+
+  await db.insert(controlVersions).values({
+    acceptedEvidenceTypes: JSON.stringify(['document']),
+    applicabilityConditions: 'Applies to this component.',
+    businessMeaning: 'Updated release assurance.',
+    controlCode,
+    controlId,
+    createdAt: new Date(),
+    externalStandardsMappings: JSON.stringify([]),
+    id: versionId,
+    releaseImpact: 'needs review',
+    title,
+    verificationMethod: 'Review updated evidence.',
+    versionNumber: 2,
+  });
+  await db.update(controls).set({ currentVersionId: versionId }).where(eq(controls.id, controlId));
+
+  return versionId;
+}
+
+async function createTemplate(input: {
+  controlIds: string[];
+  name?: string;
+  organizationId: string;
+  status?: 'active' | 'archived' | 'draft';
+}) {
+  const now = new Date();
+  const templateId = crypto.randomUUID();
+
+  await db.insert(checklistTemplates).values({
+    authorMemberId: (
+      await db
+        .select()
+        .from(members)
+        .where(eq(members.organizationId, input.organizationId))
+        .limit(1)
+    )[0]!.id,
+    createdAt: now,
+    id: templateId,
+    name: input.name ?? 'Release Readiness',
+    normalizedName: (input.name ?? 'Release Readiness').toLowerCase(),
+    organizationId: input.organizationId,
+    publishedAt: input.status === 'active' ? now : null,
+    status: input.status ?? 'active',
+    updatedAt: now,
+  });
+
+  for (const [displayOrder, controlId] of input.controlIds.entries()) {
+    await db.insert(checklistTemplateItems).values({
+      controlId,
+      createdAt: now,
+      displayOrder,
+      id: crypto.randomUUID(),
+      sectionId: null,
+      templateId,
+    });
+  }
+
+  return templateId;
+}
+
+async function applyTemplate(input: {
+  body: Record<string, unknown>;
+  componentId: string;
+  headers: Headers;
+  organizationSlug: string;
+  projectSlug: string;
+}) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${input.organizationSlug}/projects/${input.projectSlug}/components/${input.componentId}/checklists`,
+    {
+      body: JSON.stringify(input.body),
+      headers: input.headers,
+      method: 'POST',
+    },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+beforeEach(() => {
+  const originalFetch = globalThis.fetch;
+
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const url =
+      typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+
+    if (url === mailpitSendUrl) {
+      return new Response(null, { status: 200 });
+    }
+
+    return originalFetch(input, init);
+  });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe('Project Checklists API', () => {
+  it('lets Organization owners, admins, and the Project Owner apply active Checklist Templates', async () => {
+    const owner = await createSignedInOwner('project-checklist-owner');
+    const admin = await addMemberToOrganization(
+      owner.organization.id,
+      'project-checklist-admin',
+      'admin',
+    );
+    const projectOwner = await addMemberToOrganization(
+      owner.organization.id,
+      'project-checklist-project-owner',
+    );
+    const member = await addMemberToOrganization(owner.organization.id, 'project-checklist-member');
+    const projectId = await createProject({
+      organizationId: owner.organization.id,
+      projectOwnerMemberId: projectOwner.memberId,
+      slug: 'vendor-risk',
+    });
+    const ownerComponentId = await createComponent(projectId, 'Owner Component');
+    const adminComponentId = await createComponent(projectId, 'Admin Component');
+    const projectOwnerComponentId = await createComponent(projectId, 'Project Owner Component');
+    const memberComponentId = await createComponent(projectId, 'Member Component');
+    const control = await createActiveControl({
+      controlCode: 'AUTH-147',
+      organizationId: owner.organization.id,
+      title: 'Require MFA',
+    });
+    const templateId = await createTemplate({
+      controlIds: [control.controlId],
+      organizationId: owner.organization.id,
+    });
+
+    await expect(
+      applyTemplate({
+        body: { displayName: 'Owner Checklist', templateId },
+        componentId: ownerComponentId,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({ status: 201 });
+    await expect(
+      applyTemplate({
+        body: { displayName: 'Admin Checklist', templateId },
+        componentId: adminComponentId,
+        headers: admin.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({ status: 201 });
+    await expect(
+      applyTemplate({
+        body: { displayName: 'Project Owner Checklist', templateId },
+        componentId: projectOwnerComponentId,
+        headers: projectOwner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({ status: 201 });
+    await expect(
+      applyTemplate({
+        body: { displayName: 'Member Checklist', templateId },
+        componentId: memberComponentId,
+        headers: member.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({ status: 403 });
+  });
+
+  it('creates a Project Checklist, generated items, and unchecked verification records using latest Control Versions', async () => {
+    const owner = await createSignedInOwner('project-checklist-side-effects');
+    const projectId = await createProject({
+      organizationId: owner.organization.id,
+      projectOwnerMemberId: null,
+      slug: 'vendor-risk',
+    });
+    const componentId = await createComponent(projectId);
+    const firstControl = await createActiveControl({
+      controlCode: 'AUTH-247',
+      organizationId: owner.organization.id,
+      title: 'Require MFA',
+    });
+    const secondControl = await createActiveControl({
+      controlCode: 'LOG-247',
+      organizationId: owner.organization.id,
+      title: 'Require logging',
+    });
+    const latestVersionId = await addLatestControlVersion(
+      firstControl.controlId,
+      'AUTH-247',
+      'Require phishing-resistant MFA',
+    );
+    const templateId = await createTemplate({
+      controlIds: [firstControl.controlId, secondControl.controlId],
+      name: 'Production Readiness',
+      organizationId: owner.organization.id,
+    });
+
+    const response = await applyTemplate({
+      body: { templateId },
+      componentId,
+      headers: owner.headers,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'vendor-risk',
+    });
+
+    expect(response.status).toBe(201);
+    expect(response.body.projectChecklist).toMatchObject({
+      componentId,
+      displayName: 'Production Readiness',
+      items: [
+        {
+          control: { controlCode: 'AUTH-247', id: firstControl.controlId },
+          controlVersion: { id: latestVersionId, versionNumber: 2 },
+          displayOrder: 0,
+          verificationRecord: { status: 'unchecked' },
+        },
+        {
+          control: { controlCode: 'LOG-247', id: secondControl.controlId },
+          controlVersion: { id: secondControl.versionId, versionNumber: 1 },
+          displayOrder: 1,
+          verificationRecord: { status: 'unchecked' },
+        },
+      ],
+      templateId,
+    });
+
+    const checklists = await db
+      .select()
+      .from(projectChecklists)
+      .where(eq(projectChecklists.componentId, componentId));
+    const items = await db.select().from(projectChecklistItems);
+    const verificationRecords = await db.select().from(projectChecklistVerificationRecords);
+
+    expect(checklists).toHaveLength(1);
+    expect(items).toHaveLength(2);
+    expect(verificationRecords).toHaveLength(2);
+    expect(items.map(({ templateItemId }) => templateItemId).sort()).toEqual(
+      (await db.select({ id: checklistTemplateItems.id }).from(checklistTemplateItems))
+        .map(({ id }) => id)
+        .sort(),
+    );
+  });
+
+  it('enforces one active Project Checklist per template and unique display names per component', async () => {
+    const owner = await createSignedInOwner('project-checklist-unique');
+    const projectId = await createProject({
+      organizationId: owner.organization.id,
+      projectOwnerMemberId: null,
+      slug: 'vendor-risk',
+    });
+    const componentId = await createComponent(projectId);
+    const control = await createActiveControl({
+      controlCode: 'AUTH-347',
+      organizationId: owner.organization.id,
+      title: 'Require MFA',
+    });
+    const firstTemplateId = await createTemplate({
+      controlIds: [control.controlId],
+      name: 'Release Readiness',
+      organizationId: owner.organization.id,
+    });
+    const secondTemplateId = await createTemplate({
+      controlIds: [control.controlId],
+      name: 'Operational Readiness',
+      organizationId: owner.organization.id,
+    });
+
+    await applyTemplate({
+      body: { displayName: 'Custom Checklist', templateId: firstTemplateId },
+      componentId,
+      headers: owner.headers,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'vendor-risk',
+    });
+
+    await expect(
+      applyTemplate({
+        body: { displayName: 'Another Checklist', templateId: firstTemplateId },
+        componentId,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({
+      body: {
+        error:
+          'Project Component already has an active Project Checklist for this Checklist Template.',
+      },
+      status: 400,
+    });
+    await expect(
+      applyTemplate({
+        body: { displayName: ' custom   checklist ', templateId: secondTemplateId },
+        componentId,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({
+      body: { error: 'Project Checklist display name is already used for this Project Component.' },
+      status: 400,
+    });
+  });
+
+  it('rejects inactive templates, archived Projects, archived Project Components, and archived Controls', async () => {
+    const owner = await createSignedInOwner('project-checklist-inactive');
+    const activeProjectId = await createProject({
+      organizationId: owner.organization.id,
+      projectOwnerMemberId: null,
+      slug: 'vendor-risk',
+    });
+    const archivedProjectId = await createProject({
+      archived: true,
+      organizationId: owner.organization.id,
+      projectOwnerMemberId: null,
+      slug: 'legacy-risk',
+    });
+    const activeComponentId = await createComponent(activeProjectId, 'Active Component');
+    const archivedComponentId = await createComponent(activeProjectId, 'Archived Component', true);
+    const archivedProjectComponentId = await createComponent(archivedProjectId, 'Legacy Component');
+    const control = await createActiveControl({
+      controlCode: 'AUTH-447',
+      organizationId: owner.organization.id,
+      title: 'Require MFA',
+    });
+    const inactiveTemplateId = await createTemplate({
+      controlIds: [control.controlId],
+      organizationId: owner.organization.id,
+      status: 'draft',
+    });
+    const archivedControlTemplateId = await createTemplate({
+      controlIds: [control.controlId],
+      name: 'Archived Control Template',
+      organizationId: owner.organization.id,
+    });
+
+    await db
+      .update(controls)
+      .set({ archivedAt: new Date() })
+      .where(eq(controls.id, control.controlId));
+
+    await expect(
+      applyTemplate({
+        body: { templateId: inactiveTemplateId },
+        componentId: activeComponentId,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({
+      body: { error: 'Only active Checklist Templates can be applied.' },
+      status: 400,
+    });
+    await expect(
+      applyTemplate({
+        body: { templateId: archivedControlTemplateId },
+        componentId: activeComponentId,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({
+      body: { error: 'Checklist Template contains Controls that are no longer active.' },
+      status: 400,
+    });
+    await expect(
+      applyTemplate({
+        body: { templateId: archivedControlTemplateId },
+        componentId: archivedComponentId,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({ status: 404 });
+    await expect(
+      applyTemplate({
+        body: { templateId: archivedControlTemplateId },
+        componentId: archivedProjectComponentId,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'legacy-risk',
+      }),
+    ).resolves.toMatchObject({ status: 404 });
+  });
+});
