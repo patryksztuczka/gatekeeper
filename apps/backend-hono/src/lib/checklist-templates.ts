@@ -1,24 +1,7 @@
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import { db } from '../db/client';
-import {
-  checklistTemplateItems,
-  checklistTemplates,
-  controls,
-  controlVersions,
-  members,
-  users,
-} from '../db/schema';
+import { checklistTemplates, members, users } from '../db/schema';
 import type { OrganizationMembership } from './projects';
-
-export type ChecklistTemplateItem = {
-  control: {
-    controlCode: string;
-    id: string;
-    title: string;
-  };
-  createdAt: string;
-  id: string;
-};
 
 export type ChecklistTemplateListItem = {
   author: {
@@ -28,7 +11,6 @@ export type ChecklistTemplateListItem = {
   };
   createdAt: string;
   id: string;
-  items: ChecklistTemplateItem[];
   name: string;
   publishedAt: string | null;
   status: ChecklistTemplateStatus;
@@ -39,14 +21,10 @@ export type ChecklistTemplateListFilters = {
   status: ChecklistTemplateStatus | 'all';
 };
 
-type ChecklistTemplateStatus = 'active' | 'draft';
+type ChecklistTemplateStatus = 'active' | 'archived' | 'draft';
 
 type CreateChecklistTemplateInput = {
   name: string;
-};
-
-type AddChecklistTemplateItemInput = {
-  controlId: string;
 };
 
 const manageChecklistTemplateRoles = new Set(['owner', 'admin']);
@@ -78,7 +56,7 @@ export async function listChecklistTemplates(
     .where(eq(checklistTemplates.organizationId, membership.organizationId))
     .orderBy(asc(checklistTemplates.createdAt), asc(checklistTemplates.name));
 
-  const templates = rows
+  return rows
     .map(({ authorEmail, authorId, authorName, createdAt, publishedAt, status, ...template }) => ({
       ...template,
       author: {
@@ -87,22 +65,11 @@ export async function listChecklistTemplates(
         name: authorName,
       },
       createdAt: createdAt.toISOString(),
-      items: [] as ChecklistTemplateItem[],
       publishedAt: publishedAt?.toISOString() ?? null,
       status: status as ChecklistTemplateStatus,
     }))
     .filter((template) => isChecklistTemplateVisible(template, membership))
     .filter((template) => matchesChecklistTemplateFilters(template, filters));
-
-  const itemsByTemplateId = await listChecklistTemplateItems(
-    membership.organizationId,
-    templates.map(({ id }) => id),
-  );
-
-  return templates.map((template) => ({
-    ...template,
-    items: itemsByTemplateId.get(template.id) ?? [],
-  }));
 }
 
 export async function createChecklistTemplate(
@@ -190,12 +157,12 @@ export async function publishChecklistTemplate(
   )!;
 }
 
-export async function addChecklistTemplateItem(
-  membership: OrganizationMembership,
-  templateId: string,
-  input: AddChecklistTemplateItemInput,
-): Promise<ChecklistTemplateListItem | null> {
-  if (!canManageChecklistTemplates(membership.role)) {
+export async function setChecklistTemplateArchivedForMembership(input: {
+  archived: boolean;
+  membership: OrganizationMembership;
+  templateId: string;
+}): Promise<ChecklistTemplateListItem | null> {
+  if (!canManageChecklistTemplates(input.membership.role)) {
     return null;
   }
 
@@ -204,8 +171,9 @@ export async function addChecklistTemplateItem(
     .from(checklistTemplates)
     .where(
       and(
-        eq(checklistTemplates.id, templateId),
-        eq(checklistTemplates.organizationId, membership.organizationId),
+        eq(checklistTemplates.id, input.templateId),
+        eq(checklistTemplates.organizationId, input.membership.organizationId),
+        eq(checklistTemplates.status, input.archived ? 'active' : 'archived'),
       ),
     )
     .limit(1)
@@ -215,83 +183,12 @@ export async function addChecklistTemplateItem(
     return null;
   }
 
-  const control = await db
-    .select({ id: controls.id })
-    .from(controls)
-    .where(
-      and(
-        eq(controls.id, input.controlId),
-        eq(controls.organizationId, membership.organizationId),
-        isNull(controls.archivedAt),
-      ),
-    )
-    .limit(1)
-    .then((rows) => rows[0] ?? null);
+  await db
+    .update(checklistTemplates)
+    .set({ status: input.archived ? 'archived' : 'active', updatedAt: new Date() })
+    .where(eq(checklistTemplates.id, template.id));
 
-  if (!control) {
-    throw new ChecklistTemplateInputError(
-      'Only active, non-archived Controls can be added to Checklist Templates.',
-    );
-  }
-
-  const existingItem = await db
-    .select({ id: checklistTemplateItems.id })
-    .from(checklistTemplateItems)
-    .where(
-      and(
-        eq(checklistTemplateItems.templateId, template.id),
-        eq(checklistTemplateItems.controlId, control.id),
-      ),
-    )
-    .limit(1)
-    .then((rows) => rows[0] ?? null);
-
-  if (existingItem) {
-    throw new ChecklistTemplateInputError(
-      'Control is already included in this Checklist Template.',
-    );
-  }
-
-  await db.insert(checklistTemplateItems).values({
-    controlId: control.id,
-    createdAt: new Date(),
-    id: crypto.randomUUID(),
-    templateId: template.id,
-  });
-
-  return (await listChecklistTemplates(membership)).find(({ id }) => id === template.id)!;
-}
-
-export async function removeChecklistTemplateItem(
-  membership: OrganizationMembership,
-  templateId: string,
-  itemId: string,
-): Promise<ChecklistTemplateListItem | null> {
-  if (!canManageChecklistTemplates(membership.role)) {
-    return null;
-  }
-
-  const item = await db
-    .select({ id: checklistTemplateItems.id })
-    .from(checklistTemplateItems)
-    .innerJoin(checklistTemplates, eq(checklistTemplateItems.templateId, checklistTemplates.id))
-    .where(
-      and(
-        eq(checklistTemplates.id, templateId),
-        eq(checklistTemplates.organizationId, membership.organizationId),
-        eq(checklistTemplateItems.id, itemId),
-      ),
-    )
-    .limit(1)
-    .then((rows) => rows[0] ?? null);
-
-  if (!item) {
-    return null;
-  }
-
-  await db.delete(checklistTemplateItems).where(eq(checklistTemplateItems.id, item.id));
-
-  return (await listChecklistTemplates(membership)).find(({ id }) => id === templateId)!;
+  return (await listChecklistTemplates(input.membership)).find(({ id }) => id === template.id)!;
 }
 
 export function normalizeChecklistTemplateCreateBody(body: unknown): CreateChecklistTemplateInput {
@@ -301,13 +198,6 @@ export function normalizeChecklistTemplateCreateBody(body: unknown): CreateCheck
   return { name: typeof record.name === 'string' ? record.name : '' };
 }
 
-export function normalizeChecklistTemplateItemBody(body: unknown): AddChecklistTemplateItemInput {
-  const value = typeof body === 'object' && body !== null ? body : {};
-  const record = value as Record<string, unknown>;
-
-  return { controlId: typeof record.controlId === 'string' ? record.controlId : '' };
-}
-
 export function normalizeChecklistTemplateListFilters(
   query: Record<string, string | string[] | undefined>,
 ): ChecklistTemplateListFilters {
@@ -315,7 +205,7 @@ export function normalizeChecklistTemplateListFilters(
 
   return {
     search: firstQueryValue(query.q).trim(),
-    status: status === 'active' || status === 'draft' ? status : 'all',
+    status: status === 'active' || status === 'archived' || status === 'draft' ? status : 'all',
   };
 }
 
@@ -356,55 +246,6 @@ function validateChecklistTemplateInput(input: CreateChecklistTemplateInput) {
 
 function normalizeChecklistTemplateName(name: string): string {
   return name.trim().replace(/\s+/g, ' ').toLowerCase();
-}
-
-async function listChecklistTemplateItems(
-  organizationId: string,
-  templateIds: string[],
-): Promise<Map<string, ChecklistTemplateItem[]>> {
-  const itemsByTemplateId = new Map<string, ChecklistTemplateItem[]>();
-
-  if (templateIds.length === 0) {
-    return itemsByTemplateId;
-  }
-
-  const rows = await db
-    .select({
-      controlCode: controlVersions.controlCode,
-      controlId: controls.id,
-      createdAt: checklistTemplateItems.createdAt,
-      id: checklistTemplateItems.id,
-      templateId: checklistTemplateItems.templateId,
-      title: controlVersions.title,
-    })
-    .from(checklistTemplateItems)
-    .innerJoin(checklistTemplates, eq(checklistTemplateItems.templateId, checklistTemplates.id))
-    .innerJoin(controls, eq(checklistTemplateItems.controlId, controls.id))
-    .innerJoin(controlVersions, eq(controls.currentVersionId, controlVersions.id))
-    .where(
-      and(
-        eq(checklistTemplates.organizationId, organizationId),
-        inArray(checklistTemplateItems.templateId, templateIds),
-      ),
-    )
-    .orderBy(asc(checklistTemplateItems.createdAt), asc(controlVersions.controlCode));
-
-  for (const row of rows) {
-    const items = itemsByTemplateId.get(row.templateId) ?? [];
-
-    items.push({
-      control: {
-        controlCode: row.controlCode,
-        id: row.controlId,
-        title: row.title,
-      },
-      createdAt: row.createdAt.toISOString(),
-      id: row.id,
-    });
-    itemsByTemplateId.set(row.templateId, items);
-  }
-
-  return itemsByTemplateId;
 }
 
 function firstQueryValue(value: string | string[] | undefined): string {

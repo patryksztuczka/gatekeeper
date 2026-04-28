@@ -79,18 +79,9 @@ export type ChecklistTemplateListItem = {
   };
   createdAt: string;
   id: string;
-  items: Array<{
-    control: {
-      controlCode: string;
-      id: string;
-      title: string;
-    };
-    createdAt: string;
-    id: string;
-  }>;
   name: string;
   publishedAt: string | null;
-  status: 'active' | 'draft';
+  status: 'active' | 'archived' | 'draft';
 };
 
 export type ControlListItem = {
@@ -336,7 +327,7 @@ export function createProject(
 
 export function listChecklistTemplates(
   organizationSlug: string,
-  filters: { search?: string; status?: 'active' | 'draft' | 'all' } = {},
+  filters: { search?: string; status?: 'active' | 'archived' | 'draft' | 'all' } = {},
 ) {
   const query = toQueryString({
     q: filters.search,
@@ -370,29 +361,20 @@ export function publishChecklistTemplate(organizationSlug: string, templateId: s
   );
 }
 
-export function addChecklistTemplateItem(
-  organizationSlug: string,
-  templateId: string,
-  input: { controlId: string },
-) {
+export function archiveChecklistTemplate(organizationSlug: string, templateId: string) {
   return request<{ checklistTemplate: ChecklistTemplateListItem }>(
-    `/api/organizations/${organizationSlug}/checklist-templates/${templateId}/items`,
+    `/api/organizations/${organizationSlug}/checklist-templates/${templateId}/archive`,
     {
       method: 'POST',
-      body: JSON.stringify(input),
     },
   );
 }
 
-export function removeChecklistTemplateItem(
-  organizationSlug: string,
-  templateId: string,
-  itemId: string,
-) {
+export function restoreChecklistTemplate(organizationSlug: string, templateId: string) {
   return request<{ checklistTemplate: ChecklistTemplateListItem }>(
-    `/api/organizations/${organizationSlug}/checklist-templates/${templateId}/items/${itemId}`,
+    `/api/organizations/${organizationSlug}/checklist-templates/${templateId}/restore`,
     {
-      method: 'DELETE',
+      method: 'POST',
     },
   );
 }
