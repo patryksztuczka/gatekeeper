@@ -71,6 +71,25 @@ export type DraftControlListItem = {
   title: string;
 };
 
+export type ChecklistTemplateItem = {
+  control: {
+    controlCode: string;
+    id: string;
+    title: string;
+  };
+  createdAt: string;
+  displayOrder: number;
+  id: string;
+  sectionId: string | null;
+};
+
+export type ChecklistTemplateSection = {
+  displayOrder: number;
+  id: string;
+  items: ChecklistTemplateItem[];
+  name: string;
+};
+
 export type ChecklistTemplateListItem = {
   author: {
     email: string;
@@ -79,18 +98,12 @@ export type ChecklistTemplateListItem = {
   };
   createdAt: string;
   id: string;
-  items: Array<{
-    control: {
-      controlCode: string;
-      id: string;
-      title: string;
-    };
-    createdAt: string;
-    id: string;
-  }>;
+  items: ChecklistTemplateItem[];
   name: string;
   publishedAt: string | null;
+  sections: ChecklistTemplateSection[];
   status: 'active' | 'draft';
+  unsectionedItems: ChecklistTemplateItem[];
 };
 
 export type ControlListItem = {

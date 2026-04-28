@@ -161,6 +161,91 @@ async function addChecklistTemplateItemRequest(
   };
 }
 
+async function createChecklistTemplateSectionRequest(
+  organizationSlug: string,
+  templateId: string,
+  headers: Headers,
+  body: Record<string, unknown>,
+) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/checklist-templates/${templateId}/sections`,
+    {
+      body: JSON.stringify(body),
+      headers,
+      method: 'POST',
+    },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+async function renameChecklistTemplateSectionRequest(
+  organizationSlug: string,
+  templateId: string,
+  sectionId: string,
+  headers: Headers,
+  body: Record<string, unknown>,
+) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/checklist-templates/${templateId}/sections/${sectionId}`,
+    {
+      body: JSON.stringify(body),
+      headers,
+      method: 'PATCH',
+    },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+async function reorderChecklistTemplateSectionsRequest(
+  organizationSlug: string,
+  templateId: string,
+  headers: Headers,
+  body: Record<string, unknown>,
+) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/checklist-templates/${templateId}/sections/order`,
+    {
+      body: JSON.stringify(body),
+      headers,
+      method: 'PATCH',
+    },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+async function reorderChecklistTemplateItemsRequest(
+  organizationSlug: string,
+  templateId: string,
+  headers: Headers,
+  body: Record<string, unknown>,
+) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/checklist-templates/${templateId}/items/order`,
+    {
+      body: JSON.stringify(body),
+      headers,
+      method: 'PATCH',
+    },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
 async function removeChecklistTemplateItemRequest(
   organizationSlug: string,
   templateId: string,
@@ -553,10 +638,18 @@ describe('Checklist Templates', () => {
             id: control.id,
             title: 'Require MFA',
           },
+          sectionId: null,
+        },
+      ],
+      unsectionedItems: [
+        {
+          control: {
+            controlCode: 'AUTH-043',
+          },
+          sectionId: null,
         },
       ],
     });
-    expect(JSON.stringify(addResponse.body.checklistTemplate)).not.toContain('section');
 
     const addedItem = (addResponse.body.checklistTemplate as { items: Array<{ id: string }> })
       .items[0]!;
@@ -690,5 +783,237 @@ describe('Checklist Templates', () => {
 
     expect(memberAddResponse.status).toBe(403);
     expect(memberRemoveResponse.status).toBe(403);
+  });
+
+  it('lets Organization owners create, rename, and reorder local Checklist Template Sections', async () => {
+    const { headers, organization } = await createSignedInOwner('template-sections-owner');
+    const createTemplateResponse = await createChecklistTemplateRequest(
+      organization.slug,
+      headers,
+      {
+        name: 'Sectioned Template',
+      },
+    );
+    const template = createTemplateResponse.body.checklistTemplate as { id: string };
+
+    const firstResponse = await createChecklistTemplateSectionRequest(
+      organization.slug,
+      template.id,
+      headers,
+      { name: 'Access' },
+    );
+    const secondResponse = await createChecklistTemplateSectionRequest(
+      organization.slug,
+      template.id,
+      headers,
+      { name: 'Monitoring' },
+    );
+
+    expect(firstResponse.status).toBe(201);
+    expect(secondResponse.status).toBe(201);
+
+    const sections = (secondResponse.body.checklistTemplate as { sections: Array<{ id: string }> })
+      .sections;
+    const accessSection = sections[0]!;
+    const monitoringSection = sections[1]!;
+    const renameResponse = await renameChecklistTemplateSectionRequest(
+      organization.slug,
+      template.id,
+      accessSection.id,
+      headers,
+      { name: 'Identity' },
+    );
+    const reorderResponse = await reorderChecklistTemplateSectionsRequest(
+      organization.slug,
+      template.id,
+      headers,
+      { sectionIds: [monitoringSection.id, accessSection.id] },
+    );
+
+    expect(renameResponse.status).toBe(200);
+    expect(renameResponse.body.checklistTemplate).toMatchObject({
+      sections: [{ name: 'Identity' }, { name: 'Monitoring' }],
+    });
+    expect(reorderResponse.status).toBe(200);
+    expect(reorderResponse.body.checklistTemplate).toMatchObject({
+      sections: [
+        { displayOrder: 0, name: 'Monitoring' },
+        { displayOrder: 1, name: 'Identity' },
+      ],
+    });
+  });
+
+  it('requires Section names to be unique within one Checklist Template only', async () => {
+    const { headers, organization } = await createSignedInOwner('template-sections-unique');
+    const firstTemplateResponse = await createChecklistTemplateRequest(organization.slug, headers, {
+      name: 'First Section Template',
+    });
+    const secondTemplateResponse = await createChecklistTemplateRequest(
+      organization.slug,
+      headers,
+      {
+        name: 'Second Section Template',
+      },
+    );
+    const firstTemplate = firstTemplateResponse.body.checklistTemplate as { id: string };
+    const secondTemplate = secondTemplateResponse.body.checklistTemplate as { id: string };
+
+    await createChecklistTemplateSectionRequest(organization.slug, firstTemplate.id, headers, {
+      name: 'Evidence',
+    });
+    const duplicateResponse = await createChecklistTemplateSectionRequest(
+      organization.slug,
+      firstTemplate.id,
+      headers,
+      { name: ' evidence ' },
+    );
+    const otherTemplateResponse = await createChecklistTemplateSectionRequest(
+      organization.slug,
+      secondTemplate.id,
+      headers,
+      { name: 'Evidence' },
+    );
+
+    expect(duplicateResponse.status).toBe(400);
+    expect(duplicateResponse.body).toMatchObject({
+      error: 'Checklist Template Section name is already used in this Checklist Template.',
+    });
+    expect(otherTemplateResponse.status).toBe(201);
+  });
+
+  it('assigns items to optional Sections and reorders them for display', async () => {
+    const { headers, organization } = await createSignedInOwner('template-items-ordering');
+    const createTemplateResponse = await createChecklistTemplateRequest(
+      organization.slug,
+      headers,
+      {
+        name: 'Grouped Template',
+      },
+    );
+    const template = createTemplateResponse.body.checklistTemplate as { id: string };
+    const sectionResponse = await createChecklistTemplateSectionRequest(
+      organization.slug,
+      template.id,
+      headers,
+      { name: 'Identity' },
+    );
+    const section = (sectionResponse.body.checklistTemplate as { sections: Array<{ id: string }> })
+      .sections[0]!;
+    const firstControl = await createActiveControl(organization.slug, headers, {
+      controlCode: 'AUTH-049',
+      title: 'Require MFA',
+    });
+    const secondControl = await createActiveControl(organization.slug, headers, {
+      controlCode: 'AUTH-050',
+      title: 'Require SSO',
+    });
+
+    const firstItemResponse = await addChecklistTemplateItemRequest(
+      organization.slug,
+      template.id,
+      headers,
+      { controlId: firstControl.id, sectionId: section.id },
+    );
+    const secondItemResponse = await addChecklistTemplateItemRequest(
+      organization.slug,
+      template.id,
+      headers,
+      { controlId: secondControl.id },
+    );
+    const firstItem = (firstItemResponse.body.checklistTemplate as { items: Array<{ id: string }> })
+      .items[0]!;
+    const secondItem = (
+      secondItemResponse.body.checklistTemplate as { items: Array<{ id: string }> }
+    ).items.find(({ id }) => id !== firstItem.id)!;
+    const reorderResponse = await reorderChecklistTemplateItemsRequest(
+      organization.slug,
+      template.id,
+      headers,
+      {
+        items: [
+          { id: secondItem.id, sectionId: section.id },
+          { id: firstItem.id, sectionId: null },
+        ],
+      },
+    );
+
+    expect(reorderResponse.status).toBe(200);
+    expect(reorderResponse.body.checklistTemplate).toMatchObject({
+      sections: [
+        {
+          items: [
+            {
+              control: { controlCode: 'AUTH-050' },
+              displayOrder: 0,
+              sectionId: section.id,
+            },
+          ],
+          name: 'Identity',
+        },
+      ],
+      unsectionedItems: [
+        {
+          control: { controlCode: 'AUTH-049' },
+          displayOrder: 0,
+          sectionId: null,
+        },
+      ],
+    });
+  });
+
+  it('prevents Organization members from managing Sections or item display order', async () => {
+    const { headers: ownerHeaders, organization } =
+      await createSignedInOwner('template-sections-auth');
+    const member = await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'template-sections-auth-member',
+      role: 'member',
+    });
+    const createTemplateResponse = await createChecklistTemplateRequest(
+      organization.slug,
+      ownerHeaders,
+      { name: 'Section Auth Template' },
+    );
+    const template = createTemplateResponse.body.checklistTemplate as { id: string };
+    const sectionResponse = await createChecklistTemplateSectionRequest(
+      organization.slug,
+      template.id,
+      ownerHeaders,
+      { name: 'Owner Section' },
+    );
+    const section = (sectionResponse.body.checklistTemplate as { sections: Array<{ id: string }> })
+      .sections[0]!;
+
+    const memberCreateSectionResponse = await createChecklistTemplateSectionRequest(
+      organization.slug,
+      template.id,
+      member.headers,
+      { name: 'Member Section' },
+    );
+    const memberRenameSectionResponse = await renameChecklistTemplateSectionRequest(
+      organization.slug,
+      template.id,
+      section.id,
+      member.headers,
+      { name: 'Renamed' },
+    );
+    const memberReorderSectionsResponse = await reorderChecklistTemplateSectionsRequest(
+      organization.slug,
+      template.id,
+      member.headers,
+      { sectionIds: [section.id] },
+    );
+    const memberReorderItemsResponse = await reorderChecklistTemplateItemsRequest(
+      organization.slug,
+      template.id,
+      member.headers,
+      { items: [] },
+    );
+
+    expect(memberCreateSectionResponse.status).toBe(403);
+    expect(memberRenameSectionResponse.status).toBe(403);
+    expect(memberReorderSectionsResponse.status).toBe(403);
+    expect(memberReorderItemsResponse.status).toBe(403);
   });
 });
