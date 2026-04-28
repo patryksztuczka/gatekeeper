@@ -478,6 +478,23 @@ async function getUncheckedCurrentRequirementsReport(input: {
   };
 }
 
+async function getOutdatedControlVersionsReport(input: {
+  headers?: Headers;
+  includeArchived?: boolean;
+  organizationSlug: string;
+}) {
+  const query = input.includeArchived ? '?includeArchived=true' : '';
+  const response = await app.request(
+    `http://example.com/api/organizations/${input.organizationSlug}/reports/outdated-control-versions${query}`,
+    input.headers ? { headers: input.headers } : undefined,
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
 async function setComponentArchived(input: {
   archived: boolean;
   componentId: string;
@@ -755,6 +772,243 @@ describe('Project Checklists API', () => {
           projectChecklistItem: { id: itemByControlId.get(updatedControl.controlId)!.id },
           uncheckedReason: 'new-control-version',
           verificationRecord: expect.objectContaining({ status: 'unchecked' }),
+        }),
+      ]),
+    );
+  });
+
+  it('reports outdated Control Versions with active-work defaults and archived-work access control', async () => {
+    const owner = await createSignedInOwner('outdated-report-owner');
+    const admin = await addMemberToOrganization(
+      owner.organization.id,
+      'outdated-report-admin',
+      'admin',
+    );
+    const member = await addMemberToOrganization(owner.organization.id, 'outdated-report-member');
+    const outsider = await createSignedInOwner('outdated-report-outsider');
+    const projectId = await createProject({
+      organizationId: owner.organization.id,
+      projectOwnerMemberId: null,
+      slug: 'outdated-active-work',
+    });
+    const componentId = await createComponent(projectId, 'Active Outdated Component');
+    const outdatedControl = await createActiveControl({
+      controlCode: 'AUTH-054',
+      organizationId: owner.organization.id,
+      title: 'Require access review',
+    });
+    const neverVerifiedControl = await createActiveControl({
+      controlCode: 'LOG-054',
+      organizationId: owner.organization.id,
+      title: 'Require log review',
+    });
+    const refreshedControl = await createActiveControl({
+      controlCode: 'SEC-054',
+      organizationId: owner.organization.id,
+      title: 'Require security review',
+    });
+    const templateId = await createTemplate({
+      controlIds: [
+        outdatedControl.controlId,
+        neverVerifiedControl.controlId,
+        refreshedControl.controlId,
+      ],
+      organizationId: owner.organization.id,
+    });
+    const activeChecklist = (
+      await applyTemplate({
+        body: { templateId },
+        componentId,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'outdated-active-work',
+      })
+    ).body.projectChecklist as {
+      id: string;
+      items: Array<{ control: { id: string }; id: string }>;
+    };
+    const activeItemByControlId = new Map(
+      activeChecklist.items.map((item) => [item.control.id, item]),
+    );
+
+    await updateChecklistItemVerification({
+      body: { status: 'checked' },
+      checklistId: activeChecklist.id,
+      componentId,
+      headers: owner.headers,
+      itemId: activeItemByControlId.get(outdatedControl.controlId)!.id,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'outdated-active-work',
+    });
+    await updateChecklistItemVerification({
+      body: { status: 'checked' },
+      checklistId: activeChecklist.id,
+      componentId,
+      headers: owner.headers,
+      itemId: activeItemByControlId.get(refreshedControl.controlId)!.id,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'outdated-active-work',
+    });
+
+    const archivedProjectId = await createProject({
+      organizationId: owner.organization.id,
+      projectOwnerMemberId: null,
+      slug: 'outdated-archived-project',
+    });
+    const archivedProjectComponentId = await createComponent(
+      archivedProjectId,
+      'Outdated Archived Project Component',
+    );
+    const archivedComponentProjectId = await createProject({
+      organizationId: owner.organization.id,
+      projectOwnerMemberId: null,
+      slug: 'outdated-archived-component',
+    });
+    const archivedComponentId = await createComponent(
+      archivedComponentProjectId,
+      'Outdated Archived Component',
+    );
+    const archivedChecklistProjectId = await createProject({
+      organizationId: owner.organization.id,
+      projectOwnerMemberId: null,
+      slug: 'outdated-archived-checklist',
+    });
+    const archivedChecklistComponentId = await createComponent(
+      archivedChecklistProjectId,
+      'Outdated Archived Checklist Component',
+    );
+
+    for (const [slug, archivedComponent] of [
+      ['outdated-archived-project', archivedProjectComponentId],
+      ['outdated-archived-component', archivedComponentId],
+      ['outdated-archived-checklist', archivedChecklistComponentId],
+    ] as const) {
+      await applyTemplate({
+        body: { templateId },
+        componentId: archivedComponent,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: slug,
+      });
+    }
+
+    const proposedResponse = await createControlProposedUpdate({
+      body: {
+        acceptedEvidenceTypes: ['document'],
+        applicabilityConditions: 'Applies to active Project Checklist Items.',
+        businessMeaning: 'Updated security review requires fresh verification.',
+        controlCode: 'SEC-054',
+        externalStandardsMappings: [],
+        releaseImpact: 'blocking',
+        title: 'Require refreshed security review',
+        verificationMethod: 'Review updated security evidence.',
+      },
+      controlId: refreshedControl.controlId,
+      headers: owner.headers,
+      organizationSlug: owner.organization.slug,
+    });
+    await publishControlProposedUpdate({
+      controlId: refreshedControl.controlId,
+      headers: owner.headers,
+      organizationSlug: owner.organization.slug,
+      proposedUpdateId: (proposedResponse.body.proposedUpdate as { id: string }).id,
+    });
+    const latestOutdatedVersionId = await addLatestControlVersion(
+      outdatedControl.controlId,
+      'AUTH-054',
+      'Require refreshed access review',
+    );
+
+    await db
+      .update(projects)
+      .set({ archivedAt: new Date() })
+      .where(eq(projects.id, archivedProjectId));
+    await db
+      .update(projectComponents)
+      .set({ archivedAt: new Date() })
+      .where(eq(projectComponents.id, archivedComponentId));
+    await db
+      .update(projectChecklists)
+      .set({ archivedAt: new Date() })
+      .where(eq(projectChecklists.componentId, archivedChecklistComponentId));
+
+    await expect(
+      getOutdatedControlVersionsReport({ organizationSlug: owner.organization.slug }),
+    ).resolves.toMatchObject({ body: { error: 'Unauthorized' }, status: 401 });
+    await expect(
+      getOutdatedControlVersionsReport({
+        headers: outsider.headers,
+        organizationSlug: owner.organization.slug,
+      }),
+    ).resolves.toMatchObject({ body: { error: 'Organization not found' }, status: 404 });
+    await expect(
+      getOutdatedControlVersionsReport({
+        headers: member.headers,
+        includeArchived: true,
+        organizationSlug: owner.organization.slug,
+      }),
+    ).resolves.toMatchObject({ status: 403 });
+
+    const activeReportResponse = await getOutdatedControlVersionsReport({
+      headers: member.headers,
+      organizationSlug: owner.organization.slug,
+    });
+    const activeOutdatedItems = activeReportResponse.body.outdatedControlVersions as Array<{
+      control: { controlCode: string };
+      latestControlVersion: { id: string; versionNumber: number };
+      pinnedControlVersion: { id: string; versionNumber: number };
+      project: { archivedAt: string | null; slug: string };
+      projectChecklist: { archivedAt: string | null; displayName: string };
+      projectChecklistItem: { id: string };
+      projectComponent: { archivedAt: string | null; name: string };
+      verificationRecord: { status: string };
+    }>;
+
+    expect(activeReportResponse.status).toBe(200);
+    expect(activeOutdatedItems).toEqual([
+      expect.objectContaining({
+        control: expect.objectContaining({ controlCode: 'AUTH-054' }),
+        latestControlVersion: { id: latestOutdatedVersionId, versionNumber: 2 },
+        pinnedControlVersion: {
+          id: outdatedControl.versionId,
+          versionNumber: 1,
+        },
+        project: expect.objectContaining({ archivedAt: null, slug: 'outdated-active-work' }),
+        projectChecklist: expect.objectContaining({ archivedAt: null }),
+        projectChecklistItem: { id: activeItemByControlId.get(outdatedControl.controlId)!.id },
+        projectComponent: expect.objectContaining({
+          archivedAt: null,
+          name: 'Active Outdated Component',
+        }),
+        verificationRecord: expect.objectContaining({ status: 'checked' }),
+      }),
+    ]);
+    expect(activeOutdatedItems.map((item) => item.control.controlCode)).not.toContain('LOG-054');
+    expect(activeOutdatedItems.map((item) => item.control.controlCode)).not.toContain('SEC-054');
+
+    const archivedReportResponse = await getOutdatedControlVersionsReport({
+      headers: admin.headers,
+      includeArchived: true,
+      organizationSlug: owner.organization.slug,
+    });
+    const archivedOutdatedItems = archivedReportResponse.body.outdatedControlVersions as Array<{
+      project: { archivedAt: string | null; slug: string };
+      projectChecklist: { archivedAt: string | null };
+      projectComponent: { archivedAt: string | null };
+    }>;
+
+    expect(archivedReportResponse.status).toBe(200);
+    expect(archivedOutdatedItems).toHaveLength(4);
+    expect(archivedOutdatedItems).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          project: expect.objectContaining({ archivedAt: expect.any(String) }),
+        }),
+        expect.objectContaining({
+          projectComponent: expect.objectContaining({ archivedAt: expect.any(String) }),
+        }),
+        expect.objectContaining({
+          projectChecklist: expect.objectContaining({ archivedAt: expect.any(String) }),
         }),
       ]),
     );

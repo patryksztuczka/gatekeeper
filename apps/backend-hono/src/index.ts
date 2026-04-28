@@ -86,6 +86,7 @@ import {
   applyChecklistTemplateToProjectComponent,
   canApplyProjectChecklists,
   getProjectChecklistForMembership,
+  listOutdatedControlVersionsForMembership,
   listUncheckedCurrentRequirementsForMembership,
   normalizeApplyChecklistTemplateBody,
   normalizeChecklistItemVerificationBody,
@@ -276,6 +277,41 @@ app.get(
     });
   },
 );
+
+app.get('/api/organizations/:organizationSlug/reports/outdated-control-versions', async (c) => {
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const membership = await getOrganizationMembership(
+    c.req.param('organizationSlug'),
+    session.user.id,
+  );
+
+  if (!membership) {
+    return c.json({ error: 'Organization not found' }, 404);
+  }
+
+  const includeArchived = c.req.query('includeArchived') === 'true';
+
+  if (includeArchived && !canManageProjects(membership.role)) {
+    return c.json(
+      { error: 'Archived work history is restricted to Organization owners and admins.' },
+      403,
+    );
+  }
+
+  return c.json({
+    outdatedControlVersions: await listOutdatedControlVersionsForMembership({
+      includeArchived,
+      membership,
+    }),
+  });
+});
 
 app.get('/api/organizations/:organizationSlug/checklist-templates', async (c) => {
   const session = await auth.api.getSession({

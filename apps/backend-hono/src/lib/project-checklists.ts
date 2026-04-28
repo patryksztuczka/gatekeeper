@@ -111,6 +111,46 @@ export type UncheckedCurrentRequirementReportItem = {
   };
 };
 
+export type OutdatedControlVersionReportItem = {
+  control: {
+    controlCode: string;
+    id: string;
+    releaseImpact: string;
+    title: string;
+  };
+  latestControlVersion: {
+    id: string;
+    versionNumber: number;
+  };
+  pinnedControlVersion: {
+    id: string;
+    versionNumber: number;
+  };
+  project: {
+    archivedAt: string | null;
+    id: string;
+    name: string;
+    slug: string;
+  };
+  projectChecklist: {
+    archivedAt: string | null;
+    displayName: string;
+    id: string;
+  };
+  projectChecklistItem: {
+    id: string;
+  };
+  projectComponent: {
+    archivedAt: string | null;
+    id: string;
+    name: string;
+  };
+  verificationRecord: {
+    id: string;
+    status: string;
+  };
+};
+
 type ApplyChecklistTemplateInput = {
   displayName: string | null;
   templateId: string;
@@ -777,6 +817,135 @@ export async function listUncheckedCurrentRequirementsForMembership(
       status: row.verificationStatus,
     },
   }));
+}
+
+export async function listOutdatedControlVersionsForMembership(input: {
+  includeArchived: boolean;
+  membership: OrganizationMembership;
+}): Promise<OutdatedControlVersionReportItem[]> {
+  const rows = await db
+    .select({
+      componentArchivedAt: projectComponents.archivedAt,
+      componentId: projectComponents.id,
+      componentName: projectComponents.name,
+      controlCode: controlVersions.controlCode,
+      controlId: projectChecklistItems.controlId,
+      displayOrder: projectChecklistItems.displayOrder,
+      itemId: projectChecklistItems.id,
+      latestControlVersionId: controls.currentVersionId,
+      pinnedControlVersionId: projectChecklistItems.controlVersionId,
+      pinnedVersionNumber: controlVersions.versionNumber,
+      projectArchivedAt: projects.archivedAt,
+      projectChecklistArchivedAt: projectChecklists.archivedAt,
+      projectChecklistDisplayName: projectChecklists.displayName,
+      projectChecklistId: projectChecklists.id,
+      projectId: projects.id,
+      projectName: projects.name,
+      projectSlug: projects.slug,
+      releaseImpact: controlVersions.releaseImpact,
+      title: controlVersions.title,
+      verificationRecordId: projectChecklistVerificationRecords.id,
+      verificationStatus: projectChecklistVerificationRecords.status,
+    })
+    .from(projectChecklistItems)
+    .innerJoin(
+      projectChecklists,
+      eq(projectChecklistItems.projectChecklistId, projectChecklists.id),
+    )
+    .innerJoin(projectComponents, eq(projectChecklists.componentId, projectComponents.id))
+    .innerJoin(projects, eq(projectComponents.projectId, projects.id))
+    .innerJoin(controls, eq(projectChecklistItems.controlId, controls.id))
+    .innerJoin(controlVersions, eq(projectChecklistItems.controlVersionId, controlVersions.id))
+    .innerJoin(
+      projectChecklistVerificationRecords,
+      eq(projectChecklistItems.verificationRecordId, projectChecklistVerificationRecords.id),
+    )
+    .where(
+      and(
+        eq(projects.organizationId, input.membership.organizationId),
+        input.includeArchived ? undefined : isNull(projects.archivedAt),
+        input.includeArchived ? undefined : isNull(projectComponents.archivedAt),
+        input.includeArchived ? undefined : isNull(projectChecklists.archivedAt),
+        isNull(projectChecklistItems.removedFromTemplateAt),
+        isNull(controls.archivedAt),
+        ne(projectChecklistItems.controlVersionId, controls.currentVersionId),
+      ),
+    )
+    .orderBy(
+      asc(projects.name),
+      asc(projectComponents.name),
+      asc(projectChecklists.displayName),
+      asc(projectChecklistItems.displayOrder),
+      asc(controlVersions.controlCode),
+    );
+
+  const latestControlVersionIds = rows
+    .map(({ latestControlVersionId }) => latestControlVersionId)
+    .filter((latestControlVersionId): latestControlVersionId is string => !!latestControlVersionId);
+  const latestVersions = latestControlVersionIds.length
+    ? await db
+        .select({
+          id: controlVersions.id,
+          versionNumber: controlVersions.versionNumber,
+        })
+        .from(controlVersions)
+        .where(inArray(controlVersions.id, latestControlVersionIds))
+    : [];
+  const latestVersionById = new Map(latestVersions.map((version) => [version.id, version]));
+
+  return rows.flatMap((row) => {
+    if (!row.latestControlVersionId) {
+      return [];
+    }
+
+    const latestControlVersion = latestVersionById.get(row.latestControlVersionId);
+
+    if (!latestControlVersion) {
+      return [];
+    }
+
+    return [
+      {
+        control: {
+          controlCode: row.controlCode,
+          id: row.controlId,
+          releaseImpact: row.releaseImpact,
+          title: row.title,
+        },
+        latestControlVersion: {
+          id: latestControlVersion.id,
+          versionNumber: latestControlVersion.versionNumber,
+        },
+        pinnedControlVersion: {
+          id: row.pinnedControlVersionId,
+          versionNumber: row.pinnedVersionNumber,
+        },
+        project: {
+          archivedAt: row.projectArchivedAt?.toISOString() ?? null,
+          id: row.projectId,
+          name: row.projectName,
+          slug: row.projectSlug,
+        },
+        projectChecklist: {
+          archivedAt: row.projectChecklistArchivedAt?.toISOString() ?? null,
+          displayName: row.projectChecklistDisplayName,
+          id: row.projectChecklistId,
+        },
+        projectChecklistItem: {
+          id: row.itemId,
+        },
+        projectComponent: {
+          archivedAt: row.componentArchivedAt?.toISOString() ?? null,
+          id: row.componentId,
+          name: row.componentName,
+        },
+        verificationRecord: {
+          id: row.verificationRecordId,
+          status: row.verificationStatus,
+        },
+      },
+    ];
+  });
 }
 
 function isCompleteVerificationStatus(status: string): boolean {
