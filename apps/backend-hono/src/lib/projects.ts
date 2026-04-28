@@ -1,6 +1,7 @@
 import { and, asc, eq, isNotNull, isNull, ne } from 'drizzle-orm';
 import { db } from '../db/client';
 import { members, organizations, projectComponents, projects, users } from '../db/schema';
+import { catchUpActiveProjectChecklists } from './project-checklist-catch-up';
 
 export type ProjectListItem = {
   archivedAt: string | null;
@@ -315,6 +316,10 @@ export async function setProjectArchivedForMembership(input: {
     })
     .where(eq(projects.id, existingProject.id));
 
+  if (!input.archived) {
+    await catchUpActiveProjectChecklists({ projectId: existingProject.id });
+  }
+
   return getProjectDetailForMembership(input.membership, input.projectSlug);
 }
 
@@ -489,6 +494,10 @@ export async function setProjectComponentArchivedForMembership(input: {
       updatedAt: new Date(),
     })
     .where(eq(projectComponents.id, component.id));
+
+  if (!input.archived) {
+    await catchUpActiveProjectChecklists({ componentId: component.id });
+  }
 
   return getProjectComponent(project.id, component.id).then((row) =>
     row ? formatProjectComponent(row) : null,

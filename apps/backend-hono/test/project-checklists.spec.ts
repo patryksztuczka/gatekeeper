@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import app from '../src/index';
@@ -470,6 +470,47 @@ async function getUncheckedCurrentRequirementsReport(input: {
   const response = await app.request(
     `http://example.com/api/organizations/${input.organizationSlug}/reports/unchecked-current-requirements`,
     input.headers ? { headers: input.headers } : undefined,
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+async function setComponentArchived(input: {
+  archived: boolean;
+  componentId: string;
+  headers: Headers;
+  organizationSlug: string;
+  projectSlug: string;
+}) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${input.organizationSlug}/projects/${input.projectSlug}/components/${input.componentId}/${input.archived ? 'archive' : 'restore'}`,
+    {
+      headers: input.headers,
+      method: 'PATCH',
+    },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+async function setProjectArchived(input: {
+  archived: boolean;
+  headers: Headers;
+  organizationSlug: string;
+  projectSlug: string;
+}) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${input.organizationSlug}/projects/${input.projectSlug}/${input.archived ? 'archive' : 'restore'}`,
+    {
+      headers: input.headers,
+      method: 'PATCH',
+    },
   );
 
   return {
@@ -1812,6 +1853,305 @@ describe('Project Checklists API', () => {
                 ],
                 status: 'unchecked',
               },
+            },
+          ],
+        },
+      },
+      status: 200,
+    });
+  });
+
+  it('catches up restored active-work containers without duplicating verification records', async () => {
+    const owner = await createSignedInOwner('project-checklist-restore-catch-up');
+    const staleControl = await createActiveControl({
+      controlCode: 'AUTH-853',
+      organizationId: owner.organization.id,
+      title: 'Require MFA before restore',
+    });
+    const missedControl = await createActiveControl({
+      controlCode: 'LOG-853',
+      organizationId: owner.organization.id,
+      title: 'Require logging before restore',
+    });
+    const templateId = await createTemplate({
+      controlIds: [staleControl.controlId],
+      organizationId: owner.organization.id,
+    });
+    const projectArchivedProjectId = await createProject({
+      organizationId: owner.organization.id,
+      projectOwnerMemberId: null,
+      slug: 'restore-project-risk',
+    });
+    const componentArchivedProjectId = await createProject({
+      organizationId: owner.organization.id,
+      projectOwnerMemberId: null,
+      slug: 'restore-component-risk',
+    });
+    const checklistArchivedProjectId = await createProject({
+      organizationId: owner.organization.id,
+      projectOwnerMemberId: null,
+      slug: 'restore-checklist-risk',
+    });
+    const projectArchivedComponentId = await createComponent(
+      projectArchivedProjectId,
+      'Project Archived Component',
+    );
+    const componentArchivedComponentId = await createComponent(
+      componentArchivedProjectId,
+      'Component Archived Component',
+    );
+    const checklistArchivedComponentId = await createComponent(
+      checklistArchivedProjectId,
+      'Checklist Archived Component',
+    );
+    const projectArchivedApplyResponse = await applyTemplate({
+      body: { templateId },
+      componentId: projectArchivedComponentId,
+      headers: owner.headers,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'restore-project-risk',
+    });
+    const componentArchivedApplyResponse = await applyTemplate({
+      body: { templateId },
+      componentId: componentArchivedComponentId,
+      headers: owner.headers,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'restore-component-risk',
+    });
+    const checklistArchivedApplyResponse = await applyTemplate({
+      body: { templateId },
+      componentId: checklistArchivedComponentId,
+      headers: owner.headers,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'restore-checklist-risk',
+    });
+    const projectArchivedChecklist = projectArchivedApplyResponse.body.projectChecklist as {
+      id: string;
+      items: [{ id: string; verificationRecord: { id: string } }];
+    };
+    const componentArchivedChecklist = componentArchivedApplyResponse.body.projectChecklist as {
+      id: string;
+      items: [{ id: string; verificationRecord: { id: string } }];
+    };
+    const checklistArchivedChecklist = checklistArchivedApplyResponse.body.projectChecklist as {
+      id: string;
+      items: [{ id: string; verificationRecord: { id: string } }];
+    };
+    const originalRecordIds = [
+      projectArchivedChecklist.items[0].verificationRecord.id,
+      componentArchivedChecklist.items[0].verificationRecord.id,
+      checklistArchivedChecklist.items[0].verificationRecord.id,
+    ];
+
+    await updateChecklistItemVerification({
+      body: { status: 'checked' },
+      checklistId: projectArchivedChecklist.id,
+      componentId: projectArchivedComponentId,
+      headers: owner.headers,
+      itemId: projectArchivedChecklist.items[0].id,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'restore-project-risk',
+    });
+    await expect(
+      setProjectArchived({
+        archived: true,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'restore-project-risk',
+      }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      setComponentArchived({
+        archived: true,
+        componentId: componentArchivedComponentId,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'restore-component-risk',
+      }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      setChecklistArchived({
+        archived: true,
+        checklistId: checklistArchivedChecklist.id,
+        componentId: checklistArchivedComponentId,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'restore-checklist-risk',
+      }),
+    ).resolves.toMatchObject({ status: 200 });
+
+    await expect(
+      addChecklistTemplateItem({
+        controlId: missedControl.controlId,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        templateId,
+      }),
+    ).resolves.toMatchObject({ status: 201 });
+
+    const proposedResponse = await createControlProposedUpdate({
+      body: {
+        acceptedEvidenceTypes: ['document'],
+        applicabilityConditions: 'Applies after restore.',
+        businessMeaning: 'Restored work must use current assurance requirements.',
+        controlCode: 'AUTH-853',
+        externalStandardsMappings: [],
+        releaseImpact: 'blocking',
+        title: 'Require MFA after restore',
+        verificationMethod: 'Review restored evidence.',
+      },
+      controlId: staleControl.controlId,
+      headers: owner.headers,
+      organizationSlug: owner.organization.slug,
+    });
+    const proposedUpdate = proposedResponse.body.proposedUpdate as { id: string };
+    const publishResponse = await publishControlProposedUpdate({
+      controlId: staleControl.controlId,
+      headers: owner.headers,
+      organizationSlug: owner.organization.slug,
+      proposedUpdateId: proposedUpdate.id,
+    });
+    const publishedControl = publishResponse.body.control as {
+      currentVersion: { id: string; versionNumber: number };
+    };
+
+    expect(publishResponse.status).toBe(201);
+
+    const inactiveItems = await db
+      .select()
+      .from(projectChecklistItems)
+      .where(
+        inArray(projectChecklistItems.projectChecklistId, [
+          projectArchivedChecklist.id,
+          componentArchivedChecklist.id,
+          checklistArchivedChecklist.id,
+        ]),
+      );
+
+    expect(inactiveItems).toHaveLength(3);
+    expect(inactiveItems.map(({ controlVersionId }) => controlVersionId)).toEqual([
+      staleControl.versionId,
+      staleControl.versionId,
+      staleControl.versionId,
+    ]);
+
+    await expect(
+      setProjectArchived({
+        archived: false,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'restore-project-risk',
+      }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      setComponentArchived({
+        archived: false,
+        componentId: componentArchivedComponentId,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'restore-component-risk',
+      }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      setChecklistArchived({
+        archived: false,
+        checklistId: checklistArchivedChecklist.id,
+        componentId: checklistArchivedComponentId,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'restore-checklist-risk',
+      }),
+    ).resolves.toMatchObject({ status: 200 });
+
+    await setProjectArchived({
+      archived: false,
+      headers: owner.headers,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'restore-project-risk',
+    });
+    await setComponentArchived({
+      archived: false,
+      componentId: componentArchivedComponentId,
+      headers: owner.headers,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'restore-component-risk',
+    });
+    await setChecklistArchived({
+      archived: false,
+      checklistId: checklistArchivedChecklist.id,
+      componentId: checklistArchivedComponentId,
+      headers: owner.headers,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'restore-checklist-risk',
+    });
+
+    const restoredItems = await db
+      .select()
+      .from(projectChecklistItems)
+      .where(
+        inArray(projectChecklistItems.projectChecklistId, [
+          projectArchivedChecklist.id,
+          componentArchivedChecklist.id,
+          checklistArchivedChecklist.id,
+        ]),
+      );
+    const restoredRecords = await db
+      .select()
+      .from(projectChecklistVerificationRecords)
+      .where(
+        inArray(
+          projectChecklistVerificationRecords.id,
+          restoredItems.map(({ verificationRecordId }) => verificationRecordId),
+        ),
+      );
+    const preservedRecords = await db
+      .select()
+      .from(projectChecklistVerificationRecords)
+      .where(inArray(projectChecklistVerificationRecords.id, originalRecordIds));
+
+    expect(restoredItems).toHaveLength(6);
+    expect(restoredRecords).toHaveLength(6);
+    expect(preservedRecords).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          controlVersionId: staleControl.versionId,
+          id: originalRecordIds[0],
+          status: 'checked',
+        }),
+      ]),
+    );
+    expect(restoredItems).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ controlVersionId: publishedControl.currentVersion.id }),
+        expect.objectContaining({ controlVersionId: missedControl.versionId }),
+      ]),
+    );
+
+    await expect(
+      openChecklist({
+        checklistId: projectArchivedChecklist.id,
+        componentId: projectArchivedComponentId,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'restore-project-risk',
+      }),
+    ).resolves.toMatchObject({
+      body: {
+        projectChecklist: {
+          completion: { completedItems: 0, totalItems: 2 },
+          items: [
+            {
+              control: { controlCode: 'AUTH-853' },
+              controlVersion: { id: publishedControl.currentVersion.id, versionNumber: 2 },
+              verificationRecord: {
+                history: [{ controlVersion: { id: staleControl.versionId }, status: 'checked' }],
+                status: 'unchecked',
+              },
+            },
+            {
+              control: { controlCode: 'LOG-853' },
+              controlVersion: { id: missedControl.versionId, versionNumber: 1 },
+              verificationRecord: { status: 'unchecked' },
             },
           ],
         },
