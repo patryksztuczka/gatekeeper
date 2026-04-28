@@ -751,10 +751,12 @@ describe('Checklist Templates', () => {
       items: [
         {
           control: {
+            archivedAt: null,
             controlCode: 'AUTH-043',
             id: control.id,
             title: 'Require MFA',
           },
+          requiresAdminAttention: false,
         },
       ],
     });
@@ -801,6 +803,85 @@ describe('Checklist Templates', () => {
     expect(duplicateResponse.status).toBe(400);
     expect(duplicateResponse.body).toMatchObject({
       error: 'Control is already included in this Checklist Template.',
+    });
+  });
+
+  it('retains archived Control references and marks them for admin attention', async () => {
+    const { headers: ownerHeaders, organization } = await createSignedInOwner(
+      'template-items-archived-retained',
+    );
+    const member = await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'template-items-archived-member',
+      role: 'member',
+    });
+    const createTemplateResponse = await createChecklistTemplateRequest(
+      organization.slug,
+      ownerHeaders,
+      { name: 'Archived Reference Template' },
+    );
+    const template = createTemplateResponse.body.checklistTemplate as { id: string };
+    const control = await createActiveControl(organization.slug, ownerHeaders, {
+      controlCode: 'AUTH-145',
+      title: 'Retained Archived Control',
+    });
+
+    await addChecklistTemplateItemRequest(organization.slug, template.id, ownerHeaders, {
+      controlId: control.id,
+    });
+    await publishChecklistTemplateRequest(organization.slug, template.id, ownerHeaders);
+
+    const archiveResponse = await archiveControlRequest(
+      organization.slug,
+      control.id,
+      ownerHeaders,
+    );
+
+    expect(archiveResponse.status).toBe(200);
+
+    const ownerListResponse = await listChecklistTemplatesRequest(organization.slug, ownerHeaders, {
+      status: 'active',
+    });
+    const memberListResponse = await listChecklistTemplatesRequest(
+      organization.slug,
+      member.headers,
+      { status: 'active' },
+    );
+
+    for (const response of [ownerListResponse, memberListResponse]) {
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({
+        checklistTemplates: [
+          {
+            items: [
+              {
+                control: {
+                  archivedAt: expect.any(String),
+                  controlCode: 'AUTH-145',
+                  id: control.id,
+                  title: 'Retained Archived Control',
+                },
+                requiresAdminAttention: true,
+              },
+            ],
+            name: 'Archived Reference Template',
+            status: 'active',
+          },
+        ],
+      });
+    }
+
+    const addArchivedAgainResponse = await addChecklistTemplateItemRequest(
+      organization.slug,
+      template.id,
+      ownerHeaders,
+      { controlId: control.id },
+    );
+
+    expect(addArchivedAgainResponse.status).toBe(400);
+    expect(addArchivedAgainResponse.body).toMatchObject({
+      error: 'Only active, non-archived Controls can be added to Checklist Templates.',
     });
   });
 

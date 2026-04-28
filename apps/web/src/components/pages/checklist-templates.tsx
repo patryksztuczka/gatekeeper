@@ -439,6 +439,16 @@ export function ChecklistTemplatesPage() {
                     Items reference Controls from the Control Library.
                   </p>
                 </div>
+                {template.items.some((item) => item.requiresAdminAttention) ? (
+                  <Alert>
+                    <AlertCircle />
+                    <AlertTitle>Admin attention needed</AlertTitle>
+                    <AlertDescription>
+                      This Checklist Template still references archived Controls. Review the
+                      retained references before using it for new governance work.
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
                 {template.items.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No Controls added yet.</p>
                 ) : (
@@ -449,9 +459,22 @@ export function ChecklistTemplatesPage() {
                         className="flex flex-col gap-2 rounded-md border bg-background p-3 sm:flex-row sm:items-center sm:justify-between"
                       >
                         <div>
-                          <p className="text-sm font-medium">
-                            {item.control.controlCode}: {item.control.title}
-                          </p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-sm font-medium">
+                              {item.control.controlCode}: {item.control.title}
+                            </p>
+                            {item.control.archivedAt ? (
+                              <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">
+                                Archived Control
+                              </span>
+                            ) : null}
+                          </div>
+                          {item.requiresAdminAttention ? (
+                            <p className="mt-1 text-xs text-amber-700">
+                              Admin attention needed. This retained reference is no longer eligible
+                              for new Checklist Template items.
+                            </p>
+                          ) : null}
                         </div>
                         {canManage ? (
                           <Button

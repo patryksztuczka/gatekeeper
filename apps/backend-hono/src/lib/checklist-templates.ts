@@ -12,12 +12,14 @@ import type { OrganizationMembership } from './projects';
 
 export type ChecklistTemplateItem = {
   control: {
+    archivedAt: string | null;
     controlCode: string;
     id: string;
     title: string;
   };
   createdAt: string;
   id: string;
+  requiresAdminAttention: boolean;
 };
 
 export type ChecklistTemplateListItem = {
@@ -404,6 +406,7 @@ async function listChecklistTemplateItems(
 
   const rows = await db
     .select({
+      archivedAt: controls.archivedAt,
       controlCode: controlVersions.controlCode,
       controlId: controls.id,
       createdAt: checklistTemplateItems.createdAt,
@@ -428,12 +431,14 @@ async function listChecklistTemplateItems(
 
     items.push({
       control: {
+        archivedAt: row.archivedAt?.toISOString() ?? null,
         controlCode: row.controlCode,
         id: row.controlId,
         title: row.title,
       },
       createdAt: row.createdAt.toISOString(),
       id: row.id,
+      requiresAdminAttention: row.archivedAt !== null,
     });
     itemsByTemplateId.set(row.templateId, items);
   }
