@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from '../db/client';
 import {
   checklistTemplateItems,
@@ -8,6 +8,7 @@ import {
   controlVersions,
   projectChecklistItems,
   projectChecklists,
+  projectChecklistVerificationHistory,
   projectChecklistVerificationRecords,
   projectComponents,
   projects,
@@ -40,6 +41,7 @@ export type ProjectChecklistItemResponse = {
   };
   controlVersion: {
     id: string;
+    isLatest: boolean;
     versionNumber: number;
   };
   displayOrder: number;
@@ -47,9 +49,23 @@ export type ProjectChecklistItemResponse = {
   sectionId: string | null;
   templateItemId: string;
   verificationRecord: {
+    history: ProjectChecklistVerificationHistoryResponse[];
     id: string;
+    notApplicableExplanation: string | null;
     status: string;
   };
+};
+
+export type ProjectChecklistVerificationHistoryResponse = {
+  actorMemberId: string;
+  controlVersion: {
+    id: string;
+    versionNumber: number;
+  };
+  createdAt: string;
+  id: string;
+  notApplicableExplanation: string | null;
+  status: string;
 };
 
 export type ProjectChecklistSectionResponse = {
@@ -62,6 +78,13 @@ export type ProjectChecklistSectionResponse = {
 type ApplyChecklistTemplateInput = {
   displayName: string | null;
   templateId: string;
+};
+
+type VerificationStatus = 'checked' | 'unchecked' | 'not-applicable';
+
+type UpdateChecklistItemVerificationInput = {
+  notApplicableExplanation: string | null;
+  status: VerificationStatus | null;
 };
 
 export class ProjectChecklistInputError extends Error {}
@@ -224,6 +247,111 @@ export function normalizeApplyChecklistTemplateBody(body: unknown): ApplyCheckli
   };
 }
 
+export function normalizeChecklistItemVerificationBody(
+  body: unknown,
+): UpdateChecklistItemVerificationInput {
+  const value = typeof body === 'object' && body !== null ? body : {};
+  const record = value as Record<string, unknown>;
+  const status = typeof record.status === 'string' ? record.status : null;
+
+  return {
+    notApplicableExplanation:
+      typeof record.notApplicableExplanation === 'string' ? record.notApplicableExplanation : null,
+    status: isVerificationStatus(status) ? status : null,
+  };
+}
+
+export async function updateProjectChecklistItemVerification(input: {
+  checklistId: string;
+  componentId: string;
+  itemId: string;
+  membership: OrganizationMembership;
+  projectSlug: string;
+  values: UpdateChecklistItemVerificationInput;
+}): Promise<ProjectChecklistResponse | null> {
+  if (!input.values.status) {
+    throw new ProjectChecklistInputError(
+      'Verification status must be checked, unchecked, or not applicable.',
+    );
+  }
+
+  const notApplicableExplanation = input.values.notApplicableExplanation?.trim() ?? '';
+
+  if (input.values.status === 'not-applicable' && !notApplicableExplanation) {
+    throw new ProjectChecklistInputError('Not applicable verification requires an explanation.');
+  }
+
+  const checklistItem = await db
+    .select({
+      componentArchivedAt: projectComponents.archivedAt,
+      controlVersionId: projectChecklistItems.controlVersionId,
+      itemId: projectChecklistItems.id,
+      projectArchivedAt: projects.archivedAt,
+      projectChecklistArchivedAt: projectChecklists.archivedAt,
+      verificationRecordId: projectChecklistItems.verificationRecordId,
+    })
+    .from(projectChecklistItems)
+    .innerJoin(
+      projectChecklists,
+      eq(projectChecklistItems.projectChecklistId, projectChecklists.id),
+    )
+    .innerJoin(projectComponents, eq(projectChecklists.componentId, projectComponents.id))
+    .innerJoin(projects, eq(projectComponents.projectId, projects.id))
+    .where(
+      and(
+        eq(projectChecklistItems.id, input.itemId),
+        eq(projectChecklistItems.projectChecklistId, input.checklistId),
+        eq(projectChecklists.componentId, input.componentId),
+        eq(projects.organizationId, input.membership.organizationId),
+        eq(projects.slug, input.projectSlug),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (!checklistItem) {
+    return null;
+  }
+
+  if (
+    checklistItem.projectArchivedAt ||
+    checklistItem.componentArchivedAt ||
+    checklistItem.projectChecklistArchivedAt
+  ) {
+    throw new ProjectChecklistInputError('Archived Project Checklist containers are read-only.');
+  }
+
+  const now = new Date();
+  const storedExplanation =
+    input.values.status === 'not-applicable' ? notApplicableExplanation : null;
+
+  await db
+    .update(projectChecklistVerificationRecords)
+    .set({
+      notApplicableExplanation: storedExplanation,
+      status: input.values.status,
+      updatedAt: now,
+    })
+    .where(eq(projectChecklistVerificationRecords.id, checklistItem.verificationRecordId));
+
+  await db.insert(projectChecklistVerificationHistory).values({
+    actorMemberId: input.membership.id,
+    controlVersionId: checklistItem.controlVersionId,
+    createdAt: now,
+    id: crypto.randomUUID(),
+    notApplicableExplanation: storedExplanation,
+    projectChecklistItemId: checklistItem.itemId,
+    status: input.values.status,
+  });
+
+  return getProjectChecklistForMembership({
+    checklistId: input.checklistId,
+    componentId: input.componentId,
+    membership: input.membership,
+    projectSlug: input.projectSlug,
+  });
+}
+
 export async function getProjectChecklistForMembership(input: {
   checklistId: string;
   componentId?: string;
@@ -262,6 +390,7 @@ export async function getProjectChecklistForMembership(input: {
     .select({
       controlCode: controlVersions.controlCode,
       controlId: projectChecklistItems.controlId,
+      currentVersionId: controls.currentVersionId,
       controlVersionId: projectChecklistItems.controlVersionId,
       displayOrder: projectChecklistItems.displayOrder,
       id: projectChecklistItems.id,
@@ -269,6 +398,7 @@ export async function getProjectChecklistForMembership(input: {
       sectionDisplayOrder: checklistTemplateSections.displayOrder,
       sectionId: checklistTemplateItems.sectionId,
       sectionName: checklistTemplateSections.name,
+      notApplicableExplanation: projectChecklistVerificationRecords.notApplicableExplanation,
       status: projectChecklistVerificationRecords.status,
       templateItemId: projectChecklistItems.templateItemId,
       title: controlVersions.title,
@@ -288,6 +418,7 @@ export async function getProjectChecklistForMembership(input: {
       eq(checklistTemplateItems.sectionId, checklistTemplateSections.id),
     )
     .innerJoin(controlVersions, eq(projectChecklistItems.controlVersionId, controlVersions.id))
+    .innerJoin(controls, eq(projectChecklistItems.controlId, controls.id))
     .innerJoin(
       projectChecklistVerificationRecords,
       eq(projectChecklistItems.verificationRecordId, projectChecklistVerificationRecords.id),
@@ -300,6 +431,32 @@ export async function getProjectChecklistForMembership(input: {
       asc(projectChecklistItems.createdAt),
     );
 
+  const histories = itemRows.length
+    ? await db
+        .select({
+          actorMemberId: projectChecklistVerificationHistory.actorMemberId,
+          controlVersionId: projectChecklistVerificationHistory.controlVersionId,
+          createdAt: projectChecklistVerificationHistory.createdAt,
+          id: projectChecklistVerificationHistory.id,
+          notApplicableExplanation: projectChecklistVerificationHistory.notApplicableExplanation,
+          projectChecklistItemId: projectChecklistVerificationHistory.projectChecklistItemId,
+          status: projectChecklistVerificationHistory.status,
+          versionNumber: controlVersions.versionNumber,
+        })
+        .from(projectChecklistVerificationHistory)
+        .innerJoin(
+          controlVersions,
+          eq(projectChecklistVerificationHistory.controlVersionId, controlVersions.id),
+        )
+        .where(
+          inArray(
+            projectChecklistVerificationHistory.projectChecklistItemId,
+            itemRows.map(({ id }) => id),
+          ),
+        )
+        .orderBy(desc(projectChecklistVerificationHistory.createdAt))
+    : [];
+
   const items = itemRows.map((item) => ({
     control: {
       controlCode: item.controlCode,
@@ -309,6 +466,7 @@ export async function getProjectChecklistForMembership(input: {
     },
     controlVersion: {
       id: item.controlVersionId,
+      isLatest: item.controlVersionId === item.currentVersionId,
       versionNumber: item.versionNumber,
     },
     displayOrder: item.displayOrder,
@@ -316,7 +474,21 @@ export async function getProjectChecklistForMembership(input: {
     sectionId: item.sectionId,
     templateItemId: item.templateItemId,
     verificationRecord: {
+      history: histories
+        .filter((history) => history.projectChecklistItemId === item.id)
+        .map((history) => ({
+          actorMemberId: history.actorMemberId,
+          controlVersion: {
+            id: history.controlVersionId,
+            versionNumber: history.versionNumber,
+          },
+          createdAt: history.createdAt.toISOString(),
+          id: history.id,
+          notApplicableExplanation: history.notApplicableExplanation,
+          status: history.status,
+        })),
       id: item.verificationRecordId,
+      notApplicableExplanation: item.notApplicableExplanation,
       status: item.status,
     },
   }));
@@ -366,6 +538,10 @@ export async function getProjectChecklistForMembership(input: {
 
 function isCompleteVerificationStatus(status: string): boolean {
   return status === 'checked' || status === 'not-applicable' || status === 'not_applicable';
+}
+
+function isVerificationStatus(status: string | null): status is VerificationStatus {
+  return status === 'checked' || status === 'unchecked' || status === 'not-applicable';
 }
 
 async function assertProjectChecklistIsUnique(input: {

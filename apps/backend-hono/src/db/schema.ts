@@ -530,6 +530,7 @@ export const projectChecklistVerificationRecords = sqliteTable(
       .notNull()
       .references(() => controlVersions.id, { onDelete: 'restrict' }),
     status: text('status').default('unchecked').notNull(),
+    notApplicableExplanation: text('not_applicable_explanation'),
     createdAt: integer('created_at', { mode: 'timestamp_ms' })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),
@@ -577,5 +578,33 @@ export const projectChecklistItems = sqliteTable(
       table.projectChecklistId,
       table.templateItemId,
     ),
+  ],
+);
+
+export const projectChecklistVerificationHistory = sqliteTable(
+  'project_checklist_verification_history',
+  {
+    id: text('id').primaryKey(),
+    projectChecklistItemId: text('project_checklist_item_id')
+      .notNull()
+      .references(() => projectChecklistItems.id, { onDelete: 'cascade' }),
+    controlVersionId: text('control_version_id')
+      .notNull()
+      .references(() => controlVersions.id, { onDelete: 'restrict' }),
+    actorMemberId: text('actor_member_id')
+      .notNull()
+      .references(() => members.id, { onDelete: 'restrict' }),
+    status: text('status').notNull(),
+    notApplicableExplanation: text('not_applicable_explanation'),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+  },
+  (table) => [
+    index('project_checklist_verification_history_item_id_idx').on(table.projectChecklistItemId),
+    index('project_checklist_verification_history_control_version_id_idx').on(
+      table.controlVersionId,
+    ),
+    index('project_checklist_verification_history_actor_member_id_idx').on(table.actorMemberId),
   ],
 );
