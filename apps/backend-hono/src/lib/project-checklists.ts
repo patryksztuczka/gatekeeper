@@ -14,6 +14,7 @@ import {
   projects,
 } from '../db/schema';
 import { canManageProjects, type OrganizationMembership } from './projects';
+import { catchUpActiveProjectChecklists } from './project-checklist-catch-up';
 
 export type ProjectChecklistResponse = {
   archivedAt: string | null;
@@ -417,6 +418,10 @@ export async function setProjectChecklistArchivedForMembership(input: {
       updatedAt: new Date(),
     })
     .where(eq(projectChecklists.id, checklist.id));
+
+  if (!input.archived) {
+    await catchUpActiveProjectChecklists({ checklistId: checklist.id });
+  }
 
   return getProjectChecklistForMembership({
     checklistId: checklist.id,
