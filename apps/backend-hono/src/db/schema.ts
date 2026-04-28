@@ -406,3 +406,27 @@ export const checklistTemplates = sqliteTable(
     ),
   ],
 );
+
+export const checklistTemplateItems = sqliteTable(
+  'checklist_template_items',
+  {
+    id: text('id').primaryKey(),
+    templateId: text('template_id')
+      .notNull()
+      .references(() => checklistTemplates.id, { onDelete: 'cascade' }),
+    controlId: text('control_id')
+      .notNull()
+      .references(() => controls.id, { onDelete: 'cascade' }),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+  },
+  (table) => [
+    index('checklist_template_item_template_id_idx').on(table.templateId),
+    index('checklist_template_item_control_id_idx').on(table.controlId),
+    uniqueIndex('checklist_template_item_template_control_unique').on(
+      table.templateId,
+      table.controlId,
+    ),
+  ],
+);
