@@ -1,13 +1,17 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { AlertCircle, CheckCircle2, Plus } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Plus, Trash2 } from 'lucide-react';
 import { useParams, useSearchParams } from 'react-router';
 import {
+  addChecklistTemplateItem,
   createChecklistTemplate,
   getMembershipResolution,
+  listControls,
   listChecklistTemplates,
   publishChecklistTemplate,
+  removeChecklistTemplateItem,
   type ChecklistTemplateListItem,
+  type ControlListItem,
 } from '../../features/auth/auth-api';
 import { humanizeAuthError } from '../../features/auth/auth-errors';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -35,9 +39,11 @@ export function ChecklistTemplatesPage() {
   const { organizationSlug } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const [templates, setTemplates] = useState<ChecklistTemplateListItem[]>([]);
+  const [controls, setControls] = useState<ControlListItem[]>([]);
   const [currentRole, setCurrentRole] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [publishingTemplateId, setPublishingTemplateId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -53,13 +59,15 @@ export function ChecklistTemplatesPage() {
       setIsLoading(true);
       setError(null);
       try {
-        const [templateResponse, resolution] = await Promise.all([
+        const [templateResponse, resolution, controlResponse] = await Promise.all([
           listChecklistTemplates(organizationSlug, { search, status: statusFilter }),
           getMembershipResolution(),
+          listControls(organizationSlug, { status: 'active' }),
         ]);
         const organization = resolution.organizations.find((org) => org.slug === organizationSlug);
 
         setTemplates(templateResponse.checklistTemplates);
+        setControls(controlResponse.controls);
         setCurrentRole(organization?.role ?? null);
       } catch (caughtError) {
         const rawMessage =
@@ -137,6 +145,73 @@ export function ChecklistTemplatesPage() {
       setError(humanizeAuthError(null, rawMessage, 'Unable to publish Checklist Template.'));
     } finally {
       setPublishingTemplateId(null);
+    }
+  };
+
+  const handleAddChecklistTemplateItem = async (
+    event: FormEvent<HTMLFormElement>,
+    template: ChecklistTemplateListItem,
+  ) => {
+    event.preventDefault();
+    if (!organizationSlug) return;
+
+    const formData = new FormData(event.currentTarget);
+    const controlId = String(formData.get('controlId') ?? '');
+
+    if (!controlId) return;
+
+    setEditingTemplateId(template.id);
+    setError(null);
+    setStatus(null);
+    try {
+      const response = await addChecklistTemplateItem(organizationSlug, template.id, { controlId });
+
+      setTemplates((currentTemplates) =>
+        currentTemplates.map((currentTemplate) =>
+          currentTemplate.id === template.id ? response.checklistTemplate : currentTemplate,
+        ),
+      );
+      event.currentTarget.reset();
+      setStatus('Control added to Checklist Template.');
+    } catch (caughtError) {
+      const rawMessage =
+        caughtError instanceof Error
+          ? caughtError.message
+          : 'Unable to add Control to Checklist Template.';
+      setError(humanizeAuthError(null, rawMessage, 'Unable to add Control to Checklist Template.'));
+    } finally {
+      setEditingTemplateId(null);
+    }
+  };
+
+  const handleRemoveChecklistTemplateItem = async (
+    template: ChecklistTemplateListItem,
+    itemId: string,
+  ) => {
+    if (!organizationSlug) return;
+
+    setEditingTemplateId(template.id);
+    setError(null);
+    setStatus(null);
+    try {
+      const response = await removeChecklistTemplateItem(organizationSlug, template.id, itemId);
+
+      setTemplates((currentTemplates) =>
+        currentTemplates.map((currentTemplate) =>
+          currentTemplate.id === template.id ? response.checklistTemplate : currentTemplate,
+        ),
+      );
+      setStatus('Control removed from Checklist Template.');
+    } catch (caughtError) {
+      const rawMessage =
+        caughtError instanceof Error
+          ? caughtError.message
+          : 'Unable to remove Control from Checklist Template.';
+      setError(
+        humanizeAuthError(null, rawMessage, 'Unable to remove Control from Checklist Template.'),
+      );
+    } finally {
+      setEditingTemplateId(null);
     }
   };
 
@@ -259,6 +334,75 @@ export function ChecklistTemplatesPage() {
                     ? `Published ${formatDate(template.publishedAt)}`
                     : `Created ${formatDate(template.createdAt)}`}
                 </p>
+              </div>
+              <div className="mt-4 space-y-3 rounded-lg border bg-muted/30 p-4">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                  <h3 className="text-sm font-medium">Template Controls</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Items reference Controls from the Control Library.
+                  </p>
+                </div>
+                {template.items.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No Controls added yet.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {template.items.map((item) => (
+                      <li
+                        key={item.id}
+                        className="flex flex-col gap-2 rounded-md border bg-background p-3 sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <div>
+                          <p className="text-sm font-medium">
+                            {item.control.controlCode}: {item.control.title}
+                          </p>
+                        </div>
+                        {canManage ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                              void handleRemoveChecklistTemplateItem(template, item.id)
+                            }
+                            disabled={editingTemplateId === template.id}
+                          >
+                            <Trash2 />
+                            Remove
+                          </Button>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {canManage ? (
+                  <form
+                    className="flex flex-col gap-2 sm:flex-row"
+                    onSubmit={(event) => void handleAddChecklistTemplateItem(event, template)}
+                  >
+                    <select
+                      name="controlId"
+                      defaultValue=""
+                      className="flex h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 md:text-sm"
+                      disabled={editingTemplateId === template.id}
+                    >
+                      <option value="">Select an active Control</option>
+                      {controls
+                        .filter(
+                          (control) =>
+                            !template.items.some((item) => item.control.id === control.id),
+                        )
+                        .map((control) => (
+                          <option key={control.id} value={control.id}>
+                            {control.controlCode}: {control.title}
+                          </option>
+                        ))}
+                    </select>
+                    <Button type="submit" size="sm" disabled={editingTemplateId === template.id}>
+                      <Plus />
+                      Add Control
+                    </Button>
+                  </form>
+                ) : null}
               </div>
               {canManage && template.status === 'draft' ? (
                 <div className="mt-4 flex justify-end">

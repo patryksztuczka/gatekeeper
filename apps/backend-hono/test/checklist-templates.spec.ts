@@ -140,6 +140,131 @@ async function createChecklistTemplateRequest(
   };
 }
 
+async function addChecklistTemplateItemRequest(
+  organizationSlug: string,
+  templateId: string,
+  headers: Headers,
+  body: Record<string, unknown>,
+) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/checklist-templates/${templateId}/items`,
+    {
+      body: JSON.stringify(body),
+      headers,
+      method: 'POST',
+    },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+async function removeChecklistTemplateItemRequest(
+  organizationSlug: string,
+  templateId: string,
+  itemId: string,
+  headers: Headers,
+) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/checklist-templates/${templateId}/items/${itemId}`,
+    {
+      headers,
+      method: 'DELETE',
+    },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+async function createDraftControlRequest(
+  organizationSlug: string,
+  headers: Headers,
+  body: Record<string, unknown>,
+) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/controls/drafts`,
+    {
+      body: JSON.stringify(body),
+      headers,
+      method: 'POST',
+    },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+const completePublishBody = {
+  acceptedEvidenceTypes: ['document', 'approval record'],
+  applicabilityConditions: 'Applies to internet-facing authentication surfaces.',
+  businessMeaning: 'Release teams must verify users have a second authentication factor.',
+  releaseImpact: 'blocking',
+  verificationMethod: 'Review identity provider MFA policy evidence.',
+};
+
+async function publishDraftControlRequest(
+  organizationSlug: string,
+  draftControlId: string,
+  headers: Headers,
+  body: Record<string, unknown> = completePublishBody,
+) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/controls/drafts/${draftControlId}/publish`,
+    {
+      body: JSON.stringify(body),
+      headers,
+      method: 'POST',
+    },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+async function archiveControlRequest(
+  organizationSlug: string,
+  controlId: string,
+  headers: Headers,
+) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/controls/${controlId}/archive`,
+    {
+      body: JSON.stringify({ reason: 'No longer used for new Checklist Templates.' }),
+      headers,
+      method: 'PATCH',
+    },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+async function createActiveControl(
+  organizationSlug: string,
+  headers: Headers,
+  input: { controlCode: string; title: string },
+) {
+  const draftResponse = await createDraftControlRequest(organizationSlug, headers, input);
+  const draft = draftResponse.body.draftControl as { id: string };
+  const publishResponse = await publishDraftControlRequest(organizationSlug, draft.id, headers);
+
+  expect(draftResponse.status).toBe(201);
+  expect(publishResponse.status).toBe(201);
+
+  return publishResponse.body.control as { id: string };
+}
+
 async function listChecklistTemplatesRequest(
   organizationSlug: string,
   headers: Headers,
@@ -393,5 +518,177 @@ describe('Checklist Templates', () => {
       name: 'Policy Independent Template',
       status: 'active',
     });
+  });
+
+  it('lets Organization owners add active Controls outside any Section and remove template items', async () => {
+    const { headers, organization } = await createSignedInOwner('template-items-owner');
+    const createTemplateResponse = await createChecklistTemplateRequest(
+      organization.slug,
+      headers,
+      {
+        name: 'Release Template',
+      },
+    );
+    const template = createTemplateResponse.body.checklistTemplate as { id: string };
+    const control = await createActiveControl(organization.slug, headers, {
+      controlCode: 'AUTH-043',
+      title: 'Require MFA',
+    });
+
+    const addResponse = await addChecklistTemplateItemRequest(
+      organization.slug,
+      template.id,
+      headers,
+      {
+        controlId: control.id,
+      },
+    );
+
+    expect(addResponse.status).toBe(201);
+    expect(addResponse.body.checklistTemplate).toMatchObject({
+      items: [
+        {
+          control: {
+            controlCode: 'AUTH-043',
+            id: control.id,
+            title: 'Require MFA',
+          },
+        },
+      ],
+    });
+    expect(JSON.stringify(addResponse.body.checklistTemplate)).not.toContain('section');
+
+    const addedItem = (addResponse.body.checklistTemplate as { items: Array<{ id: string }> })
+      .items[0]!;
+    const removeResponse = await removeChecklistTemplateItemRequest(
+      organization.slug,
+      template.id,
+      addedItem.id,
+      headers,
+    );
+
+    expect(removeResponse.status).toBe(200);
+    expect(removeResponse.body.checklistTemplate).toMatchObject({ items: [] });
+  });
+
+  it('prevents duplicate Control references in the same Checklist Template', async () => {
+    const { headers, organization } = await createSignedInOwner('template-items-duplicate');
+    const createTemplateResponse = await createChecklistTemplateRequest(
+      organization.slug,
+      headers,
+      {
+        name: 'Duplicate Guard Template',
+      },
+    );
+    const template = createTemplateResponse.body.checklistTemplate as { id: string };
+    const control = await createActiveControl(organization.slug, headers, {
+      controlCode: 'AUTH-044',
+      title: 'Require SSO',
+    });
+
+    await addChecklistTemplateItemRequest(organization.slug, template.id, headers, {
+      controlId: control.id,
+    });
+    const duplicateResponse = await addChecklistTemplateItemRequest(
+      organization.slug,
+      template.id,
+      headers,
+      { controlId: control.id },
+    );
+
+    expect(duplicateResponse.status).toBe(400);
+    expect(duplicateResponse.body).toMatchObject({
+      error: 'Control is already included in this Checklist Template.',
+    });
+  });
+
+  it('rejects Draft Controls, Archived Controls, and Controls from other Organizations', async () => {
+    const { headers, organization } = await createSignedInOwner('template-items-eligibility');
+    const other = await createSignedInOwner('template-items-other-org');
+    const createTemplateResponse = await createChecklistTemplateRequest(
+      organization.slug,
+      headers,
+      {
+        name: 'Eligible Controls Template',
+      },
+    );
+    const template = createTemplateResponse.body.checklistTemplate as { id: string };
+    const draftResponse = await createDraftControlRequest(organization.slug, headers, {
+      controlCode: 'AUTH-045',
+      title: 'Draft Control',
+    });
+    const draftControl = draftResponse.body.draftControl as { id: string };
+    const archivedControl = await createActiveControl(organization.slug, headers, {
+      controlCode: 'AUTH-046',
+      title: 'Archived Control',
+    });
+    const otherControl = await createActiveControl(other.organization.slug, other.headers, {
+      controlCode: 'AUTH-047',
+      title: 'Other Organization Control',
+    });
+
+    expect(
+      (await archiveControlRequest(organization.slug, archivedControl.id, headers)).status,
+    ).toBe(200);
+
+    for (const controlId of [draftControl.id, archivedControl.id, otherControl.id]) {
+      const response = await addChecklistTemplateItemRequest(
+        organization.slug,
+        template.id,
+        headers,
+        {
+          controlId,
+        },
+      );
+
+      expect(response.status).toBe(400);
+      expect(response.body).toMatchObject({
+        error: 'Only active, non-archived Controls can be added to Checklist Templates.',
+      });
+    }
+  });
+
+  it('prevents Organization members from adding or removing Checklist Template items', async () => {
+    const { headers: ownerHeaders, organization } =
+      await createSignedInOwner('template-items-auth');
+    const member = await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'template-items-auth-member',
+      role: 'member',
+    });
+    const createTemplateResponse = await createChecklistTemplateRequest(
+      organization.slug,
+      ownerHeaders,
+      { name: 'Authorization Template' },
+    );
+    const template = createTemplateResponse.body.checklistTemplate as { id: string };
+    const control = await createActiveControl(organization.slug, ownerHeaders, {
+      controlCode: 'AUTH-048',
+      title: 'Owner Added Control',
+    });
+    const addResponse = await addChecklistTemplateItemRequest(
+      organization.slug,
+      template.id,
+      ownerHeaders,
+      { controlId: control.id },
+    );
+    const item = (addResponse.body.checklistTemplate as { items: Array<{ id: string }> }).items[0]!;
+
+    const memberAddResponse = await addChecklistTemplateItemRequest(
+      organization.slug,
+      template.id,
+      member.headers,
+      { controlId: control.id },
+    );
+    const memberRemoveResponse = await removeChecklistTemplateItemRequest(
+      organization.slug,
+      template.id,
+      item.id,
+      member.headers,
+    );
+
+    expect(memberAddResponse.status).toBe(403);
+    expect(memberRemoveResponse.status).toBe(403);
   });
 });
