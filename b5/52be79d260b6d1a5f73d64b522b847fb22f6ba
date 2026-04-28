@@ -1,0 +1,25 @@
+apps/backend-hono/src/lib/controls.ts
+  9e5d12d420b25c45 4-8,1076-1080,1086-1127
+apps/backend-hono/test/project-checklists.spec.ts
+  9e5d12d420b25c45 360-400,1027-1228
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "b552be79d260b6d1a5f73d64b522b847fb22f6ba",
+  "prompts": {
+    "9e5d12d420b25c45": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_22a15a977ffeFasDB5pFjS9New",
+        "model": "openai/gpt-5.5"
+      },
+      "human_author": "Patryk Sztuczka",
+      "messages": [],
+      "total_additions": 306,
+      "total_deletions": 7,
+      "accepted_lines": 299,
+      "overriden_lines": 0
+    }
+  }
+}
