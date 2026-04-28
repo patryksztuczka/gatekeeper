@@ -71,6 +71,19 @@ export type DraftControlListItem = {
   title: string;
 };
 
+export type ChecklistTemplateListItem = {
+  author: {
+    email: string;
+    id: string;
+    name: string;
+  };
+  createdAt: string;
+  id: string;
+  name: string;
+  publishedAt: string | null;
+  status: 'active' | 'draft';
+};
+
 export type ControlListItem = {
   archivedAt: string | null;
   archiveReason: string | null;
@@ -310,6 +323,42 @@ export function createProject(
     method: 'POST',
     body: JSON.stringify(input),
   });
+}
+
+export function listChecklistTemplates(
+  organizationSlug: string,
+  filters: { search?: string; status?: 'active' | 'draft' | 'all' } = {},
+) {
+  const query = toQueryString({
+    q: filters.search,
+    status: filters.status && filters.status !== 'all' ? filters.status : undefined,
+  });
+
+  return request<{ checklistTemplates: ChecklistTemplateListItem[] }>(
+    `/api/organizations/${organizationSlug}/checklist-templates${query}`,
+    {
+      method: 'GET',
+    },
+  );
+}
+
+export function createChecklistTemplate(organizationSlug: string, input: { name: string }) {
+  return request<{ checklistTemplate: ChecklistTemplateListItem }>(
+    `/api/organizations/${organizationSlug}/checklist-templates`,
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function publishChecklistTemplate(organizationSlug: string, templateId: string) {
+  return request<{ checklistTemplate: ChecklistTemplateListItem }>(
+    `/api/organizations/${organizationSlug}/checklist-templates/${templateId}/publish`,
+    {
+      method: 'POST',
+    },
+  );
 }
 
 function toQueryString(params: Record<string, string | undefined>) {
