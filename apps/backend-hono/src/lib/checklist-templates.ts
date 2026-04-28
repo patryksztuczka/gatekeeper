@@ -21,7 +21,7 @@ export type ChecklistTemplateListFilters = {
   status: ChecklistTemplateStatus | 'all';
 };
 
-type ChecklistTemplateStatus = 'active' | 'draft';
+type ChecklistTemplateStatus = 'active' | 'archived' | 'draft';
 
 type CreateChecklistTemplateInput = {
   name: string;
@@ -157,6 +157,40 @@ export async function publishChecklistTemplate(
   )!;
 }
 
+export async function setChecklistTemplateArchivedForMembership(input: {
+  archived: boolean;
+  membership: OrganizationMembership;
+  templateId: string;
+}): Promise<ChecklistTemplateListItem | null> {
+  if (!canManageChecklistTemplates(input.membership.role)) {
+    return null;
+  }
+
+  const template = await db
+    .select({ id: checklistTemplates.id })
+    .from(checklistTemplates)
+    .where(
+      and(
+        eq(checklistTemplates.id, input.templateId),
+        eq(checklistTemplates.organizationId, input.membership.organizationId),
+        eq(checklistTemplates.status, input.archived ? 'active' : 'archived'),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (!template) {
+    return null;
+  }
+
+  await db
+    .update(checklistTemplates)
+    .set({ status: input.archived ? 'archived' : 'active', updatedAt: new Date() })
+    .where(eq(checklistTemplates.id, template.id));
+
+  return (await listChecklistTemplates(input.membership)).find(({ id }) => id === template.id)!;
+}
+
 export function normalizeChecklistTemplateCreateBody(body: unknown): CreateChecklistTemplateInput {
   const value = typeof body === 'object' && body !== null ? body : {};
   const record = value as Record<string, unknown>;
@@ -171,7 +205,7 @@ export function normalizeChecklistTemplateListFilters(
 
   return {
     search: firstQueryValue(query.q).trim(),
-    status: status === 'active' || status === 'draft' ? status : 'all',
+    status: status === 'active' || status === 'archived' || status === 'draft' ? status : 'all',
   };
 }
 
