@@ -73,6 +73,7 @@ export type DraftControlListItem = {
 
 export type ChecklistTemplateItem = {
   control: {
+    archivedAt: string | null;
     controlCode: string;
     id: string;
     title: string;
@@ -80,6 +81,7 @@ export type ChecklistTemplateItem = {
   createdAt: string;
   displayOrder: number;
   id: string;
+  requiresAdminAttention: boolean;
   sectionId: string | null;
 };
 
@@ -102,7 +104,7 @@ export type ChecklistTemplateListItem = {
   name: string;
   publishedAt: string | null;
   sections: ChecklistTemplateSection[];
-  status: 'active' | 'draft';
+  status: 'active' | 'archived' | 'draft';
   unsectionedItems: ChecklistTemplateItem[];
 };
 
@@ -349,7 +351,7 @@ export function createProject(
 
 export function listChecklistTemplates(
   organizationSlug: string,
-  filters: { search?: string; status?: 'active' | 'draft' | 'all' } = {},
+  filters: { search?: string; status?: 'active' | 'archived' | 'draft' | 'all' } = {},
 ) {
   const query = toQueryString({
     q: filters.search,
@@ -383,16 +385,34 @@ export function publishChecklistTemplate(organizationSlug: string, templateId: s
   );
 }
 
+export function archiveChecklistTemplate(organizationSlug: string, templateId: string) {
+  return request<{ checklistTemplate: ChecklistTemplateListItem }>(
+    `/api/organizations/${organizationSlug}/checklist-templates/${templateId}/archive`,
+    {
+      method: 'POST',
+    },
+  );
+}
+
 export function addChecklistTemplateItem(
   organizationSlug: string,
   templateId: string,
-  input: { controlId: string },
+  input: { controlId: string; sectionId?: string | null },
 ) {
   return request<{ checklistTemplate: ChecklistTemplateListItem }>(
     `/api/organizations/${organizationSlug}/checklist-templates/${templateId}/items`,
     {
       method: 'POST',
       body: JSON.stringify(input),
+    },
+  );
+}
+
+export function restoreChecklistTemplate(organizationSlug: string, templateId: string) {
+  return request<{ checklistTemplate: ChecklistTemplateListItem }>(
+    `/api/organizations/${organizationSlug}/checklist-templates/${templateId}/restore`,
+    {
+      method: 'POST',
     },
   );
 }
