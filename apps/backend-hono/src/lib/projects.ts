@@ -1,6 +1,6 @@
-import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm';
+import { and, asc, eq, isNotNull, isNull, ne } from 'drizzle-orm';
 import { db } from '../db/client';
-import { members, organizations, projects, users } from '../db/schema';
+import { members, organizations, projectComponents, projects, users } from '../db/schema';
 
 export type ProjectListItem = {
   archivedAt: string | null;
@@ -33,6 +33,18 @@ export type ProjectDetailResponse = {
   } | null;
 };
 
+export type ProjectComponentResponse = {
+  archivedAt: string | null;
+  createdAt: string;
+  description: string | null;
+  id: string;
+  name: string;
+  projectId: string;
+  updatedAt: string;
+};
+
+export type ProjectComponentListStatus = 'active' | 'archived';
+
 export type OrganizationMemberListItem = {
   email: string;
   id: string;
@@ -61,6 +73,11 @@ type UpdateProjectInput = {
   projectOwnerMemberId: string | null;
 };
 
+type ProjectComponentInput = {
+  description: string | null;
+  name: string;
+};
+
 const editableOrganizationRoles = new Set(['owner', 'admin']);
 const projectSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -85,6 +102,19 @@ export async function getOrganizationMembership(
 
 export function canManageProjects(role: string): boolean {
   return editableOrganizationRoles.has(role);
+}
+
+export async function canManageProjectComponents(input: {
+  membership: OrganizationMembership;
+  projectSlug: string;
+}): Promise<boolean> {
+  if (canManageProjects(input.membership.role)) {
+    return true;
+  }
+
+  const project = await getProjectRecordForMembership(input.membership, input.projectSlug);
+
+  return project?.projectOwnerMemberId === input.membership.id;
 }
 
 export async function listOrganizationMembers(
@@ -342,6 +372,129 @@ export async function updateProjectForMembership(input: {
   return getProjectDetailForMembership(input.membership, input.projectSlug);
 }
 
+export async function listProjectComponentsForMembership(input: {
+  membership: OrganizationMembership;
+  projectSlug: string;
+  status: ProjectComponentListStatus;
+}): Promise<ProjectComponentResponse[] | null> {
+  const project = await getProjectRecordForMembership(input.membership, input.projectSlug);
+
+  if (!project) {
+    return null;
+  }
+
+  const rows = await db
+    .select()
+    .from(projectComponents)
+    .where(
+      and(
+        eq(projectComponents.projectId, project.id),
+        input.status === 'archived'
+          ? isNotNull(projectComponents.archivedAt)
+          : isNull(projectComponents.archivedAt),
+      ),
+    )
+    .orderBy(asc(projectComponents.createdAt), asc(projectComponents.name));
+
+  return rows.map(formatProjectComponent);
+}
+
+export async function createProjectComponentForMembership(input: {
+  membership: OrganizationMembership;
+  projectSlug: string;
+  values: ProjectComponentInput;
+}): Promise<ProjectComponentResponse | null> {
+  const project = await getProjectRecordForMembership(input.membership, input.projectSlug);
+
+  if (!project) {
+    return null;
+  }
+
+  const values = validateProjectComponentInput(input.values);
+  await assertProjectComponentNameAvailable(project.id, values.name);
+
+  const now = new Date();
+  const component = {
+    archivedAt: null,
+    createdAt: now,
+    description: values.description,
+    id: crypto.randomUUID(),
+    name: values.name,
+    projectId: project.id,
+    updatedAt: now,
+  };
+
+  await db.insert(projectComponents).values(component);
+
+  return formatProjectComponent(component);
+}
+
+export async function updateProjectComponentForMembership(input: {
+  componentId: string;
+  membership: OrganizationMembership;
+  projectSlug: string;
+  values: ProjectComponentInput;
+}): Promise<ProjectComponentResponse | null> {
+  const project = await getProjectRecordForMembership(input.membership, input.projectSlug);
+
+  if (!project) {
+    return null;
+  }
+
+  const component = await getProjectComponent(project.id, input.componentId);
+
+  if (!component) {
+    return null;
+  }
+
+  const values = validateProjectComponentInput(input.values);
+  await assertProjectComponentNameAvailable(project.id, values.name, component.id);
+
+  await db
+    .update(projectComponents)
+    .set({
+      description: values.description,
+      name: values.name,
+      updatedAt: new Date(),
+    })
+    .where(eq(projectComponents.id, component.id));
+
+  return getProjectComponent(project.id, component.id).then((row) =>
+    row ? formatProjectComponent(row) : null,
+  );
+}
+
+export async function setProjectComponentArchivedForMembership(input: {
+  archived: boolean;
+  componentId: string;
+  membership: OrganizationMembership;
+  projectSlug: string;
+}): Promise<ProjectComponentResponse | null> {
+  const project = await getProjectRecordForMembership(input.membership, input.projectSlug);
+
+  if (!project) {
+    return null;
+  }
+
+  const component = await getProjectComponent(project.id, input.componentId);
+
+  if (!component) {
+    return null;
+  }
+
+  await db
+    .update(projectComponents)
+    .set({
+      archivedAt: input.archived ? new Date() : null,
+      updatedAt: new Date(),
+    })
+    .where(eq(projectComponents.id, component.id));
+
+  return getProjectComponent(project.id, component.id).then((row) =>
+    row ? formatProjectComponent(row) : null,
+  );
+}
+
 export function slugifyProjectName(value: string): string {
   const normalizedValue = Array.from(value.normalize('NFKD'))
     .filter((character) => character.charCodeAt(0) <= 0x7f)
@@ -355,6 +508,82 @@ export function slugifyProjectName(value: string): string {
 }
 
 export class ProjectInputError extends Error {}
+
+export class ProjectComponentInputError extends Error {}
+
+async function getProjectRecordForMembership(
+  membership: OrganizationMembership,
+  projectSlug: string,
+) {
+  return db
+    .select({
+      id: projects.id,
+      projectOwnerMemberId: projects.projectOwnerMemberId,
+    })
+    .from(projects)
+    .where(
+      and(eq(projects.organizationId, membership.organizationId), eq(projects.slug, projectSlug)),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+}
+
+async function getProjectComponent(projectId: string, componentId: string) {
+  return db
+    .select()
+    .from(projectComponents)
+    .where(and(eq(projectComponents.projectId, projectId), eq(projectComponents.id, componentId)))
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+}
+
+async function assertProjectComponentNameAvailable(
+  projectId: string,
+  name: string,
+  exceptComponentId?: string,
+) {
+  const duplicate = await db
+    .select({ id: projectComponents.id })
+    .from(projectComponents)
+    .where(
+      and(
+        eq(projectComponents.projectId, projectId),
+        eq(projectComponents.name, name),
+        exceptComponentId ? ne(projectComponents.id, exceptComponentId) : undefined,
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (duplicate) {
+    throw new ProjectComponentInputError('Project Component name is already used in this Project.');
+  }
+}
+
+function validateProjectComponentInput(input: ProjectComponentInput): ProjectComponentInput {
+  const name = input.name.trim();
+  const description = input.description?.trim() || null;
+
+  if (!name) {
+    throw new ProjectComponentInputError('Project Component name is required.');
+  }
+
+  return { description, name };
+}
+
+function formatProjectComponent(
+  component: typeof projectComponents.$inferSelect,
+): ProjectComponentResponse {
+  return {
+    archivedAt: component.archivedAt?.toISOString() ?? null,
+    createdAt: component.createdAt.toISOString(),
+    description: component.description,
+    id: component.id,
+    name: component.name,
+    projectId: component.projectId,
+    updatedAt: component.updatedAt.toISOString(),
+  };
+}
 
 function validateProjectInput(input: CreateProjectInput) {
   const name = input.name.trim();
@@ -413,5 +642,15 @@ export function normalizeProjectUpdateBody(body: unknown): UpdateProjectInput {
       typeof record.projectOwnerMemberId === 'string' && record.projectOwnerMemberId
         ? record.projectOwnerMemberId
         : null,
+  };
+}
+
+export function normalizeProjectComponentBody(body: unknown): ProjectComponentInput {
+  const value = typeof body === 'object' && body !== null ? body : {};
+  const record = value as Record<string, unknown>;
+
+  return {
+    description: typeof record.description === 'string' ? record.description : null,
+    name: typeof record.name === 'string' ? record.name : '',
   };
 }

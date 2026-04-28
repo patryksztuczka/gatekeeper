@@ -63,16 +63,23 @@ import {
   withdrawControlPublishRequest,
 } from './lib/controls';
 import {
+  canManageProjectComponents,
   canManageProjects,
+  createProjectComponentForMembership,
   createProject,
   getProjectDetailForMember,
   getOrganizationMembership,
+  listProjectComponentsForMembership,
   listProjects,
   listOrganizationMembers,
+  normalizeProjectComponentBody,
   normalizeProjectCreateBody,
   normalizeProjectUpdateBody,
+  ProjectComponentInputError,
   ProjectInputError,
+  setProjectComponentArchivedForMembership,
   setProjectArchivedForMembership,
+  updateProjectComponentForMembership,
   updateProjectForMembership,
 } from './lib/projects';
 
@@ -1135,6 +1142,165 @@ app.get('/api/organizations/:organizationSlug/projects/:projectSlug', async (c) 
   return c.json({ project });
 });
 
+app.get('/api/organizations/:organizationSlug/projects/:projectSlug/components', async (c) => {
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const membership = await getOrganizationMembership(
+    c.req.param('organizationSlug'),
+    session.user.id,
+  );
+
+  if (!membership) {
+    return c.json({ error: 'Project unavailable' }, 404);
+  }
+
+  const status = c.req.query('status') === 'archived' ? 'archived' : 'active';
+
+  if (
+    status === 'archived' &&
+    !(await canManageProjectComponents({ membership, projectSlug: c.req.param('projectSlug') }))
+  ) {
+    return c.json(
+      { error: 'Only Project Component managers can view archived Project Components.' },
+      403,
+    );
+  }
+
+  const components = await listProjectComponentsForMembership({
+    membership,
+    projectSlug: c.req.param('projectSlug'),
+    status,
+  });
+
+  if (!components) {
+    return c.json({ error: 'Project unavailable' }, 404);
+  }
+
+  return c.json({ components });
+});
+
+app.post('/api/organizations/:organizationSlug/projects/:projectSlug/components', async (c) => {
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const membership = await getOrganizationMembership(
+    c.req.param('organizationSlug'),
+    session.user.id,
+  );
+
+  if (!membership) {
+    return c.json({ error: 'Project unavailable' }, 404);
+  }
+
+  if (
+    !(await canManageProjectComponents({ membership, projectSlug: c.req.param('projectSlug') }))
+  ) {
+    return c.json(
+      {
+        error:
+          'Only Organization owners, admins, and the Project Owner can create Project Components.',
+      },
+      403,
+    );
+  }
+
+  try {
+    const component = await createProjectComponentForMembership({
+      membership,
+      projectSlug: c.req.param('projectSlug'),
+      values: normalizeProjectComponentBody(await c.req.json().catch(() => null)),
+    });
+
+    if (!component) {
+      return c.json({ error: 'Project unavailable' }, 404);
+    }
+
+    return c.json({ component }, 201);
+  } catch (caughtError) {
+    if (caughtError instanceof ProjectComponentInputError) {
+      return c.json({ error: caughtError.message }, 400);
+    }
+
+    throw caughtError;
+  }
+});
+
+app.patch(
+  '/api/organizations/:organizationSlug/projects/:projectSlug/components/:componentId',
+  async (c) => {
+    const session = await auth.api.getSession({
+      headers: c.req.raw.headers,
+    });
+
+    if (!session) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const membership = await getOrganizationMembership(
+      c.req.param('organizationSlug'),
+      session.user.id,
+    );
+
+    if (!membership) {
+      return c.json({ error: 'Project Component unavailable' }, 404);
+    }
+
+    if (
+      !(await canManageProjectComponents({ membership, projectSlug: c.req.param('projectSlug') }))
+    ) {
+      return c.json(
+        {
+          error:
+            'Only Organization owners, admins, and the Project Owner can edit Project Components.',
+        },
+        403,
+      );
+    }
+
+    try {
+      const component = await updateProjectComponentForMembership({
+        componentId: c.req.param('componentId'),
+        membership,
+        projectSlug: c.req.param('projectSlug'),
+        values: normalizeProjectComponentBody(await c.req.json().catch(() => null)),
+      });
+
+      if (!component) {
+        return c.json({ error: 'Project Component unavailable' }, 404);
+      }
+
+      return c.json({ component });
+    } catch (caughtError) {
+      if (caughtError instanceof ProjectComponentInputError) {
+        return c.json({ error: caughtError.message }, 400);
+      }
+
+      throw caughtError;
+    }
+  },
+);
+
+app.patch(
+  '/api/organizations/:organizationSlug/projects/:projectSlug/components/:componentId/archive',
+  async (c) => setProjectComponentArchived(c, true),
+);
+
+app.patch(
+  '/api/organizations/:organizationSlug/projects/:projectSlug/components/:componentId/restore',
+  async (c) => setProjectComponentArchived(c, false),
+);
+
 app.patch('/api/organizations/:organizationSlug/projects/:projectSlug', async (c) => {
   const session = await auth.api.getSession({
     headers: c.req.raw.headers,
@@ -1185,6 +1351,54 @@ app.patch('/api/organizations/:organizationSlug/projects/:projectSlug/archive', 
 app.patch('/api/organizations/:organizationSlug/projects/:projectSlug/restore', async (c) => {
   return setProjectArchived(c, false);
 });
+
+async function setProjectComponentArchived(c: Context, archived: boolean) {
+  const organizationSlug = c.req.param('organizationSlug');
+  const projectSlug = c.req.param('projectSlug');
+  const componentId = c.req.param('componentId');
+
+  if (!organizationSlug || !projectSlug || !componentId) {
+    return c.json({ error: 'Project Component unavailable' }, 404);
+  }
+
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const membership = await getOrganizationMembership(organizationSlug, session.user.id);
+
+  if (!membership) {
+    return c.json({ error: 'Project Component unavailable' }, 404);
+  }
+
+  if (!(await canManageProjectComponents({ membership, projectSlug }))) {
+    return c.json(
+      {
+        error: `Only Organization owners, admins, and the Project Owner can ${
+          archived ? 'archive' : 'restore'
+        } Project Components.`,
+      },
+      403,
+    );
+  }
+
+  const component = await setProjectComponentArchivedForMembership({
+    archived,
+    componentId,
+    membership,
+    projectSlug,
+  });
+
+  if (!component) {
+    return c.json({ error: 'Project Component unavailable' }, 404);
+  }
+
+  return c.json({ component });
+}
 
 async function setProjectArchived(c: Context, archived: boolean) {
   const organizationSlug = c.req.param('organizationSlug');

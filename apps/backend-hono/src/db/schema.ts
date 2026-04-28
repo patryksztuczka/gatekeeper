@@ -186,6 +186,30 @@ export const projects = sqliteTable(
   ],
 );
 
+export const projectComponents = sqliteTable(
+  'project_components',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description'),
+    archivedAt: integer('archived_at', { mode: 'timestamp_ms' }),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index('project_component_project_id_idx').on(table.projectId),
+    uniqueIndex('project_component_project_name_unique').on(table.projectId, table.name),
+  ],
+);
+
 export const draftControls = sqliteTable(
   'draft_controls',
   {
