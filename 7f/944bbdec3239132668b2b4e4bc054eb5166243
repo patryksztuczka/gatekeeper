@@ -1,0 +1,35 @@
+apps/backend-hono/src/db/schema.ts
+  1c2ffaa60342fdcd 409-432
+apps/web/src/components/pages/checklist-templates.tsx
+  1c2ffaa60342fdcd 3,6,9,12,14,42,46,62,65,70,151-217,338-405
+apps/backend-hono/src/lib/checklist-templates.ts
+  1c2ffaa60342fdcd 1,3-10,13-22,31,48-51,81,90,96-105,193-296,304-310,361-407
+apps/web/src/features/auth/auth-api.ts
+  1c2ffaa60342fdcd 82-90,373-395
+apps/backend-hono/src/index.ts
+  1c2ffaa60342fdcd 14,20,23,476-564
+apps/backend-hono/test/checklist-templates.spec.ts
+  1c2ffaa60342fdcd 143-267,522-692
+apps/backend-hono/drizzle/migrations/0009_checklist_template_items.sql
+  1c2ffaa60342fdcd 1-12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "7f944bbdec3239132668b2b4e4bc054eb5166243",
+  "prompts": {
+    "1c2ffaa60342fdcd": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_22a50fa40ffeD1kwpHBYrJnQsE",
+        "model": "openai/gpt-5.5"
+      },
+      "human_author": "Patryk Sztuczka",
+      "messages": [],
+      "total_additions": 841,
+      "total_deletions": 42,
+      "accepted_lines": 804,
+      "overriden_lines": 0
+    }
+  }
+}
