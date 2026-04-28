@@ -54,7 +54,7 @@ type NavItem = {
 const PLATFORM_NAV: NavItem[] = [
   { label: 'Dashboard', icon: LayoutDashboard, path: '/' },
   { label: 'Projects', icon: FolderKanban, path: '/projects' },
-  { label: 'Checklists', icon: ListChecks, path: '/checklists' },
+  { label: 'Checklist Templates', icon: ListChecks, path: '/checklists' },
   { label: 'Controls', icon: ShieldCheck, path: '/controls' },
 ];
 

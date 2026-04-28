@@ -71,6 +71,43 @@ export type DraftControlListItem = {
   title: string;
 };
 
+export type ChecklistTemplateItem = {
+  control: {
+    archivedAt: string | null;
+    controlCode: string;
+    id: string;
+    title: string;
+  };
+  createdAt: string;
+  displayOrder: number;
+  id: string;
+  requiresAdminAttention: boolean;
+  sectionId: string | null;
+};
+
+export type ChecklistTemplateSection = {
+  displayOrder: number;
+  id: string;
+  items: ChecklistTemplateItem[];
+  name: string;
+};
+
+export type ChecklistTemplateListItem = {
+  author: {
+    email: string;
+    id: string;
+    name: string;
+  };
+  createdAt: string;
+  id: string;
+  items: ChecklistTemplateItem[];
+  name: string;
+  publishedAt: string | null;
+  sections: ChecklistTemplateSection[];
+  status: 'active' | 'archived' | 'draft';
+  unsectionedItems: ChecklistTemplateItem[];
+};
+
 export type ControlListItem = {
   archivedAt: string | null;
   archiveReason: string | null;
@@ -310,6 +347,87 @@ export function createProject(
     method: 'POST',
     body: JSON.stringify(input),
   });
+}
+
+export function listChecklistTemplates(
+  organizationSlug: string,
+  filters: { search?: string; status?: 'active' | 'archived' | 'draft' | 'all' } = {},
+) {
+  const query = toQueryString({
+    q: filters.search,
+    status: filters.status && filters.status !== 'all' ? filters.status : undefined,
+  });
+
+  return request<{ checklistTemplates: ChecklistTemplateListItem[] }>(
+    `/api/organizations/${organizationSlug}/checklist-templates${query}`,
+    {
+      method: 'GET',
+    },
+  );
+}
+
+export function createChecklistTemplate(organizationSlug: string, input: { name: string }) {
+  return request<{ checklistTemplate: ChecklistTemplateListItem }>(
+    `/api/organizations/${organizationSlug}/checklist-templates`,
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function publishChecklistTemplate(organizationSlug: string, templateId: string) {
+  return request<{ checklistTemplate: ChecklistTemplateListItem }>(
+    `/api/organizations/${organizationSlug}/checklist-templates/${templateId}/publish`,
+    {
+      method: 'POST',
+    },
+  );
+}
+
+export function archiveChecklistTemplate(organizationSlug: string, templateId: string) {
+  return request<{ checklistTemplate: ChecklistTemplateListItem }>(
+    `/api/organizations/${organizationSlug}/checklist-templates/${templateId}/archive`,
+    {
+      method: 'POST',
+    },
+  );
+}
+
+export function addChecklistTemplateItem(
+  organizationSlug: string,
+  templateId: string,
+  input: { controlId: string; sectionId?: string | null },
+) {
+  return request<{ checklistTemplate: ChecklistTemplateListItem }>(
+    `/api/organizations/${organizationSlug}/checklist-templates/${templateId}/items`,
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function restoreChecklistTemplate(organizationSlug: string, templateId: string) {
+  return request<{ checklistTemplate: ChecklistTemplateListItem }>(
+    `/api/organizations/${organizationSlug}/checklist-templates/${templateId}/restore`,
+    {
+      method: 'POST',
+    },
+  );
+}
+
+export function removeChecklistTemplateItem(
+  organizationSlug: string,
+  templateId: string,
+  itemId: string,
+) {
+  return request<{ checklistTemplate: ChecklistTemplateListItem }>(
+    `/api/organizations/${organizationSlug}/checklist-templates/${templateId}/items/${itemId}`,
+    {
+      method: 'DELETE',
+    },
+  );
 }
 
 function toQueryString(params: Record<string, string | undefined>) {

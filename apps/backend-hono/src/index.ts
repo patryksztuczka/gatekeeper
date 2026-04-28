@@ -11,6 +11,26 @@ import {
   updateControlApprovalPolicy,
 } from './lib/control-approval-policy';
 import {
+  addChecklistTemplateItem,
+  ChecklistTemplateInputError,
+  canManageChecklistTemplates,
+  createChecklistTemplate,
+  createChecklistTemplateSection,
+  listChecklistTemplates,
+  normalizeChecklistTemplateCreateBody,
+  normalizeChecklistTemplateItemOrderBody,
+  normalizeChecklistTemplateItemBody,
+  normalizeChecklistTemplateListFilters,
+  normalizeChecklistTemplateSectionBody,
+  normalizeChecklistTemplateSectionOrderBody,
+  publishChecklistTemplate,
+  renameChecklistTemplateSection,
+  removeChecklistTemplateItem,
+  reorderChecklistTemplateItems,
+  reorderChecklistTemplateSections,
+  setChecklistTemplateArchivedForMembership,
+} from './lib/checklist-templates';
+import {
   canArchiveControls,
   canPublishControls,
   approveControlPublishRequest,
@@ -220,6 +240,38 @@ app.get('/api/organizations/:organizationSlug/projects', async (c) => {
   return c.json({ projects: await listProjects(membership.organizationId, status) });
 });
 
+app.get('/api/organizations/:organizationSlug/checklist-templates', async (c) => {
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const membership = await getOrganizationMembership(
+    c.req.param('organizationSlug'),
+    session.user.id,
+  );
+
+  if (!membership) {
+    return c.json({ error: 'Organization not found' }, 404);
+  }
+
+  const filters = normalizeChecklistTemplateListFilters(c.req.query());
+
+  if (filters.status === 'archived' && !canManageChecklistTemplates(membership.role)) {
+    return c.json(
+      { error: 'Only Organization owners and admins can view archived Checklist Templates.' },
+      403,
+    );
+  }
+
+  return c.json({
+    checklistTemplates: await listChecklistTemplates(membership, filters),
+  });
+});
+
 app.get('/api/organizations/:organizationSlug/controls/drafts', async (c) => {
   const session = await auth.api.getSession({
     headers: c.req.raw.headers,
@@ -400,6 +452,381 @@ app.post('/api/organizations/:organizationSlug/controls/drafts', async (c) => {
     throw caughtError;
   }
 });
+
+app.post('/api/organizations/:organizationSlug/checklist-templates', async (c) => {
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const membership = await getOrganizationMembership(
+    c.req.param('organizationSlug'),
+    session.user.id,
+  );
+
+  if (!membership) {
+    return c.json({ error: 'Organization not found' }, 404);
+  }
+
+  if (!canManageChecklistTemplates(membership.role)) {
+    return c.json(
+      { error: 'Only Organization owners and admins can create Checklist Templates.' },
+      403,
+    );
+  }
+
+  try {
+    const checklistTemplate = await createChecklistTemplate(
+      membership,
+      normalizeChecklistTemplateCreateBody(await c.req.json().catch(() => null)),
+    );
+
+    return c.json({ checklistTemplate }, 201);
+  } catch (caughtError) {
+    if (caughtError instanceof ChecklistTemplateInputError) {
+      return c.json({ error: caughtError.message }, 400);
+    }
+
+    throw caughtError;
+  }
+});
+
+app.post(
+  '/api/organizations/:organizationSlug/checklist-templates/:templateId/sections',
+  async (c) => {
+    const session = await auth.api.getSession({
+      headers: c.req.raw.headers,
+    });
+
+    if (!session) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const membership = await getOrganizationMembership(
+      c.req.param('organizationSlug'),
+      session.user.id,
+    );
+
+    if (!membership) {
+      return c.json({ error: 'Checklist Template unavailable' }, 404);
+    }
+
+    if (!canManageChecklistTemplates(membership.role)) {
+      return c.json(
+        { error: 'Only Organization owners and admins can edit Checklist Template Sections.' },
+        403,
+      );
+    }
+
+    try {
+      const checklistTemplate = await createChecklistTemplateSection(
+        membership,
+        c.req.param('templateId'),
+        normalizeChecklistTemplateSectionBody(await c.req.json().catch(() => null)),
+      );
+
+      if (!checklistTemplate) {
+        return c.json({ error: 'Checklist Template unavailable' }, 404);
+      }
+
+      return c.json({ checklistTemplate }, 201);
+    } catch (caughtError) {
+      if (caughtError instanceof ChecklistTemplateInputError) {
+        return c.json({ error: caughtError.message }, 400);
+      }
+
+      throw caughtError;
+    }
+  },
+);
+
+app.patch(
+  '/api/organizations/:organizationSlug/checklist-templates/:templateId/sections/order',
+  async (c) => {
+    const session = await auth.api.getSession({
+      headers: c.req.raw.headers,
+    });
+
+    if (!session) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const membership = await getOrganizationMembership(
+      c.req.param('organizationSlug'),
+      session.user.id,
+    );
+
+    if (!membership) {
+      return c.json({ error: 'Checklist Template unavailable' }, 404);
+    }
+
+    if (!canManageChecklistTemplates(membership.role)) {
+      return c.json(
+        { error: 'Only Organization owners and admins can edit Checklist Template Sections.' },
+        403,
+      );
+    }
+
+    try {
+      const checklistTemplate = await reorderChecklistTemplateSections(
+        membership,
+        c.req.param('templateId'),
+        normalizeChecklistTemplateSectionOrderBody(await c.req.json().catch(() => null)),
+      );
+
+      if (!checklistTemplate) {
+        return c.json({ error: 'Checklist Template unavailable' }, 404);
+      }
+
+      return c.json({ checklistTemplate });
+    } catch (caughtError) {
+      if (caughtError instanceof ChecklistTemplateInputError) {
+        return c.json({ error: caughtError.message }, 400);
+      }
+
+      throw caughtError;
+    }
+  },
+);
+
+app.patch(
+  '/api/organizations/:organizationSlug/checklist-templates/:templateId/sections/:sectionId',
+  async (c) => {
+    const session = await auth.api.getSession({
+      headers: c.req.raw.headers,
+    });
+
+    if (!session) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const membership = await getOrganizationMembership(
+      c.req.param('organizationSlug'),
+      session.user.id,
+    );
+
+    if (!membership) {
+      return c.json({ error: 'Checklist Template Section unavailable' }, 404);
+    }
+
+    if (!canManageChecklistTemplates(membership.role)) {
+      return c.json(
+        { error: 'Only Organization owners and admins can edit Checklist Template Sections.' },
+        403,
+      );
+    }
+
+    try {
+      const checklistTemplate = await renameChecklistTemplateSection(
+        membership,
+        c.req.param('templateId'),
+        c.req.param('sectionId'),
+        normalizeChecklistTemplateSectionBody(await c.req.json().catch(() => null)),
+      );
+
+      if (!checklistTemplate) {
+        return c.json({ error: 'Checklist Template Section unavailable' }, 404);
+      }
+
+      return c.json({ checklistTemplate });
+    } catch (caughtError) {
+      if (caughtError instanceof ChecklistTemplateInputError) {
+        return c.json({ error: caughtError.message }, 400);
+      }
+
+      throw caughtError;
+    }
+  },
+);
+
+app.post(
+  '/api/organizations/:organizationSlug/checklist-templates/:templateId/items',
+  async (c) => {
+    const session = await auth.api.getSession({
+      headers: c.req.raw.headers,
+    });
+
+    if (!session) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const membership = await getOrganizationMembership(
+      c.req.param('organizationSlug'),
+      session.user.id,
+    );
+
+    if (!membership) {
+      return c.json({ error: 'Checklist Template unavailable' }, 404);
+    }
+
+    if (!canManageChecklistTemplates(membership.role)) {
+      return c.json(
+        { error: 'Only Organization owners and admins can edit Checklist Template items.' },
+        403,
+      );
+    }
+
+    try {
+      const checklistTemplate = await addChecklistTemplateItem(
+        membership,
+        c.req.param('templateId'),
+        normalizeChecklistTemplateItemBody(await c.req.json().catch(() => null)),
+      );
+
+      if (!checklistTemplate) {
+        return c.json({ error: 'Checklist Template unavailable' }, 404);
+      }
+
+      return c.json({ checklistTemplate }, 201);
+    } catch (caughtError) {
+      if (caughtError instanceof ChecklistTemplateInputError) {
+        return c.json({ error: caughtError.message }, 400);
+      }
+
+      throw caughtError;
+    }
+  },
+);
+
+app.patch(
+  '/api/organizations/:organizationSlug/checklist-templates/:templateId/items/order',
+  async (c) => {
+    const session = await auth.api.getSession({
+      headers: c.req.raw.headers,
+    });
+
+    if (!session) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const membership = await getOrganizationMembership(
+      c.req.param('organizationSlug'),
+      session.user.id,
+    );
+
+    if (!membership) {
+      return c.json({ error: 'Checklist Template unavailable' }, 404);
+    }
+
+    if (!canManageChecklistTemplates(membership.role)) {
+      return c.json(
+        { error: 'Only Organization owners and admins can edit Checklist Template items.' },
+        403,
+      );
+    }
+
+    try {
+      const checklistTemplate = await reorderChecklistTemplateItems(
+        membership,
+        c.req.param('templateId'),
+        normalizeChecklistTemplateItemOrderBody(await c.req.json().catch(() => null)),
+      );
+
+      if (!checklistTemplate) {
+        return c.json({ error: 'Checklist Template unavailable' }, 404);
+      }
+
+      return c.json({ checklistTemplate });
+    } catch (caughtError) {
+      if (caughtError instanceof ChecklistTemplateInputError) {
+        return c.json({ error: caughtError.message }, 400);
+      }
+
+      throw caughtError;
+    }
+  },
+);
+
+app.delete(
+  '/api/organizations/:organizationSlug/checklist-templates/:templateId/items/:itemId',
+  async (c) => {
+    const session = await auth.api.getSession({
+      headers: c.req.raw.headers,
+    });
+
+    if (!session) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const membership = await getOrganizationMembership(
+      c.req.param('organizationSlug'),
+      session.user.id,
+    );
+
+    if (!membership) {
+      return c.json({ error: 'Checklist Template unavailable' }, 404);
+    }
+
+    if (!canManageChecklistTemplates(membership.role)) {
+      return c.json(
+        { error: 'Only Organization owners and admins can edit Checklist Template items.' },
+        403,
+      );
+    }
+
+    const checklistTemplate = await removeChecklistTemplateItem(
+      membership,
+      c.req.param('templateId'),
+      c.req.param('itemId'),
+    );
+
+    if (!checklistTemplate) {
+      return c.json({ error: 'Checklist Template item unavailable' }, 404);
+    }
+
+    return c.json({ checklistTemplate });
+  },
+);
+
+app.post(
+  '/api/organizations/:organizationSlug/checklist-templates/:templateId/publish',
+  async (c) => {
+    const session = await auth.api.getSession({
+      headers: c.req.raw.headers,
+    });
+
+    if (!session) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const membership = await getOrganizationMembership(
+      c.req.param('organizationSlug'),
+      session.user.id,
+    );
+
+    if (!membership) {
+      return c.json({ error: 'Checklist Template unavailable' }, 404);
+    }
+
+    if (!canManageChecklistTemplates(membership.role)) {
+      return c.json(
+        { error: 'Only Organization owners and admins can publish Checklist Templates.' },
+        403,
+      );
+    }
+
+    const checklistTemplate = await publishChecklistTemplate(membership, c.req.param('templateId'));
+
+    if (!checklistTemplate) {
+      return c.json({ error: 'Checklist Template unavailable' }, 404);
+    }
+
+    return c.json({ checklistTemplate });
+  },
+);
+
+app.post(
+  '/api/organizations/:organizationSlug/checklist-templates/:templateId/archive',
+  async (c) => setChecklistTemplateArchived(c, true),
+);
+
+app.post(
+  '/api/organizations/:organizationSlug/checklist-templates/:templateId/restore',
+  async (c) => setChecklistTemplateArchived(c, false),
+);
 
 app.post('/api/organizations/:organizationSlug/controls/:controlId/proposed-updates', async (c) => {
   const session = await auth.api.getSession({
@@ -1063,6 +1490,50 @@ async function setControlArchived(c: Context, archived: boolean) {
   }
 
   return c.json({ control });
+}
+
+async function setChecklistTemplateArchived(c: Context, archived: boolean) {
+  const organizationSlug = c.req.param('organizationSlug');
+  const templateId = c.req.param('templateId');
+
+  if (!organizationSlug || !templateId) {
+    return c.json({ error: 'Checklist Template unavailable' }, 404);
+  }
+
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const membership = await getOrganizationMembership(organizationSlug, session.user.id);
+
+  if (!membership) {
+    return c.json({ error: 'Checklist Template unavailable' }, 404);
+  }
+
+  if (!canManageChecklistTemplates(membership.role)) {
+    return c.json(
+      {
+        error: `Only Organization owners and admins can ${archived ? 'archive' : 'restore'} Checklist Templates.`,
+      },
+      403,
+    );
+  }
+
+  const checklistTemplate = await setChecklistTemplateArchivedForMembership({
+    archived,
+    membership,
+    templateId,
+  });
+
+  if (!checklistTemplate) {
+    return c.json({ error: 'Checklist Template unavailable' }, 404);
+  }
+
+  return c.json({ checklistTemplate });
 }
 
 async function reviewControlPublishRequest(c: Context, action: 'approve' | 'reject' | 'withdraw') {
