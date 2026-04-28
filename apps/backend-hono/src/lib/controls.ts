@@ -1,6 +1,11 @@
 import { and, asc, desc, eq, isNotNull, isNull, ne } from 'drizzle-orm';
 import { db } from '../db/client';
 import {
+  projectChecklistItems,
+  projectChecklists,
+  projectChecklistVerificationRecords,
+  projectComponents,
+  projects,
   controlProposedUpdates,
   controlPublishRequestApprovals,
   controlPublishRequests,
@@ -1068,9 +1073,58 @@ export async function publishControlProposedUpdate(
       updatedAt: now,
     })
     .where(eq(controls.id, controlId));
+  await propagateControlVersionToActiveProjectChecklistItems({
+    controlId,
+    controlVersionId: versionId,
+    now,
+  });
   await db.delete(controlProposedUpdates).where(eq(controlProposedUpdates.id, proposedUpdateId));
 
   return getControlDetail(membership, controlId);
+}
+
+async function propagateControlVersionToActiveProjectChecklistItems(input: {
+  controlId: string;
+  controlVersionId: string;
+  now: Date;
+}) {
+  const items = await db
+    .select({ id: projectChecklistItems.id })
+    .from(projectChecklistItems)
+    .innerJoin(
+      projectChecklists,
+      eq(projectChecklistItems.projectChecklistId, projectChecklists.id),
+    )
+    .innerJoin(projectComponents, eq(projectChecklists.componentId, projectComponents.id))
+    .innerJoin(projects, eq(projectComponents.projectId, projects.id))
+    .where(
+      and(
+        eq(projectChecklistItems.controlId, input.controlId),
+        ne(projectChecklistItems.controlVersionId, input.controlVersionId),
+        isNull(projects.archivedAt),
+        isNull(projectComponents.archivedAt),
+        isNull(projectChecklists.archivedAt),
+      ),
+    );
+
+  for (const item of items) {
+    const verificationRecordId = crypto.randomUUID();
+
+    await db.insert(projectChecklistVerificationRecords).values({
+      controlVersionId: input.controlVersionId,
+      createdAt: input.now,
+      id: verificationRecordId,
+      status: 'unchecked',
+      updatedAt: input.now,
+    });
+    await db
+      .update(projectChecklistItems)
+      .set({
+        controlVersionId: input.controlVersionId,
+        verificationRecordId,
+      })
+      .where(eq(projectChecklistItems.id, item.id));
+  }
 }
 
 export function normalizeDraftControlCreateBody(body: unknown): CreateDraftControlInput {
