@@ -12,6 +12,7 @@ import {
   members,
   projectChecklistItems,
   projectChecklists,
+  projectChecklistVerificationHistory,
   projectChecklistVerificationRecords,
   projectComponents,
   projects,
@@ -324,6 +325,30 @@ async function openChecklist(input: {
   const response = await app.request(
     `http://example.com/api/organizations/${input.organizationSlug}/projects/${input.projectSlug}/components/${input.componentId}/checklists/${input.checklistId}`,
     { headers: input.headers },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+async function updateChecklistItemVerification(input: {
+  body: Record<string, unknown>;
+  checklistId: string;
+  componentId: string;
+  headers: Headers;
+  itemId: string;
+  organizationSlug: string;
+  projectSlug: string;
+}) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${input.organizationSlug}/projects/${input.projectSlug}/components/${input.componentId}/checklists/${input.checklistId}/items/${input.itemId}/verification`,
+    {
+      body: JSON.stringify(input.body),
+      headers: input.headers,
+      method: 'PATCH',
+    },
   );
 
   return {
@@ -815,6 +840,326 @@ describe('Project Checklists API', () => {
       archivedAt: expect.any(String),
       completion: { completedItems: 1, totalItems: 1 },
       items: [{ control: { controlCode: 'AUTH-748' }, verificationRecord: { status: 'checked' } }],
+    });
+  });
+
+  it('lets active Organization members change checklist item verification and inspect Control Version history', async () => {
+    const owner = await createSignedInOwner('project-checklist-verify-owner');
+    const member = await addMemberToOrganization(
+      owner.organization.id,
+      'project-checklist-verify-member',
+    );
+    const projectId = await createProject({
+      organizationId: owner.organization.id,
+      projectOwnerMemberId: null,
+      slug: 'vendor-risk',
+    });
+    const componentId = await createComponent(projectId);
+    const control = await createActiveControl({
+      controlCode: 'AUTH-849',
+      organizationId: owner.organization.id,
+      title: 'Require MFA',
+    });
+    const templateId = await createTemplate({
+      controlIds: [control.controlId],
+      organizationId: owner.organization.id,
+    });
+    const applyResponse = await applyTemplate({
+      body: { templateId },
+      componentId,
+      headers: owner.headers,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'vendor-risk',
+    });
+    const projectChecklist = applyResponse.body.projectChecklist as {
+      id: string;
+      items: [{ id: string }];
+    };
+    const itemId = projectChecklist.items[0].id;
+
+    await addLatestControlVersion(control.controlId, 'AUTH-849', 'Require phishing-resistant MFA');
+
+    await expect(
+      updateChecklistItemVerification({
+        body: {
+          status: 'not-applicable',
+          notApplicableExplanation: 'Compensating control applies.',
+        },
+        checklistId: projectChecklist.id,
+        componentId,
+        headers: member.headers,
+        itemId,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({
+      body: {
+        projectChecklist: {
+          completion: { completedItems: 1, totalItems: 1 },
+          items: [
+            {
+              controlVersion: { id: control.versionId, versionNumber: 1 },
+              verificationRecord: {
+                history: [
+                  {
+                    actorMemberId: member.memberId,
+                    controlVersion: { id: control.versionId, versionNumber: 1 },
+                    createdAt: expect.any(String),
+                    notApplicableExplanation: 'Compensating control applies.',
+                    status: 'not-applicable',
+                  },
+                ],
+                notApplicableExplanation: 'Compensating control applies.',
+                status: 'not-applicable',
+              },
+            },
+          ],
+        },
+      },
+      status: 200,
+    });
+    await expect(
+      updateChecklistItemVerification({
+        body: { status: 'checked' },
+        checklistId: projectChecklist.id,
+        componentId,
+        headers: member.headers,
+        itemId,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({
+      body: {
+        projectChecklist: {
+          items: [
+            {
+              verificationRecord: {
+                history: [
+                  { notApplicableExplanation: null, status: 'checked' },
+                  {
+                    notApplicableExplanation: 'Compensating control applies.',
+                    status: 'not-applicable',
+                  },
+                ],
+                notApplicableExplanation: null,
+                status: 'checked',
+              },
+            },
+          ],
+        },
+      },
+      status: 200,
+    });
+    await expect(
+      updateChecklistItemVerification({
+        body: { status: 'unchecked' },
+        checklistId: projectChecklist.id,
+        componentId,
+        headers: member.headers,
+        itemId,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({
+      body: {
+        projectChecklist: {
+          completion: { completedItems: 0, totalItems: 1 },
+          items: [{ verificationRecord: { notApplicableExplanation: null, status: 'unchecked' } }],
+        },
+      },
+      status: 200,
+    });
+
+    const historyRows = await db
+      .select()
+      .from(projectChecklistVerificationHistory)
+      .where(eq(projectChecklistVerificationHistory.projectChecklistItemId, itemId));
+
+    expect(historyRows).toHaveLength(3);
+    expect(historyRows.map(({ controlVersionId }) => controlVersionId)).toEqual([
+      control.versionId,
+      control.versionId,
+      control.versionId,
+    ]);
+  });
+
+  it('rejects missing not applicable explanations and keeps checked or unchecked evidence-free', async () => {
+    const owner = await createSignedInOwner('project-checklist-verify-validation');
+    const projectId = await createProject({
+      organizationId: owner.organization.id,
+      projectOwnerMemberId: null,
+      slug: 'vendor-risk',
+    });
+    const componentId = await createComponent(projectId);
+    const control = await createActiveControl({
+      controlCode: 'AUTH-949',
+      organizationId: owner.organization.id,
+      title: 'Require MFA',
+    });
+    const templateId = await createTemplate({
+      controlIds: [control.controlId],
+      organizationId: owner.organization.id,
+    });
+    const applyResponse = await applyTemplate({
+      body: { templateId },
+      componentId,
+      headers: owner.headers,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'vendor-risk',
+    });
+    const projectChecklist = applyResponse.body.projectChecklist as {
+      id: string;
+      items: [{ id: string }];
+    };
+
+    await expect(
+      updateChecklistItemVerification({
+        body: { status: 'not-applicable', notApplicableExplanation: '   ' },
+        checklistId: projectChecklist.id,
+        componentId,
+        headers: owner.headers,
+        itemId: projectChecklist.items[0].id,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({
+      body: { error: 'Not applicable verification requires an explanation.' },
+      status: 400,
+    });
+    await expect(
+      updateChecklistItemVerification({
+        body: { status: 'checked' },
+        checklistId: projectChecklist.id,
+        componentId,
+        headers: owner.headers,
+        itemId: projectChecklist.items[0].id,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      updateChecklistItemVerification({
+        body: { status: 'unchecked' },
+        checklistId: projectChecklist.id,
+        componentId,
+        headers: owner.headers,
+        itemId: projectChecklist.items[0].id,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({ status: 200 });
+  });
+
+  it('keeps archived Projects, Project Components, and Project Checklists read-only for verification', async () => {
+    const owner = await createSignedInOwner('project-checklist-verify-archived');
+    const projectId = await createProject({
+      organizationId: owner.organization.id,
+      projectOwnerMemberId: null,
+      slug: 'vendor-risk',
+    });
+    const checklistArchivedComponentId = await createComponent(projectId, 'Checklist Archived');
+    const componentArchivedComponentId = await createComponent(projectId, 'Component Archived');
+    const projectArchivedComponentId = await createComponent(projectId, 'Project Archived');
+    const control = await createActiveControl({
+      controlCode: 'AUTH-1049',
+      organizationId: owner.organization.id,
+      title: 'Require MFA',
+    });
+    const checklistArchivedTemplateId = await createTemplate({
+      controlIds: [control.controlId],
+      name: 'Checklist Archived Readiness',
+      organizationId: owner.organization.id,
+    });
+    const componentArchivedTemplateId = await createTemplate({
+      controlIds: [control.controlId],
+      name: 'Component Archived Readiness',
+      organizationId: owner.organization.id,
+    });
+    const projectArchivedTemplateId = await createTemplate({
+      controlIds: [control.controlId],
+      name: 'Project Archived Readiness',
+      organizationId: owner.organization.id,
+    });
+    const checklistArchivedChecklist = (
+      await applyTemplate({
+        body: { templateId: checklistArchivedTemplateId },
+        componentId: checklistArchivedComponentId,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      })
+    ).body.projectChecklist as { id: string; items: [{ id: string }] };
+    const componentArchivedChecklist = (
+      await applyTemplate({
+        body: { templateId: componentArchivedTemplateId },
+        componentId: componentArchivedComponentId,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      })
+    ).body.projectChecklist as { id: string; items: [{ id: string }] };
+    const projectArchivedChecklist = (
+      await applyTemplate({
+        body: { templateId: projectArchivedTemplateId },
+        componentId: projectArchivedComponentId,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      })
+    ).body.projectChecklist as { id: string; items: [{ id: string }] };
+
+    await db
+      .update(projectChecklists)
+      .set({ archivedAt: new Date() })
+      .where(eq(projectChecklists.id, checklistArchivedChecklist.id));
+    await db
+      .update(projectComponents)
+      .set({ archivedAt: new Date() })
+      .where(eq(projectComponents.id, componentArchivedComponentId));
+
+    await expect(
+      updateChecklistItemVerification({
+        body: { status: 'checked' },
+        checklistId: checklistArchivedChecklist.id,
+        componentId: checklistArchivedComponentId,
+        headers: owner.headers,
+        itemId: checklistArchivedChecklist.items[0].id,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({
+      body: { error: 'Archived Project Checklist containers are read-only.' },
+      status: 400,
+    });
+    await expect(
+      updateChecklistItemVerification({
+        body: { status: 'checked' },
+        checklistId: componentArchivedChecklist.id,
+        componentId: componentArchivedComponentId,
+        headers: owner.headers,
+        itemId: componentArchivedChecklist.items[0].id,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({
+      body: { error: 'Archived Project Checklist containers are read-only.' },
+      status: 400,
+    });
+    await db.update(projects).set({ archivedAt: new Date() }).where(eq(projects.id, projectId));
+
+    await expect(
+      updateChecklistItemVerification({
+        body: { status: 'checked' },
+        checklistId: projectArchivedChecklist.id,
+        componentId: projectArchivedComponentId,
+        headers: owner.headers,
+        itemId: projectArchivedChecklist.items[0].id,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({
+      body: { error: 'Archived Project Checklist containers are read-only.' },
+      status: 400,
     });
   });
 

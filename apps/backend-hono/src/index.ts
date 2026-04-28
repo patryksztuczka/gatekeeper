@@ -87,7 +87,9 @@ import {
   canApplyProjectChecklists,
   getProjectChecklistForMembership,
   normalizeApplyChecklistTemplateBody,
+  normalizeChecklistItemVerificationBody,
   ProjectChecklistInputError,
+  updateProjectChecklistItemVerification,
 } from './lib/project-checklists';
 
 const app = new Hono();
@@ -1395,6 +1397,51 @@ app.get(
     }
 
     return c.json({ projectChecklist });
+  },
+);
+
+app.patch(
+  '/api/organizations/:organizationSlug/projects/:projectSlug/components/:componentId/checklists/:checklistId/items/:itemId/verification',
+  async (c) => {
+    const session = await auth.api.getSession({
+      headers: c.req.raw.headers,
+    });
+
+    if (!session) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const membership = await getOrganizationMembership(
+      c.req.param('organizationSlug'),
+      session.user.id,
+    );
+
+    if (!membership) {
+      return c.json({ error: 'Project Checklist Item unavailable' }, 404);
+    }
+
+    try {
+      const projectChecklist = await updateProjectChecklistItemVerification({
+        checklistId: c.req.param('checklistId'),
+        componentId: c.req.param('componentId'),
+        itemId: c.req.param('itemId'),
+        membership,
+        projectSlug: c.req.param('projectSlug'),
+        values: normalizeChecklistItemVerificationBody(await c.req.json().catch(() => null)),
+      });
+
+      if (!projectChecklist) {
+        return c.json({ error: 'Project Checklist Item unavailable' }, 404);
+      }
+
+      return c.json({ projectChecklist });
+    } catch (caughtError) {
+      if (caughtError instanceof ProjectChecklistInputError) {
+        return c.json({ error: caughtError.message }, 400);
+      }
+
+      throw caughtError;
+    }
   },
 );
 
