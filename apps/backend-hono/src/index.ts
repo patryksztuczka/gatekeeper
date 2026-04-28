@@ -82,6 +82,12 @@ import {
   updateProjectComponentForMembership,
   updateProjectForMembership,
 } from './lib/projects';
+import {
+  applyChecklistTemplateToProjectComponent,
+  canApplyProjectChecklists,
+  normalizeApplyChecklistTemplateBody,
+  ProjectChecklistInputError,
+} from './lib/project-checklists';
 
 const app = new Hono();
 
@@ -1299,6 +1305,61 @@ app.patch(
 app.patch(
   '/api/organizations/:organizationSlug/projects/:projectSlug/components/:componentId/restore',
   async (c) => setProjectComponentArchived(c, false),
+);
+
+app.post(
+  '/api/organizations/:organizationSlug/projects/:projectSlug/components/:componentId/checklists',
+  async (c) => {
+    const session = await auth.api.getSession({
+      headers: c.req.raw.headers,
+    });
+
+    if (!session) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const membership = await getOrganizationMembership(
+      c.req.param('organizationSlug'),
+      session.user.id,
+    );
+
+    if (!membership) {
+      return c.json({ error: 'Project Component unavailable' }, 404);
+    }
+
+    if (
+      !(await canApplyProjectChecklists({ membership, projectSlug: c.req.param('projectSlug') }))
+    ) {
+      return c.json(
+        {
+          error:
+            'Only Organization owners, admins, and the Project Owner can apply Checklist Templates to Project Components.',
+        },
+        403,
+      );
+    }
+
+    try {
+      const projectChecklist = await applyChecklistTemplateToProjectComponent({
+        componentId: c.req.param('componentId'),
+        membership,
+        projectSlug: c.req.param('projectSlug'),
+        values: normalizeApplyChecklistTemplateBody(await c.req.json().catch(() => null)),
+      });
+
+      if (!projectChecklist) {
+        return c.json({ error: 'Project Component unavailable' }, 404);
+      }
+
+      return c.json({ projectChecklist }, 201);
+    } catch (caughtError) {
+      if (caughtError instanceof ProjectChecklistInputError) {
+        return c.json({ error: caughtError.message }, 400);
+      }
+
+      throw caughtError;
+    }
+  },
 );
 
 app.patch('/api/organizations/:organizationSlug/projects/:projectSlug', async (c) => {
