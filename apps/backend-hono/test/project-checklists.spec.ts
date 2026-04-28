@@ -1021,7 +1021,7 @@ describe('Project Checklists API', () => {
           completion: { completedItems: 1, totalItems: 1 },
           items: [
             {
-              controlVersion: { id: control.versionId, versionNumber: 1 },
+              controlVersion: { id: control.versionId, isLatest: false, versionNumber: 1 },
               verificationRecord: {
                 history: [
                   {
