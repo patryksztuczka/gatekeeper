@@ -76,6 +76,40 @@ export type ProjectChecklistSectionResponse = {
   name: string;
 };
 
+export type UncheckedCurrentRequirementReportItem = {
+  control: {
+    controlCode: string;
+    id: string;
+    releaseImpact: string;
+    title: string;
+  };
+  controlVersion: {
+    id: string;
+    versionNumber: number;
+  };
+  project: {
+    id: string;
+    name: string;
+    slug: string;
+  };
+  projectChecklist: {
+    displayName: string;
+    id: string;
+  };
+  projectChecklistItem: {
+    id: string;
+  };
+  projectComponent: {
+    id: string;
+    name: string;
+  };
+  uncheckedReason: 'new-control-version' | 'never-verified';
+  verificationRecord: {
+    id: string;
+    status: string;
+  };
+};
+
 type ApplyChecklistTemplateInput = {
   displayName: string | null;
   templateId: string;
@@ -619,6 +653,125 @@ export async function getProjectChecklistForMembership(input: {
     unsectionedItems: items.filter(({ sectionId }) => !sectionId),
     updatedAt: checklist.updatedAt.toISOString(),
   };
+}
+
+export async function listUncheckedCurrentRequirementsForMembership(
+  membership: OrganizationMembership,
+): Promise<UncheckedCurrentRequirementReportItem[]> {
+  const rows = await db
+    .select({
+      componentId: projectComponents.id,
+      componentName: projectComponents.name,
+      controlCode: controlVersions.controlCode,
+      controlId: projectChecklistItems.controlId,
+      controlVersionId: projectChecklistItems.controlVersionId,
+      displayOrder: projectChecklistItems.displayOrder,
+      itemId: projectChecklistItems.id,
+      projectChecklistDisplayName: projectChecklists.displayName,
+      projectChecklistId: projectChecklists.id,
+      projectId: projects.id,
+      projectName: projects.name,
+      projectSlug: projects.slug,
+      releaseImpact: controlVersions.releaseImpact,
+      title: controlVersions.title,
+      verificationRecordId: projectChecklistVerificationRecords.id,
+      verificationStatus: projectChecklistVerificationRecords.status,
+      versionNumber: controlVersions.versionNumber,
+    })
+    .from(projectChecklistItems)
+    .innerJoin(
+      projectChecklists,
+      eq(projectChecklistItems.projectChecklistId, projectChecklists.id),
+    )
+    .innerJoin(projectComponents, eq(projectChecklists.componentId, projectComponents.id))
+    .innerJoin(projects, eq(projectComponents.projectId, projects.id))
+    .innerJoin(controls, eq(projectChecklistItems.controlId, controls.id))
+    .innerJoin(controlVersions, eq(projectChecklistItems.controlVersionId, controlVersions.id))
+    .innerJoin(
+      projectChecklistVerificationRecords,
+      eq(projectChecklistItems.verificationRecordId, projectChecklistVerificationRecords.id),
+    )
+    .where(
+      and(
+        eq(projects.organizationId, membership.organizationId),
+        isNull(projects.archivedAt),
+        isNull(projectComponents.archivedAt),
+        isNull(projectChecklists.archivedAt),
+        isNull(projectChecklistItems.removedFromTemplateAt),
+        isNull(controls.archivedAt),
+        eq(projectChecklistItems.controlVersionId, controls.currentVersionId),
+        eq(projectChecklistVerificationRecords.status, 'unchecked'),
+      ),
+    )
+    .orderBy(
+      asc(projects.name),
+      asc(projectComponents.name),
+      asc(projectChecklists.displayName),
+      asc(projectChecklistItems.displayOrder),
+      asc(controlVersions.controlCode),
+    );
+
+  const histories = rows.length
+    ? await db
+        .select({
+          controlVersionId: projectChecklistVerificationHistory.controlVersionId,
+          projectChecklistItemId: projectChecklistVerificationHistory.projectChecklistItemId,
+        })
+        .from(projectChecklistVerificationHistory)
+        .where(
+          inArray(
+            projectChecklistVerificationHistory.projectChecklistItemId,
+            rows.map(({ itemId }) => itemId),
+          ),
+        )
+    : [];
+  const currentVersionByItemId = new Map(
+    rows.map(({ controlVersionId, itemId }) => [itemId, controlVersionId]),
+  );
+  const itemsWithPriorVersionHistory = new Set(
+    histories
+      .filter(
+        ({ controlVersionId, projectChecklistItemId }) =>
+          currentVersionByItemId.get(projectChecklistItemId) !== controlVersionId,
+      )
+      .map(({ projectChecklistItemId }) => projectChecklistItemId),
+  );
+
+  return rows.map((row) => ({
+    control: {
+      controlCode: row.controlCode,
+      id: row.controlId,
+      releaseImpact: row.releaseImpact,
+      title: row.title,
+    },
+    controlVersion: {
+      id: row.controlVersionId,
+      versionNumber: row.versionNumber,
+    },
+    project: {
+      id: row.projectId,
+      name: row.projectName,
+      slug: row.projectSlug,
+    },
+    projectChecklist: {
+      displayName: row.projectChecklistDisplayName,
+      id: row.projectChecklistId,
+    },
+    projectChecklistItem: {
+      id: row.itemId,
+    },
+    projectComponent: {
+      id: row.componentId,
+      name: row.componentName,
+    },
+    uncheckedReason: itemsWithPriorVersionHistory.has(row.itemId)
+      ? 'new-control-version'
+      : 'never-verified',
+    verificationRecord: {
+      id: row.verificationRecordId,
+      status: row.verificationStatus,
+    },
+  }));
 }
 
 function isCompleteVerificationStatus(status: string): boolean {

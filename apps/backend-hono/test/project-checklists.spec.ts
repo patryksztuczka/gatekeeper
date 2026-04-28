@@ -463,6 +463,21 @@ async function setChecklistArchived(input: {
   };
 }
 
+async function getUncheckedCurrentRequirementsReport(input: {
+  headers?: Headers;
+  organizationSlug: string;
+}) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${input.organizationSlug}/reports/unchecked-current-requirements`,
+    input.headers ? { headers: input.headers } : undefined,
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
 beforeEach(() => {
   const originalFetch = globalThis.fetch;
 
@@ -483,6 +498,227 @@ afterEach(() => {
 });
 
 describe('Project Checklists API', () => {
+  it('reports unchecked current requirements to Organization members only', async () => {
+    const owner = await createSignedInOwner('unchecked-report-owner');
+    const member = await addMemberToOrganization(owner.organization.id, 'unchecked-report-member');
+    const outsider = await createSignedInOwner('unchecked-report-outsider');
+    const projectId = await createProject({
+      organizationId: owner.organization.id,
+      projectOwnerMemberId: null,
+      slug: 'vendor-risk',
+    });
+    const componentId = await createComponent(projectId, 'Active Component');
+    const neverVerifiedControl = await createActiveControl({
+      controlCode: 'AUTH-055',
+      organizationId: owner.organization.id,
+      title: 'Require MFA enrollment',
+    });
+    const notApplicableControl = await createActiveControl({
+      controlCode: 'LOG-055',
+      organizationId: owner.organization.id,
+      title: 'Require centralized logs',
+    });
+    const removedControl = await createActiveControl({
+      controlCode: 'NET-055',
+      organizationId: owner.organization.id,
+      title: 'Require network review',
+    });
+    const staleControl = await createActiveControl({
+      controlCode: 'OPS-055',
+      organizationId: owner.organization.id,
+      title: 'Require operational readiness',
+    });
+    const updatedControl = await createActiveControl({
+      controlCode: 'SEC-055',
+      organizationId: owner.organization.id,
+      title: 'Require security approval',
+    });
+    const templateId = await createTemplate({
+      controlIds: [
+        neverVerifiedControl.controlId,
+        notApplicableControl.controlId,
+        removedControl.controlId,
+        staleControl.controlId,
+        updatedControl.controlId,
+      ],
+      organizationId: owner.organization.id,
+    });
+    const checklist = (
+      await applyTemplate({
+        body: { templateId },
+        componentId,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      })
+    ).body.projectChecklist as {
+      id: string;
+      items: Array<{ control: { id: string }; id: string }>;
+    };
+    const itemByControlId = new Map(checklist.items.map((item) => [item.control.id, item]));
+
+    await updateChecklistItemVerification({
+      body: {
+        notApplicableExplanation: 'This Project Component does not process audit logs.',
+        status: 'not-applicable',
+      },
+      checklistId: checklist.id,
+      componentId,
+      headers: owner.headers,
+      itemId: itemByControlId.get(notApplicableControl.controlId)!.id,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'vendor-risk',
+    });
+    await updateChecklistItemVerification({
+      body: { status: 'checked' },
+      checklistId: checklist.id,
+      componentId,
+      headers: owner.headers,
+      itemId: itemByControlId.get(updatedControl.controlId)!.id,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'vendor-risk',
+    });
+
+    const removedTemplateItem = await db
+      .select({ id: checklistTemplateItems.id })
+      .from(checklistTemplateItems)
+      .where(
+        and(
+          eq(checklistTemplateItems.templateId, templateId),
+          eq(checklistTemplateItems.controlId, removedControl.controlId),
+        ),
+      )
+      .limit(1)
+      .then((rows) => rows[0]!);
+
+    await removeChecklistTemplateItem({
+      headers: owner.headers,
+      itemId: removedTemplateItem.id,
+      organizationSlug: owner.organization.slug,
+      templateId,
+    });
+    await addLatestControlVersion(staleControl.controlId, 'OPS-055', 'Require current operations');
+
+    const proposedResponse = await createControlProposedUpdate({
+      body: {
+        acceptedEvidenceTypes: ['document'],
+        applicabilityConditions: 'Applies to active Project Checklist Items.',
+        businessMeaning: 'Updated security approval requires fresh verification.',
+        controlCode: 'SEC-055',
+        externalStandardsMappings: [],
+        releaseImpact: 'blocking',
+        title: 'Require refreshed security approval',
+        verificationMethod: 'Review updated approval evidence.',
+      },
+      controlId: updatedControl.controlId,
+      headers: owner.headers,
+      organizationSlug: owner.organization.slug,
+    });
+    await publishControlProposedUpdate({
+      controlId: updatedControl.controlId,
+      headers: owner.headers,
+      organizationSlug: owner.organization.slug,
+      proposedUpdateId: (proposedResponse.body.proposedUpdate as { id: string }).id,
+    });
+
+    const archivedProjectId = await createProject({
+      organizationId: owner.organization.id,
+      projectOwnerMemberId: null,
+      slug: 'archived-report-project',
+    });
+    const archivedProjectComponentId = await createComponent(archivedProjectId, 'Archived Project');
+    const archivedComponentProjectId = await createProject({
+      organizationId: owner.organization.id,
+      projectOwnerMemberId: null,
+      slug: 'archived-report-component',
+    });
+    const archivedComponentId = await createComponent(
+      archivedComponentProjectId,
+      'Archived Component',
+    );
+    const archivedChecklistProjectId = await createProject({
+      organizationId: owner.organization.id,
+      projectOwnerMemberId: null,
+      slug: 'archived-report-checklist',
+    });
+    const archivedChecklistComponentId = await createComponent(
+      archivedChecklistProjectId,
+      'Archived Checklist',
+    );
+
+    for (const [slug, archivedComponent] of [
+      ['archived-report-project', archivedProjectComponentId],
+      ['archived-report-component', archivedComponentId],
+      ['archived-report-checklist', archivedChecklistComponentId],
+    ] as const) {
+      await applyTemplate({
+        body: { templateId },
+        componentId: archivedComponent,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: slug,
+      });
+    }
+    await db
+      .update(projects)
+      .set({ archivedAt: new Date() })
+      .where(eq(projects.id, archivedProjectId));
+    await db
+      .update(projectComponents)
+      .set({ archivedAt: new Date() })
+      .where(eq(projectComponents.id, archivedComponentId));
+    await db
+      .update(projectChecklists)
+      .set({ archivedAt: new Date() })
+      .where(eq(projectChecklists.componentId, archivedChecklistComponentId));
+
+    await expect(
+      getUncheckedCurrentRequirementsReport({ organizationSlug: owner.organization.slug }),
+    ).resolves.toMatchObject({ body: { error: 'Unauthorized' }, status: 401 });
+    await expect(
+      getUncheckedCurrentRequirementsReport({
+        headers: outsider.headers,
+        organizationSlug: owner.organization.slug,
+      }),
+    ).resolves.toMatchObject({ body: { error: 'Organization not found' }, status: 404 });
+
+    const reportResponse = await getUncheckedCurrentRequirementsReport({
+      headers: member.headers,
+      organizationSlug: owner.organization.slug,
+    });
+    const requirements = reportResponse.body.uncheckedCurrentRequirements as Array<{
+      control: { controlCode: string; title: string };
+      controlVersion: { versionNumber: number };
+      project: { slug: string };
+      projectChecklistItem: { id: string };
+      uncheckedReason: string;
+      verificationRecord: { status: string };
+    }>;
+
+    expect(reportResponse.status).toBe(200);
+    expect(requirements).toHaveLength(2);
+    expect(requirements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          control: expect.objectContaining({ controlCode: 'AUTH-055' }),
+          controlVersion: expect.objectContaining({ versionNumber: 1 }),
+          project: expect.objectContaining({ slug: 'vendor-risk' }),
+          projectChecklistItem: { id: itemByControlId.get(neverVerifiedControl.controlId)!.id },
+          uncheckedReason: 'never-verified',
+          verificationRecord: expect.objectContaining({ status: 'unchecked' }),
+        }),
+        expect.objectContaining({
+          control: expect.objectContaining({ controlCode: 'SEC-055' }),
+          controlVersion: expect.objectContaining({ versionNumber: 2 }),
+          project: expect.objectContaining({ slug: 'vendor-risk' }),
+          projectChecklistItem: { id: itemByControlId.get(updatedControl.controlId)!.id },
+          uncheckedReason: 'new-control-version',
+          verificationRecord: expect.objectContaining({ status: 'unchecked' }),
+        }),
+      ]),
+    );
+  });
+
   it('lets Organization owners, admins, and the Project Owner apply active Checklist Templates', async () => {
     const owner = await createSignedInOwner('project-checklist-owner');
     const admin = await addMemberToOrganization(
