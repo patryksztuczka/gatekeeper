@@ -374,3 +374,35 @@ export const controlPublishRequestApprovals = sqliteTable(
     ),
   ],
 );
+
+export const checklistTemplates = sqliteTable(
+  'checklist_templates',
+  {
+    id: text('id').primaryKey(),
+    organizationId: text('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    authorMemberId: text('author_member_id')
+      .notNull()
+      .references(() => members.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    normalizedName: text('normalized_name').notNull(),
+    status: text('status').default('draft').notNull(),
+    publishedAt: integer('published_at', { mode: 'timestamp_ms' }),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index('checklist_template_organization_id_idx').on(table.organizationId),
+    index('checklist_template_author_member_id_idx').on(table.authorMemberId),
+    uniqueIndex('checklist_template_organization_name_unique').on(
+      table.organizationId,
+      table.normalizedName,
+    ),
+  ],
+);
