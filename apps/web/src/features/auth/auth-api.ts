@@ -81,12 +81,14 @@ export type ChecklistTemplateListItem = {
   id: string;
   items: Array<{
     control: {
+      archivedAt: string | null;
       controlCode: string;
       id: string;
       title: string;
     };
     createdAt: string;
     id: string;
+    requiresAdminAttention: boolean;
   }>;
   name: string;
   publishedAt: string | null;
