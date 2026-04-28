@@ -357,6 +357,28 @@ async function updateChecklistItemVerification(input: {
   };
 }
 
+async function setChecklistArchived(input: {
+  archived: boolean;
+  checklistId: string;
+  componentId: string;
+  headers: Headers;
+  organizationSlug: string;
+  projectSlug: string;
+}) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${input.organizationSlug}/projects/${input.projectSlug}/components/${input.componentId}/checklists/${input.checklistId}/${input.archived ? 'archive' : 'restore'}`,
+    {
+      headers: input.headers,
+      method: 'PATCH',
+    },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
 beforeEach(() => {
   const originalFetch = globalThis.fetch;
 
@@ -444,6 +466,107 @@ describe('Project Checklists API', () => {
         projectSlug: 'vendor-risk',
       }),
     ).resolves.toMatchObject({ status: 403 });
+  });
+
+  it('lets Organization owners, admins, and the Project Owner archive and restore Project Checklists', async () => {
+    const owner = await createSignedInOwner('project-checklist-lifecycle-owner');
+    const admin = await addMemberToOrganization(
+      owner.organization.id,
+      'project-checklist-lifecycle-admin',
+      'admin',
+    );
+    const projectOwner = await addMemberToOrganization(
+      owner.organization.id,
+      'project-checklist-lifecycle-project-owner',
+    );
+    const member = await addMemberToOrganization(
+      owner.organization.id,
+      'project-checklist-lifecycle-member',
+    );
+    const projectId = await createProject({
+      organizationId: owner.organization.id,
+      projectOwnerMemberId: projectOwner.memberId,
+      slug: 'vendor-risk',
+    });
+    const componentId = await createComponent(projectId);
+    const control = await createActiveControl({
+      controlCode: 'AUTH-150',
+      organizationId: owner.organization.id,
+      title: 'Require MFA',
+    });
+    const templateId = await createTemplate({
+      controlIds: [control.controlId],
+      organizationId: owner.organization.id,
+    });
+    const checklist = (
+      await applyTemplate({
+        body: { templateId },
+        componentId,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      })
+    ).body.projectChecklist as { id: string };
+
+    await expect(
+      setChecklistArchived({
+        archived: true,
+        checklistId: checklist.id,
+        componentId,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({
+      body: { projectChecklist: { archivedAt: expect.any(String) } },
+      status: 200,
+    });
+    await expect(
+      setChecklistArchived({
+        archived: false,
+        checklistId: checklist.id,
+        componentId,
+        headers: admin.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({ body: { projectChecklist: { archivedAt: null } }, status: 200 });
+    await expect(
+      setChecklistArchived({
+        archived: true,
+        checklistId: checklist.id,
+        componentId,
+        headers: projectOwner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      setChecklistArchived({
+        archived: false,
+        checklistId: checklist.id,
+        componentId,
+        headers: projectOwner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      setChecklistArchived({
+        archived: true,
+        checklistId: checklist.id,
+        componentId,
+        headers: member.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({
+      body: {
+        error:
+          'Only Organization owners, admins, and the Project Owner can archive Project Checklists.',
+      },
+      status: 403,
+    });
   });
 
   it('creates a Project Checklist, generated items, and unchecked verification records using latest Control Versions', async () => {
@@ -1050,6 +1173,117 @@ describe('Project Checklists API', () => {
     ).resolves.toMatchObject({ status: 200 });
   });
 
+  it('retains items and verification history when Project Checklists are archived and restored', async () => {
+    const owner = await createSignedInOwner('project-checklist-lifecycle-history');
+    const projectId = await createProject({
+      organizationId: owner.organization.id,
+      projectOwnerMemberId: null,
+      slug: 'vendor-risk',
+    });
+    const componentId = await createComponent(projectId);
+    const control = await createActiveControl({
+      controlCode: 'AUTH-1050',
+      organizationId: owner.organization.id,
+      title: 'Require MFA',
+    });
+    const templateId = await createTemplate({
+      controlIds: [control.controlId],
+      organizationId: owner.organization.id,
+    });
+    const checklist = (
+      await applyTemplate({
+        body: { templateId },
+        componentId,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      })
+    ).body.projectChecklist as { id: string; items: [{ id: string }] };
+
+    await updateChecklistItemVerification({
+      body: { status: 'checked' },
+      checklistId: checklist.id,
+      componentId,
+      headers: owner.headers,
+      itemId: checklist.items[0].id,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'vendor-risk',
+    });
+    await setChecklistArchived({
+      archived: true,
+      checklistId: checklist.id,
+      componentId,
+      headers: owner.headers,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'vendor-risk',
+    });
+
+    await expect(
+      openChecklist({
+        checklistId: checklist.id,
+        componentId,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({
+      body: {
+        projectChecklist: {
+          archivedAt: expect.any(String),
+          items: [
+            {
+              id: checklist.items[0].id,
+              verificationRecord: {
+                history: [{ status: 'checked' }],
+                status: 'checked',
+              },
+            },
+          ],
+        },
+      },
+      status: 200,
+    });
+    await expect(
+      updateChecklistItemVerification({
+        body: { status: 'unchecked' },
+        checklistId: checklist.id,
+        componentId,
+        headers: owner.headers,
+        itemId: checklist.items[0].id,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({
+      body: { error: 'Archived Project Checklist containers are read-only.' },
+      status: 400,
+    });
+    await setChecklistArchived({
+      archived: false,
+      checklistId: checklist.id,
+      componentId,
+      headers: owner.headers,
+      organizationSlug: owner.organization.slug,
+      projectSlug: 'vendor-risk',
+    });
+
+    const [items, history] = await Promise.all([
+      db
+        .select()
+        .from(projectChecklistItems)
+        .where(eq(projectChecklistItems.projectChecklistId, checklist.id)),
+      db
+        .select()
+        .from(projectChecklistVerificationHistory)
+        .where(
+          eq(projectChecklistVerificationHistory.projectChecklistItemId, checklist.items[0].id),
+        ),
+    ]);
+
+    expect(items).toHaveLength(1);
+    expect(history).toHaveLength(1);
+    expect(history[0]!.status).toBe('checked');
+  });
+
   it('keeps archived Projects, Project Components, and Project Checklists read-only for verification', async () => {
     const owner = await createSignedInOwner('project-checklist-verify-archived');
     const projectId = await createProject({
@@ -1187,13 +1421,15 @@ describe('Project Checklists API', () => {
       organizationId: owner.organization.id,
     });
 
-    await applyTemplate({
-      body: { displayName: 'Custom Checklist', templateId: firstTemplateId },
-      componentId,
-      headers: owner.headers,
-      organizationSlug: owner.organization.slug,
-      projectSlug: 'vendor-risk',
-    });
+    const firstChecklist = (
+      await applyTemplate({
+        body: { displayName: 'Custom Checklist', templateId: firstTemplateId },
+        componentId,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      })
+    ).body.projectChecklist as { id: string };
 
     await expect(
       applyTemplate({
@@ -1220,6 +1456,42 @@ describe('Project Checklists API', () => {
       }),
     ).resolves.toMatchObject({
       body: { error: 'Project Checklist display name is already used for this Project Component.' },
+      status: 400,
+    });
+
+    await expect(
+      setChecklistArchived({
+        archived: true,
+        checklistId: firstChecklist.id,
+        componentId,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      applyTemplate({
+        body: { displayName: 'Custom Checklist', templateId: firstTemplateId },
+        componentId,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({ status: 201 });
+    await expect(
+      setChecklistArchived({
+        archived: false,
+        checklistId: firstChecklist.id,
+        componentId,
+        headers: owner.headers,
+        organizationSlug: owner.organization.slug,
+        projectSlug: 'vendor-risk',
+      }),
+    ).resolves.toMatchObject({
+      body: {
+        error:
+          'Project Component already has an active Project Checklist for this Checklist Template.',
+      },
       status: 400,
     });
   });

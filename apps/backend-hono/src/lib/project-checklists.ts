@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, ne } from 'drizzle-orm';
 import { db } from '../db/client';
 import {
   checklistTemplateItems,
@@ -352,6 +352,72 @@ export async function updateProjectChecklistItemVerification(input: {
   });
 }
 
+export async function setProjectChecklistArchivedForMembership(input: {
+  archived: boolean;
+  checklistId: string;
+  componentId: string;
+  membership: OrganizationMembership;
+  projectSlug: string;
+}): Promise<ProjectChecklistResponse | null> {
+  const checklist = await db
+    .select({
+      componentArchivedAt: projectComponents.archivedAt,
+      componentId: projectChecklists.componentId,
+      displayName: projectChecklists.displayName,
+      id: projectChecklists.id,
+      normalizedDisplayName: projectChecklists.normalizedDisplayName,
+      projectArchivedAt: projects.archivedAt,
+      templateId: projectChecklists.templateId,
+    })
+    .from(projectChecklists)
+    .innerJoin(projectComponents, eq(projectChecklists.componentId, projectComponents.id))
+    .innerJoin(projects, eq(projectComponents.projectId, projects.id))
+    .where(
+      and(
+        eq(projectChecklists.id, input.checklistId),
+        eq(projectChecklists.componentId, input.componentId),
+        eq(projects.organizationId, input.membership.organizationId),
+        eq(projects.slug, input.projectSlug),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (!checklist) {
+    return null;
+  }
+
+  if (!input.archived) {
+    if (checklist.projectArchivedAt || checklist.componentArchivedAt) {
+      throw new ProjectChecklistInputError(
+        'Archived Project Checklist containers must be restored before restoring Project Checklists.',
+      );
+    }
+
+    await assertProjectChecklistIsUnique({
+      componentId: checklist.componentId,
+      excludeChecklistId: checklist.id,
+      normalizedDisplayName: checklist.normalizedDisplayName,
+      templateId: checklist.templateId,
+    });
+  }
+
+  await db
+    .update(projectChecklists)
+    .set({
+      archivedAt: input.archived ? new Date() : null,
+      updatedAt: new Date(),
+    })
+    .where(eq(projectChecklists.id, checklist.id));
+
+  return getProjectChecklistForMembership({
+    checklistId: checklist.id,
+    componentId: input.componentId,
+    membership: input.membership,
+    projectSlug: input.projectSlug,
+  });
+}
+
 export async function getProjectChecklistForMembership(input: {
   checklistId: string;
   componentId?: string;
@@ -546,6 +612,7 @@ function isVerificationStatus(status: string | null): status is VerificationStat
 
 async function assertProjectChecklistIsUnique(input: {
   componentId: string;
+  excludeChecklistId?: string;
   normalizedDisplayName: string;
   templateId: string;
 }) {
@@ -557,6 +624,7 @@ async function assertProjectChecklistIsUnique(input: {
         eq(projectChecklists.componentId, input.componentId),
         eq(projectChecklists.templateId, input.templateId),
         isNull(projectChecklists.archivedAt),
+        input.excludeChecklistId ? ne(projectChecklists.id, input.excludeChecklistId) : undefined,
       ),
     )
     .limit(1)
@@ -576,6 +644,7 @@ async function assertProjectChecklistIsUnique(input: {
         eq(projectChecklists.componentId, input.componentId),
         eq(projectChecklists.normalizedDisplayName, input.normalizedDisplayName),
         isNull(projectChecklists.archivedAt),
+        input.excludeChecklistId ? ne(projectChecklists.id, input.excludeChecklistId) : undefined,
       ),
     )
     .limit(1)
