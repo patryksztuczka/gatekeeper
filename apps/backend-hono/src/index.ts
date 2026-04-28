@@ -89,6 +89,7 @@ import {
   normalizeApplyChecklistTemplateBody,
   normalizeChecklistItemVerificationBody,
   ProjectChecklistInputError,
+  setProjectChecklistArchivedForMembership,
   updateProjectChecklistItemVerification,
 } from './lib/project-checklists';
 
@@ -1402,6 +1403,16 @@ app.get(
 );
 
 app.patch(
+  '/api/organizations/:organizationSlug/projects/:projectSlug/components/:componentId/checklists/:checklistId/archive',
+  async (c) => setProjectChecklistArchived(c, true),
+);
+
+app.patch(
+  '/api/organizations/:organizationSlug/projects/:projectSlug/components/:componentId/checklists/:checklistId/restore',
+  async (c) => setProjectChecklistArchived(c, false),
+);
+
+app.patch(
   '/api/organizations/:organizationSlug/projects/:projectSlug/components/:componentId/checklists/:checklistId/items/:itemId/verification',
   async (c) => {
     const session = await auth.api.getSession({
@@ -1543,6 +1554,64 @@ async function setProjectComponentArchived(c: Context, archived: boolean) {
   }
 
   return c.json({ component });
+}
+
+async function setProjectChecklistArchived(c: Context, archived: boolean) {
+  const organizationSlug = c.req.param('organizationSlug');
+  const projectSlug = c.req.param('projectSlug');
+  const componentId = c.req.param('componentId');
+  const checklistId = c.req.param('checklistId');
+
+  if (!organizationSlug || !projectSlug || !componentId || !checklistId) {
+    return c.json({ error: 'Project Checklist unavailable' }, 404);
+  }
+
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const membership = await getOrganizationMembership(organizationSlug, session.user.id);
+
+  if (!membership) {
+    return c.json({ error: 'Project Checklist unavailable' }, 404);
+  }
+
+  if (!(await canApplyProjectChecklists({ membership, projectSlug }))) {
+    return c.json(
+      {
+        error: `Only Organization owners, admins, and the Project Owner can ${
+          archived ? 'archive' : 'restore'
+        } Project Checklists.`,
+      },
+      403,
+    );
+  }
+
+  try {
+    const projectChecklist = await setProjectChecklistArchivedForMembership({
+      archived,
+      checklistId,
+      componentId,
+      membership,
+      projectSlug,
+    });
+
+    if (!projectChecklist) {
+      return c.json({ error: 'Project Checklist unavailable' }, 404);
+    }
+
+    return c.json({ projectChecklist });
+  } catch (caughtError) {
+    if (caughtError instanceof ProjectChecklistInputError) {
+      return c.json({ error: caughtError.message }, 400);
+    }
+
+    throw caughtError;
+  }
 }
 
 async function setProjectArchived(c: Context, archived: boolean) {

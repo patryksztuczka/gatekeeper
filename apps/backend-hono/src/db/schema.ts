@@ -512,14 +512,12 @@ export const projectChecklists = sqliteTable(
   (table) => [
     index('project_checklist_component_id_idx').on(table.componentId),
     index('project_checklist_template_id_idx').on(table.templateId),
-    uniqueIndex('project_checklist_component_template_unique').on(
-      table.componentId,
-      table.templateId,
-    ),
-    uniqueIndex('project_checklist_component_display_name_unique').on(
-      table.componentId,
-      table.normalizedDisplayName,
-    ),
+    uniqueIndex('project_checklist_active_component_template_unique')
+      .on(table.componentId, table.templateId)
+      .where(sql`${table.archivedAt} is null`),
+    uniqueIndex('project_checklist_component_display_name_unique')
+      .on(table.componentId, table.normalizedDisplayName)
+      .where(sql`${table.archivedAt} is null`),
   ],
 );
 
