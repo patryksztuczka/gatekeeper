@@ -92,7 +92,7 @@ export type ChecklistTemplateListItem = {
   }>;
   name: string;
   publishedAt: string | null;
-  status: 'active' | 'draft';
+  status: 'active' | 'archived' | 'draft';
 };
 
 export type ControlListItem = {
@@ -338,7 +338,7 @@ export function createProject(
 
 export function listChecklistTemplates(
   organizationSlug: string,
-  filters: { search?: string; status?: 'active' | 'draft' | 'all' } = {},
+  filters: { search?: string; status?: 'active' | 'archived' | 'draft' | 'all' } = {},
 ) {
   const query = toQueryString({
     q: filters.search,
@@ -372,6 +372,15 @@ export function publishChecklistTemplate(organizationSlug: string, templateId: s
   );
 }
 
+export function archiveChecklistTemplate(organizationSlug: string, templateId: string) {
+  return request<{ checklistTemplate: ChecklistTemplateListItem }>(
+    `/api/organizations/${organizationSlug}/checklist-templates/${templateId}/archive`,
+    {
+      method: 'POST',
+    },
+  );
+}
+
 export function addChecklistTemplateItem(
   organizationSlug: string,
   templateId: string,
@@ -382,6 +391,15 @@ export function addChecklistTemplateItem(
     {
       method: 'POST',
       body: JSON.stringify(input),
+    },
+  );
+}
+
+export function restoreChecklistTemplate(organizationSlug: string, templateId: string) {
+  return request<{ checklistTemplate: ChecklistTemplateListItem }>(
+    `/api/organizations/${organizationSlug}/checklist-templates/${templateId}/restore`,
+    {
+      method: 'POST',
     },
   );
 }

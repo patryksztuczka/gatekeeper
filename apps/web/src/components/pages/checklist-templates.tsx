@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { AlertCircle, CheckCircle2, Plus, Trash2 } from 'lucide-react';
+import { AlertCircle, Archive, CheckCircle2, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import { useParams, useSearchParams } from 'react-router';
 import {
   addChecklistTemplateItem,
+  archiveChecklistTemplate,
   createChecklistTemplate,
   getMembershipResolution,
   listControls,
   listChecklistTemplates,
   publishChecklistTemplate,
   removeChecklistTemplateItem,
+  restoreChecklistTemplate,
   type ChecklistTemplateListItem,
   type ControlListItem,
 } from '../../features/auth/auth-api';
@@ -32,7 +34,7 @@ function canManageChecklistTemplates(role: string | null): boolean {
 }
 
 function toStatusFilter(value: string | null) {
-  return value === 'active' || value === 'draft' ? value : 'all';
+  return value === 'active' || value === 'archived' || value === 'draft' ? value : 'all';
 }
 
 export function ChecklistTemplatesPage() {
@@ -45,6 +47,7 @@ export function ChecklistTemplatesPage() {
   const [isCreating, setIsCreating] = useState(false);
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [publishingTemplateId, setPublishingTemplateId] = useState<string | null>(null);
+  const [archivingTemplateId, setArchivingTemplateId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [name, setName] = useState('');
@@ -148,6 +151,33 @@ export function ChecklistTemplatesPage() {
     }
   };
 
+  const handleArchiveChecklistTemplate = async (template: ChecklistTemplateListItem) => {
+    if (!organizationSlug) return;
+
+    setArchivingTemplateId(template.id);
+    setError(null);
+    setStatus(null);
+    try {
+      const response = await archiveChecklistTemplate(organizationSlug, template.id);
+
+      setTemplates((currentTemplates) =>
+        currentTemplates.flatMap((currentTemplate) => {
+          if (currentTemplate.id !== template.id) return [currentTemplate];
+          return statusFilter === 'active' ? [] : [response.checklistTemplate];
+        }),
+      );
+      setStatus('Checklist Template archived.');
+    } catch (caughtError) {
+      const rawMessage =
+        caughtError instanceof Error
+          ? caughtError.message
+          : 'Unable to archive Checklist Template.';
+      setError(humanizeAuthError(null, rawMessage, 'Unable to archive Checklist Template.'));
+    } finally {
+      setArchivingTemplateId(null);
+    }
+  };
+
   const handleAddChecklistTemplateItem = async (
     event: FormEvent<HTMLFormElement>,
     template: ChecklistTemplateListItem,
@@ -215,6 +245,33 @@ export function ChecklistTemplatesPage() {
     }
   };
 
+  const handleRestoreChecklistTemplate = async (template: ChecklistTemplateListItem) => {
+    if (!organizationSlug) return;
+
+    setArchivingTemplateId(template.id);
+    setError(null);
+    setStatus(null);
+    try {
+      const response = await restoreChecklistTemplate(organizationSlug, template.id);
+
+      setTemplates((currentTemplates) =>
+        currentTemplates.flatMap((currentTemplate) => {
+          if (currentTemplate.id !== template.id) return [currentTemplate];
+          return statusFilter === 'archived' ? [] : [response.checklistTemplate];
+        }),
+      );
+      setStatus('Checklist Template restored.');
+    } catch (caughtError) {
+      const rawMessage =
+        caughtError instanceof Error
+          ? caughtError.message
+          : 'Unable to restore Checklist Template.';
+      setError(humanizeAuthError(null, rawMessage, 'Unable to restore Checklist Template.'));
+    } finally {
+      setArchivingTemplateId(null);
+    }
+  };
+
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -262,6 +319,7 @@ export function ChecklistTemplatesPage() {
             >
               <option value="all">All visible</option>
               <option value="active">Active</option>
+              <option value="archived">Archived</option>
               <option value="draft">Draft</option>
             </select>
           </div>
@@ -335,6 +393,45 @@ export function ChecklistTemplatesPage() {
                     : `Created ${formatDate(template.createdAt)}`}
                 </p>
               </div>
+              {canManage ? (
+                <div className="mt-4 flex flex-wrap justify-end gap-2">
+                  {template.status === 'active' ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void handleArchiveChecklistTemplate(template)}
+                      disabled={archivingTemplateId === template.id}
+                    >
+                      <Archive />
+                      {archivingTemplateId === template.id ? 'Archiving...' : 'Archive'}
+                    </Button>
+                  ) : null}
+                  {template.status === 'archived' ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void handleRestoreChecklistTemplate(template)}
+                      disabled={archivingTemplateId === template.id}
+                    >
+                      <RotateCcw />
+                      {archivingTemplateId === template.id ? 'Restoring...' : 'Restore'}
+                    </Button>
+                  ) : null}
+                  {template.status === 'draft' ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => void handlePublishChecklistTemplate(template)}
+                      disabled={publishingTemplateId === template.id}
+                    >
+                      {publishingTemplateId === template.id ? 'Publishing...' : 'Publish'}
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
+
               <div className="mt-4 space-y-3 rounded-lg border bg-muted/30 p-4">
                 <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                   <h3 className="text-sm font-medium">Template Controls</h3>
@@ -427,18 +524,6 @@ export function ChecklistTemplatesPage() {
                   </form>
                 ) : null}
               </div>
-              {canManage && template.status === 'draft' ? (
-                <div className="mt-4 flex justify-end">
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={() => void handlePublishChecklistTemplate(template)}
-                    disabled={publishingTemplateId === template.id}
-                  >
-                    {publishingTemplateId === template.id ? 'Publishing...' : 'Publish'}
-                  </Button>
-                </div>
-              ) : null}
             </article>
           ))}
         </section>

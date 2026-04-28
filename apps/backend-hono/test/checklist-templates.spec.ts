@@ -300,6 +300,44 @@ async function publishChecklistTemplateRequest(
   };
 }
 
+async function archiveChecklistTemplateRequest(
+  organizationSlug: string,
+  templateId: string,
+  headers: Headers,
+) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/checklist-templates/${templateId}/archive`,
+    {
+      headers,
+      method: 'POST',
+    },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
+async function restoreChecklistTemplateRequest(
+  organizationSlug: string,
+  templateId: string,
+  headers: Headers,
+) {
+  const response = await app.request(
+    `http://example.com/api/organizations/${organizationSlug}/checklist-templates/${templateId}/restore`,
+    {
+      headers,
+      method: 'POST',
+    },
+  );
+
+  return {
+    body: (await response.json()) as Record<string, unknown>,
+    status: response.status,
+  };
+}
+
 async function updateControlApprovalPolicyRequest(organizationSlug: string, headers: Headers) {
   const response = await app.request(
     `http://example.com/api/organizations/${organizationSlug}/control-approval-policy`,
@@ -517,6 +555,170 @@ describe('Checklist Templates', () => {
     expect(publishResponse.body.checklistTemplate).toMatchObject({
       name: 'Policy Independent Template',
       status: 'active',
+    });
+  });
+
+  it('lets Organization owners and admins publish, archive, and restore Checklist Templates', async () => {
+    const { headers, organization } = await createSignedInOwner('template-lifecycle');
+    const admin = await createSignedInMember({
+      ownerHeaders: headers,
+      organizationId: organization.id,
+      prefix: 'template-lifecycle-admin',
+      role: 'admin',
+    });
+
+    const createResponse = await createChecklistTemplateRequest(organization.slug, headers, {
+      name: 'Lifecycle Template',
+    });
+    const template = createResponse.body.checklistTemplate as { id: string };
+
+    const publishResponse = await publishChecklistTemplateRequest(
+      organization.slug,
+      template.id,
+      headers,
+    );
+    const publishedTemplate = publishResponse.body.checklistTemplate as {
+      createdAt: string;
+      id: string;
+      publishedAt: string;
+    };
+    const archiveResponse = await archiveChecklistTemplateRequest(
+      organization.slug,
+      template.id,
+      admin.headers,
+    );
+    const restoreResponse = await restoreChecklistTemplateRequest(
+      organization.slug,
+      template.id,
+      admin.headers,
+    );
+
+    expect(publishResponse.status).toBe(200);
+    expect(archiveResponse.status).toBe(200);
+    expect(archiveResponse.body.checklistTemplate).toMatchObject({
+      id: template.id,
+      name: 'Lifecycle Template',
+      status: 'archived',
+    });
+    expect(restoreResponse.status).toBe(200);
+    expect(restoreResponse.body.checklistTemplate).toMatchObject({
+      createdAt: publishedTemplate.createdAt,
+      id: template.id,
+      name: 'Lifecycle Template',
+      publishedAt: publishedTemplate.publishedAt,
+      status: 'active',
+    });
+  });
+
+  it('shows archived Checklist Templates only to Organization owners and admins', async () => {
+    const { headers: ownerHeaders, organization } = await createSignedInOwner(
+      'template-archive-visibility',
+    );
+    const admin = await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'template-archive-visibility-admin',
+      role: 'admin',
+    });
+    const member = await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'template-archive-visibility-member',
+      role: 'member',
+    });
+
+    const createResponse = await createChecklistTemplateRequest(organization.slug, ownerHeaders, {
+      name: 'Archived Release Template',
+    });
+    const template = createResponse.body.checklistTemplate as { id: string };
+
+    await publishChecklistTemplateRequest(organization.slug, template.id, ownerHeaders);
+    await archiveChecklistTemplateRequest(organization.slug, template.id, ownerHeaders);
+
+    const ownerArchivedListResponse = await listChecklistTemplatesRequest(
+      organization.slug,
+      ownerHeaders,
+      { status: 'archived' },
+    );
+    const adminArchivedListResponse = await listChecklistTemplatesRequest(
+      organization.slug,
+      admin.headers,
+      { status: 'archived' },
+    );
+    const memberAllListResponse = await listChecklistTemplatesRequest(
+      organization.slug,
+      member.headers,
+    );
+    const memberArchivedListResponse = await listChecklistTemplatesRequest(
+      organization.slug,
+      member.headers,
+      { status: 'archived' },
+    );
+
+    expect(ownerArchivedListResponse.status).toBe(200);
+    expect(ownerArchivedListResponse.body).toMatchObject({
+      checklistTemplates: [{ name: 'Archived Release Template', status: 'archived' }],
+    });
+    expect(adminArchivedListResponse.status).toBe(200);
+    expect(adminArchivedListResponse.body).toMatchObject({
+      checklistTemplates: [{ name: 'Archived Release Template', status: 'archived' }],
+    });
+    expect(memberAllListResponse.status).toBe(200);
+    expect(memberAllListResponse.body).toMatchObject({ checklistTemplates: [] });
+    expect(memberArchivedListResponse.status).toBe(403);
+    expect(memberArchivedListResponse.body).toMatchObject({
+      error: 'Only Organization owners and admins can view archived Checklist Templates.',
+    });
+  });
+
+  it('prevents Organization members from publishing, archiving, or restoring Checklist Templates', async () => {
+    const { headers: ownerHeaders, organization } = await createSignedInOwner('template-authz');
+    const member = await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'template-authz-member',
+      role: 'member',
+    });
+
+    const draftResponse = await createChecklistTemplateRequest(organization.slug, ownerHeaders, {
+      name: 'Protected Draft Template',
+    });
+    const draftTemplate = draftResponse.body.checklistTemplate as { id: string };
+    const activeResponse = await createChecklistTemplateRequest(organization.slug, ownerHeaders, {
+      name: 'Protected Active Template',
+    });
+    const activeTemplate = activeResponse.body.checklistTemplate as { id: string };
+
+    await publishChecklistTemplateRequest(organization.slug, activeTemplate.id, ownerHeaders);
+    await archiveChecklistTemplateRequest(organization.slug, activeTemplate.id, ownerHeaders);
+
+    const publishResponse = await publishChecklistTemplateRequest(
+      organization.slug,
+      draftTemplate.id,
+      member.headers,
+    );
+    const archiveResponse = await archiveChecklistTemplateRequest(
+      organization.slug,
+      activeTemplate.id,
+      member.headers,
+    );
+    const restoreResponse = await restoreChecklistTemplateRequest(
+      organization.slug,
+      activeTemplate.id,
+      member.headers,
+    );
+
+    expect(publishResponse.status).toBe(403);
+    expect(publishResponse.body).toMatchObject({
+      error: 'Only Organization owners and admins can publish Checklist Templates.',
+    });
+    expect(archiveResponse.status).toBe(403);
+    expect(archiveResponse.body).toMatchObject({
+      error: 'Only Organization owners and admins can archive Checklist Templates.',
+    });
+    expect(restoreResponse.status).toBe(403);
+    expect(restoreResponse.body).toMatchObject({
+      error: 'Only Organization owners and admins can restore Checklist Templates.',
     });
   });
 
