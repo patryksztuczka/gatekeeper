@@ -71,6 +71,27 @@ export type DraftControlListItem = {
   title: string;
 };
 
+export type ChecklistTemplateItem = {
+  control: {
+    archivedAt: string | null;
+    controlCode: string;
+    id: string;
+    title: string;
+  };
+  createdAt: string;
+  displayOrder: number;
+  id: string;
+  requiresAdminAttention: boolean;
+  sectionId: string | null;
+};
+
+export type ChecklistTemplateSection = {
+  displayOrder: number;
+  id: string;
+  items: ChecklistTemplateItem[];
+  name: string;
+};
+
 export type ChecklistTemplateListItem = {
   author: {
     email: string;
@@ -79,20 +100,12 @@ export type ChecklistTemplateListItem = {
   };
   createdAt: string;
   id: string;
-  items: Array<{
-    control: {
-      archivedAt: string | null;
-      controlCode: string;
-      id: string;
-      title: string;
-    };
-    createdAt: string;
-    id: string;
-    requiresAdminAttention: boolean;
-  }>;
+  items: ChecklistTemplateItem[];
   name: string;
   publishedAt: string | null;
+  sections: ChecklistTemplateSection[];
   status: 'active' | 'archived' | 'draft';
+  unsectionedItems: ChecklistTemplateItem[];
 };
 
 export type ControlListItem = {
@@ -384,7 +397,7 @@ export function archiveChecklistTemplate(organizationSlug: string, templateId: s
 export function addChecklistTemplateItem(
   organizationSlug: string,
   templateId: string,
-  input: { controlId: string },
+  input: { controlId: string; sectionId?: string | null },
 ) {
   return request<{ checklistTemplate: ChecklistTemplateListItem }>(
     `/api/organizations/${organizationSlug}/checklist-templates/${templateId}/items`,

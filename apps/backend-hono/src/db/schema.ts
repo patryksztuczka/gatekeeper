@@ -407,6 +407,33 @@ export const checklistTemplates = sqliteTable(
   ],
 );
 
+export const checklistTemplateSections = sqliteTable(
+  'checklist_template_sections',
+  {
+    id: text('id').primaryKey(),
+    templateId: text('template_id')
+      .notNull()
+      .references(() => checklistTemplates.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    normalizedName: text('normalized_name').notNull(),
+    displayOrder: integer('display_order').default(0).notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index('checklist_template_section_template_id_idx').on(table.templateId),
+    uniqueIndex('checklist_template_section_template_name_unique').on(
+      table.templateId,
+      table.normalizedName,
+    ),
+  ],
+);
+
 export const checklistTemplateItems = sqliteTable(
   'checklist_template_items',
   {
@@ -417,6 +444,10 @@ export const checklistTemplateItems = sqliteTable(
     controlId: text('control_id')
       .notNull()
       .references(() => controls.id, { onDelete: 'cascade' }),
+    sectionId: text('section_id').references(() => checklistTemplateSections.id, {
+      onDelete: 'set null',
+    }),
+    displayOrder: integer('display_order').default(0).notNull(),
     createdAt: integer('created_at', { mode: 'timestamp_ms' })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),
@@ -424,6 +455,7 @@ export const checklistTemplateItems = sqliteTable(
   (table) => [
     index('checklist_template_item_template_id_idx').on(table.templateId),
     index('checklist_template_item_control_id_idx').on(table.controlId),
+    index('checklist_template_item_section_id_idx').on(table.sectionId),
     uniqueIndex('checklist_template_item_template_control_unique').on(
       table.templateId,
       table.controlId,
