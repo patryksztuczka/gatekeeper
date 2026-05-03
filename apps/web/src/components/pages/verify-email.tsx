@@ -1,7 +1,12 @@
 import { useState } from 'react';
-import type { SyntheticEvent } from 'react';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useForm } from 'react-hook-form';
 import { Link, useSearchParams } from 'react-router';
 import { sendVerificationEmail } from '../../features/auth/auth-api';
+import {
+  verifyEmailFormSchema,
+  type VerifyEmailFormValues,
+} from '../../features/auth/auth-form-schemas';
 import {
   buildEmailVerificationCallbackUrl,
   buildSignInLink,
@@ -11,22 +16,25 @@ import {
 export function VerifyEmailPage() {
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get('redirectTo') || '/';
-  const [email, setEmail] = useState(searchParams.get('email') || '');
+  const form = useForm<VerifyEmailFormValues>({
+    resolver: zodResolver(verifyEmailFormSchema),
+    defaultValues: { email: searchParams.get('email') || '' },
+  });
+  const email = form.watch('email');
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = async (event: SyntheticEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const handleSubmit = async (values: VerifyEmailFormValues) => {
     setError(null);
     setStatus(null);
     setIsSubmitting(true);
 
     try {
       await sendVerificationEmail({
-        email,
+        email: values.email,
         callbackURL: buildEmailVerificationCallbackUrl({
-          email,
+          email: values.email,
           origin: window.location.origin,
           redirectTo,
         }),
@@ -52,18 +60,21 @@ export function VerifyEmailPage() {
         Product access is blocked until the email address is verified. You can resend the link here.
       </p>
 
-      <form className="mt-5 space-y-4" onSubmit={handleSubmit}>
+      <form className="mt-5 space-y-4" onSubmit={form.handleSubmit(handleSubmit)}>
         <label className="block text-sm">
           <span className="font-bold">Email</span>
           <input
             type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
+            {...form.register('email')}
             className="mt-1 block w-full border border-black px-3 py-2"
             autoComplete="email"
-            required
           />
         </label>
+        {form.formState.errors.email ? (
+          <p className="border border-red-700 bg-red-100 p-3 text-sm">
+            {form.formState.errors.email.message}
+          </p>
+        ) : null}
 
         {error ? <p className="border border-red-700 bg-red-100 p-3 text-sm">{error}</p> : null}
         {status ? (

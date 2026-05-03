@@ -1,12 +1,17 @@
 import { useState } from 'react';
-import type { SyntheticEvent } from 'react';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { AlertCircle, Archive, CheckCircle2, Plus, RotateCcw } from 'lucide-react';
+import { useForm } from 'react-hook-form';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { humanizeAuthError } from '../../features/auth/auth-errors';
 import { buildOrganizationPath, slugifyProjectName } from '../../features/auth/auth-routing';
 import type { OrganizationMemberListItem } from '@/features/organizations/organization-api';
 import type { ProjectListItem } from '@/features/projects/project-api';
+import {
+  createProjectFormSchema,
+  type CreateProjectFormValues,
+} from '@/features/projects/project-form-schemas';
 import { queryClient, trpc } from '@/lib/trpc';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -36,10 +41,10 @@ export function ProjectsPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [slug, setSlug] = useState('');
-  const [projectOwnerMemberId, setProjectOwnerMemberId] = useState('');
+  const createProjectForm = useForm<CreateProjectFormValues>({
+    resolver: zodResolver(createProjectFormSchema),
+    defaultValues: { name: '', slug: '', description: '', projectOwnerMemberId: '' },
+  });
   const archivedView = isArchivedView(searchParams.get('status'));
   const projectStatus = archivedView ? 'archived' : 'active';
   const hasOrganization = Boolean(organizationSlug);
@@ -113,24 +118,20 @@ export function ProjectsPage() {
     (projectQuery.isPending || memberQuery.isPending || resolutionQuery.isPending);
 
   const resetForm = () => {
-    setName('');
-    setDescription('');
-    setSlug('');
-    setProjectOwnerMemberId('');
+    createProjectForm.reset();
   };
 
-  const handleCreateProject = (event: SyntheticEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const handleCreateProject = (values: CreateProjectFormValues) => {
     if (!organizationSlug) return;
 
     setError(null);
     setStatus(null);
     createProjectMutation.mutate({
-      description,
-      name,
+      description: values.description,
+      name: values.name,
       organizationSlug,
-      projectOwnerMemberId: projectOwnerMemberId || null,
-      slug,
+      projectOwnerMemberId: values.projectOwnerMemberId || null,
+      slug: values.slug,
     });
   };
 
@@ -273,43 +274,62 @@ export function ProjectsPage() {
                 Add a Project for this Organization. The slug can be edited before creation.
               </p>
             </div>
-            <form className="mt-6 space-y-4" onSubmit={handleCreateProject}>
+            <form
+              className="mt-6 space-y-4"
+              onSubmit={createProjectForm.handleSubmit(handleCreateProject)}
+            >
               <div className="space-y-2">
                 <Label htmlFor="project-name">Name</Label>
                 <Input
                   id="project-name"
-                  value={name}
+                  {...createProjectForm.register('name')}
                   onChange={(event) => {
-                    setName(event.target.value);
-                    setSlug(slugifyProjectName(event.target.value));
+                    createProjectForm.setValue('name', event.target.value, {
+                      shouldValidate: true,
+                    });
+                    createProjectForm.setValue('slug', slugifyProjectName(event.target.value), {
+                      shouldValidate: true,
+                    });
                   }}
-                  required
                 />
+                {createProjectForm.formState.errors.name ? (
+                  <p className="text-sm text-destructive">
+                    {createProjectForm.formState.errors.name.message}
+                  </p>
+                ) : null}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="project-slug">Slug</Label>
                 <Input
                   id="project-slug"
-                  value={slug}
-                  onChange={(event) => setSlug(slugifyProjectName(event.target.value))}
-                  required
+                  {...createProjectForm.register('slug', {
+                    onChange: (event) => {
+                      createProjectForm.setValue('slug', slugifyProjectName(event.target.value), {
+                        shouldValidate: true,
+                      });
+                    },
+                  })}
                 />
+                {createProjectForm.formState.errors.slug ? (
+                  <p className="text-sm text-destructive">
+                    {createProjectForm.formState.errors.slug.message}
+                  </p>
+                ) : null}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="project-description">Description</Label>
-                <Input
-                  id="project-description"
-                  value={description}
-                  onChange={(event) => setDescription(event.target.value)}
-                  required
-                />
+                <Input id="project-description" {...createProjectForm.register('description')} />
+                {createProjectForm.formState.errors.description ? (
+                  <p className="text-sm text-destructive">
+                    {createProjectForm.formState.errors.description.message}
+                  </p>
+                ) : null}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="project-owner">Project Owner</Label>
                 <select
                   id="project-owner"
-                  value={projectOwnerMemberId}
-                  onChange={(event) => setProjectOwnerMemberId(event.target.value)}
+                  {...createProjectForm.register('projectOwnerMemberId')}
                   className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
                 >
                   <option value="">No Project Owner</option>

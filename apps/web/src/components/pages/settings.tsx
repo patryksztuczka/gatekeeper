@@ -1,10 +1,19 @@
 import { useEffect, useState } from 'react';
-import type { SyntheticEvent } from 'react';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { AlertCircle, CheckCircle2, Copy } from 'lucide-react';
+import { useForm } from 'react-hook-form';
 import { createOrganizationInvitation } from '../../features/auth/auth-api';
 import { humanizeAuthError } from '../../features/auth/auth-errors';
 import type { ControlApprovalPolicy } from '@/features/controls/control-api';
+import {
+  controlApprovalPolicyFormSchema,
+  type ControlApprovalPolicyFormValues,
+} from '@/features/controls/control-form-schemas';
+import {
+  inviteMemberFormSchema,
+  type InviteMemberFormValues,
+} from '@/features/organizations/organization-form-schemas';
 import { queryClient, trpc } from '@/lib/trpc';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -18,16 +27,22 @@ const INVITE_ROLES: Array<{ value: string; label: string }> = [
 ];
 
 export function SettingsPage() {
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState('member');
+  const inviteForm = useForm<InviteMemberFormValues>({
+    resolver: zodResolver(inviteMemberFormSchema),
+    defaultValues: { email: '', role: 'member' },
+  });
+  const policyForm = useForm<ControlApprovalPolicyFormValues>({
+    resolver: zodResolver(controlApprovalPolicyFormSchema),
+    defaultValues: { enabled: false, requiredApprovals: 1 },
+  });
+  const inviteRole = inviteForm.watch('role');
+  const policyEnabled = policyForm.watch('enabled');
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [isSubmittingInvite, setIsSubmittingInvite] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const [policy, setPolicy] = useState<ControlApprovalPolicy | null>(null);
-  const [policyEnabled, setPolicyEnabled] = useState(false);
-  const [requiredApprovals, setRequiredApprovals] = useState('1');
   const [policyError, setPolicyError] = useState<string | null>(null);
   const [policyStatus, setPolicyStatus] = useState<string | null>(null);
 
@@ -48,8 +63,10 @@ export function SettingsPage() {
       onSuccess: (response) => {
         void queryClient.invalidateQueries();
         setPolicy(response.policy);
-        setPolicyEnabled(response.policy.enabled);
-        setRequiredApprovals(String(response.policy.requiredApprovals));
+        policyForm.reset({
+          enabled: response.policy.enabled,
+          requiredApprovals: response.policy.requiredApprovals,
+        });
         setPolicyStatus('Control Approval Policy saved.');
       },
       onError: (caughtError) => {
@@ -69,12 +86,13 @@ export function SettingsPage() {
     if (!policyQuery.data) return;
 
     setPolicy(policyQuery.data.policy);
-    setPolicyEnabled(policyQuery.data.policy.enabled);
-    setRequiredApprovals(String(policyQuery.data.policy.requiredApprovals));
-  }, [activeOrg, policyQuery.data]);
+    policyForm.reset({
+      enabled: policyQuery.data.policy.enabled,
+      requiredApprovals: policyQuery.data.policy.requiredApprovals,
+    });
+  }, [activeOrg, policyForm, policyQuery.data]);
 
-  const handleInviteSubmit = async (event: SyntheticEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const handleInviteSubmit = async (values: InviteMemberFormValues) => {
     setInviteError(null);
     setInviteLink(null);
     setCopied(false);
@@ -82,11 +100,11 @@ export function SettingsPage() {
 
     try {
       const invitation = await createOrganizationInvitation({
-        email: inviteEmail,
-        role: inviteRole,
+        email: values.email,
+        role: values.role,
       });
       setInviteLink(`${window.location.origin}/invite/${invitation.id}`);
-      setInviteEmail('');
+      inviteForm.reset({ email: '', role: values.role });
     } catch (caughtError) {
       const rawMessage =
         caughtError instanceof Error ? caughtError.message : 'Unable to create invitation.';
@@ -107,21 +125,15 @@ export function SettingsPage() {
     }
   };
 
-  const handlePolicySubmit = (event: SyntheticEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const handlePolicySubmit = (values: ControlApprovalPolicyFormValues) => {
     if (!activeOrg || !policy) return;
 
     setPolicyError(null);
     setPolicyStatus(null);
 
-    const nextRequiredApprovals = policyEnabled ? Number(requiredApprovals) : 1;
+    const nextRequiredApprovals = values.enabled ? values.requiredApprovals : 1;
 
-    if (!Number.isInteger(nextRequiredApprovals) || nextRequiredApprovals < 1) {
-      setPolicyError('Required approval count must be at least 1.');
-      return;
-    }
-
-    if (policyEnabled && nextRequiredApprovals > policy.maxRequiredApprovals) {
+    if (values.enabled && nextRequiredApprovals > policy.maxRequiredApprovals) {
       setPolicyError(
         'Required approval count cannot exceed eligible approvers other than the author.',
       );
@@ -129,7 +141,7 @@ export function SettingsPage() {
     }
 
     updatePolicyMutation.mutate({
-      enabled: policyEnabled,
+      enabled: values.enabled,
       organizationSlug: activeOrg.slug,
       requiredApprovals: nextRequiredApprovals,
     });
@@ -173,7 +185,7 @@ export function SettingsPage() {
           </Alert>
         ) : null}
 
-        <form className="space-y-5" onSubmit={handlePolicySubmit}>
+        <form className="space-y-5" onSubmit={policyForm.handleSubmit(handlePolicySubmit)}>
           <div className="flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="space-y-1">
               <Label htmlFor="control-approval-enabled">Require approval to publish Controls</Label>
@@ -188,8 +200,10 @@ export function SettingsPage() {
               className="size-5"
               checked={policyEnabled}
               onChange={(event) => {
-                setPolicyEnabled(event.target.checked);
-                if (event.target.checked && requiredApprovals === '') setRequiredApprovals('1');
+                policyForm.setValue('enabled', event.target.checked, { shouldValidate: true });
+                if (event.target.checked && !policyForm.getValues('requiredApprovals')) {
+                  policyForm.setValue('requiredApprovals', 1, { shouldValidate: true });
+                }
               }}
               disabled={!activeOrg || !canManagePolicy || !policy || isSubmittingPolicy}
             />
@@ -202,10 +216,14 @@ export function SettingsPage() {
               type="number"
               min={1}
               max={policy?.maxRequiredApprovals || 1}
-              value={requiredApprovals}
-              onChange={(event) => setRequiredApprovals(event.target.value)}
+              {...policyForm.register('requiredApprovals', { valueAsNumber: true })}
               disabled={!activeOrg || !canManagePolicy || !policyEnabled || isSubmittingPolicy}
             />
+            {policyForm.formState.errors.requiredApprovals ? (
+              <p className="text-sm text-destructive">
+                {policyForm.formState.errors.requiredApprovals.message}
+              </p>
+            ) : null}
             <p className="text-sm text-muted-foreground">
               {policy
                 ? `Maximum currently allowed: ${policy.maxRequiredApprovals}. Add more Organization owners/admins before requiring more approvals.`
@@ -251,19 +269,22 @@ export function SettingsPage() {
           </p>
         </div>
 
-        <form className="space-y-5" onSubmit={handleInviteSubmit}>
+        <form className="space-y-5" onSubmit={inviteForm.handleSubmit(handleInviteSubmit)}>
           <div className="space-y-2">
             <Label htmlFor="invite-email">Email</Label>
             <Input
               id="invite-email"
               type="email"
-              value={inviteEmail}
-              onChange={(event) => setInviteEmail(event.target.value)}
+              {...inviteForm.register('email')}
               autoComplete="email"
               disabled={!activeOrg || isSubmittingInvite}
               placeholder="teammate@company.com"
-              required
             />
+            {inviteForm.formState.errors.email ? (
+              <p className="text-sm text-destructive">
+                {inviteForm.formState.errors.email.message}
+              </p>
+            ) : null}
           </div>
 
           <div className="space-y-2">
@@ -274,7 +295,9 @@ export function SettingsPage() {
                   key={role.value}
                   type="button"
                   variant={inviteRole === role.value ? 'default' : 'outline'}
-                  onClick={() => setInviteRole(role.value)}
+                  onClick={() =>
+                    inviteForm.setValue('role', role.value as InviteMemberFormValues['role'])
+                  }
                   disabled={!activeOrg || isSubmittingInvite}
                 >
                   {role.label}

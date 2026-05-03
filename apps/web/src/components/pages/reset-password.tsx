@@ -1,22 +1,28 @@
 import { useState } from 'react';
-import type { SyntheticEvent } from 'react';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useForm } from 'react-hook-form';
 import { Link, useSearchParams } from 'react-router';
 import { resetPassword } from '../../features/auth/auth-api';
+import {
+  resetPasswordFormSchema,
+  type ResetPasswordFormValues,
+} from '../../features/auth/auth-form-schemas';
 
 export function ResetPasswordPage() {
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token');
   const errorCode = searchParams.get('error');
-  const [newPassword, setNewPassword] = useState('');
+  const form = useForm<ResetPasswordFormValues>({
+    resolver: zodResolver(resetPasswordFormSchema),
+    defaultValues: { newPassword: '' },
+  });
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const isInvalidLink = errorCode === 'INVALID_TOKEN' || !token;
 
-  const handleSubmit = async (event: SyntheticEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
+  const handleSubmit = async (values: ResetPasswordFormValues) => {
     if (!token) {
       setError('This reset link is not valid.');
       return;
@@ -27,9 +33,9 @@ export function ResetPasswordPage() {
     setIsSubmitting(true);
 
     try {
-      await resetPassword({ newPassword, token });
+      await resetPassword({ newPassword: values.newPassword, token });
       setStatus('Password updated. You can sign in with the new password now.');
-      setNewPassword('');
+      form.reset();
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : 'Unable to reset password.');
     } finally {
@@ -65,19 +71,22 @@ export function ResetPasswordPage() {
       <p className="text-xs uppercase">Reset password</p>
       <h2 className="mt-2 text-2xl font-bold">Choose a new password</h2>
 
-      <form className="mt-5 space-y-4" onSubmit={handleSubmit}>
+      <form className="mt-5 space-y-4" onSubmit={form.handleSubmit(handleSubmit)}>
         <label className="block text-sm">
           <span className="font-bold">New password</span>
           <input
             type="password"
-            value={newPassword}
-            onChange={(event) => setNewPassword(event.target.value)}
+            {...form.register('newPassword')}
             className="mt-1 block w-full border border-black px-3 py-2"
             autoComplete="new-password"
             minLength={8}
-            required
           />
         </label>
+        {form.formState.errors.newPassword ? (
+          <p className="border border-red-700 bg-red-100 p-3 text-sm">
+            {form.formState.errors.newPassword.message}
+          </p>
+        ) : null}
 
         {error ? <p className="border border-red-700 bg-red-100 p-3 text-sm">{error}</p> : null}
         {status ? (

@@ -1,9 +1,14 @@
 import { useState } from 'react';
-import type { SyntheticEvent } from 'react';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { AlertCircle, CheckCircle2, ShieldCheck } from 'lucide-react';
+import { useForm } from 'react-hook-form';
 import { Link, useSearchParams } from 'react-router';
 import { requestPasswordReset } from '../../features/auth/auth-api';
 import { humanizeAuthError } from '../../features/auth/auth-errors';
+import {
+  forgotPasswordFormSchema,
+  type ForgotPasswordFormValues,
+} from '../../features/auth/auth-form-schemas';
 import { buildPasswordResetCallbackUrl } from '../../features/auth/auth-routing';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -12,20 +17,22 @@ import { Label } from '@/components/ui/label';
 
 export function ForgotPasswordPage() {
   const [searchParams] = useSearchParams();
-  const [email, setEmail] = useState(searchParams.get('email') || '');
+  const form = useForm<ForgotPasswordFormValues>({
+    resolver: zodResolver(forgotPasswordFormSchema),
+    defaultValues: { email: searchParams.get('email') || '' },
+  });
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = async (event: SyntheticEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const handleSubmit = async (values: ForgotPasswordFormValues) => {
     setError(null);
     setStatus(null);
     setIsSubmitting(true);
 
     try {
       const response = await requestPasswordReset({
-        email,
+        email: values.email,
         redirectTo: buildPasswordResetCallbackUrl(window.location.origin),
       });
 
@@ -53,17 +60,13 @@ export function ForgotPasswordPage() {
         </p>
       </div>
 
-      <form className="space-y-5" onSubmit={handleSubmit}>
+      <form className="space-y-5" onSubmit={form.handleSubmit(handleSubmit)}>
         <div className="space-y-2">
           <Label htmlFor="email">Email</Label>
-          <Input
-            id="email"
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            autoComplete="email"
-            required
-          />
+          <Input id="email" type="email" {...form.register('email')} autoComplete="email" />
+          {form.formState.errors.email ? (
+            <p className="text-sm text-destructive">{form.formState.errors.email.message}</p>
+          ) : null}
         </div>
 
         {error ? (

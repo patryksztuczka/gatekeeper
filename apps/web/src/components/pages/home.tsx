@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import type { SyntheticEvent } from 'react';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { useQuery } from '@tanstack/react-query';
 import { AlertCircle, CheckCircle2 } from 'lucide-react';
+import { useForm } from 'react-hook-form';
 import { Link, Navigate, useParams } from 'react-router';
 import { acceptOrganizationInvitation, createOrganization } from '../../features/auth/auth-api';
 import { humanizeAuthError } from '../../features/auth/auth-errors';
@@ -12,6 +13,10 @@ import {
   isReservedOrganizationSlug,
   slugifyOrganizationName,
 } from '../../features/auth/auth-routing';
+import {
+  createOrganizationFormSchema,
+  type CreateOrganizationFormValues,
+} from '@/features/organizations/organization-form-schemas';
 import { queryClient, trpc } from '@/lib/trpc';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -28,8 +33,10 @@ function formatDateTime(value: string) {
 
 export function HomePage() {
   const { organizationSlug } = useParams();
-  const [orgName, setOrgName] = useState('');
-  const [orgSlug, setOrgSlug] = useState('');
+  const createOrganizationForm = useForm<CreateOrganizationFormValues>({
+    resolver: zodResolver(createOrganizationFormSchema),
+    defaultValues: { name: '', slug: '' },
+  });
   const [orgError, setOrgError] = useState<string | null>(null);
   const [orgStatus, setOrgStatus] = useState<string | null>(null);
   const [isCreatingOrg, setIsCreatingOrg] = useState(false);
@@ -46,13 +53,8 @@ export function HomePage() {
     await resolutionQuery.refetch();
   };
 
-  const handleCreateOrganization = async (event: SyntheticEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!orgSlug) {
-      setOrgError('Organization slug is required.');
-      return;
-    }
-    if (isReservedOrganizationSlug(orgSlug)) {
+  const handleCreateOrganization = async (values: CreateOrganizationFormValues) => {
+    if (isReservedOrganizationSlug(values.slug)) {
       setOrgError('This organization slug is reserved for a public Gatekeeper route.');
       return;
     }
@@ -62,12 +64,11 @@ export function HomePage() {
     try {
       await createOrganization({
         keepCurrentActiveOrganization: false,
-        name: orgName,
-        slug: orgSlug,
+        name: values.name,
+        slug: values.slug,
       });
       setOrgStatus('Organization created.');
-      setOrgName('');
-      setOrgSlug('');
+      createOrganizationForm.reset();
       await refresh();
     } catch (caughtError) {
       const rawMessage =
@@ -139,30 +140,48 @@ export function HomePage() {
     </>
   );
 
-  const createOrganizationForm = (
-    <form className="space-y-5" onSubmit={handleCreateOrganization}>
+  const createOrganizationFormElement = (
+    <form
+      className="space-y-5"
+      onSubmit={createOrganizationForm.handleSubmit(handleCreateOrganization)}
+    >
       <div className="space-y-2">
         <Label htmlFor="org-name">Organization name</Label>
         <Input
           id="org-name"
           type="text"
-          value={orgName}
+          {...createOrganizationForm.register('name')}
           onChange={(event) => {
-            setOrgName(event.target.value);
-            setOrgSlug(generateOrganizationSlug(event.target.value));
+            createOrganizationForm.setValue('name', event.target.value, { shouldValidate: true });
+            createOrganizationForm.setValue('slug', generateOrganizationSlug(event.target.value), {
+              shouldValidate: true,
+            });
           }}
-          required
         />
+        {createOrganizationForm.formState.errors.name ? (
+          <p className="text-sm text-destructive">
+            {createOrganizationForm.formState.errors.name.message}
+          </p>
+        ) : null}
       </div>
       <div className="space-y-2">
         <Label htmlFor="org-slug">Slug</Label>
         <Input
           id="org-slug"
           type="text"
-          value={orgSlug}
-          onChange={(event) => setOrgSlug(slugifyOrganizationName(event.target.value))}
-          required
+          {...createOrganizationForm.register('slug', {
+            onChange: (event) => {
+              createOrganizationForm.setValue('slug', slugifyOrganizationName(event.target.value), {
+                shouldValidate: true,
+              });
+            },
+          })}
         />
+        {createOrganizationForm.formState.errors.slug ? (
+          <p className="text-sm text-destructive">
+            {createOrganizationForm.formState.errors.slug.message}
+          </p>
+        ) : null}
       </div>
       <Button type="submit" disabled={isCreatingOrg}>
         {isCreatingOrg ? 'Creating...' : 'Create organization'}
@@ -180,7 +199,7 @@ export function HomePage() {
           </p>
         </header>
         {feedback}
-        {createOrganizationForm}
+        {createOrganizationFormElement}
       </div>
     );
   }
@@ -233,7 +252,7 @@ export function HomePage() {
             <h2 className="text-sm font-medium text-muted-foreground">
               Or create a new organization
             </h2>
-            {createOrganizationForm}
+            {createOrganizationFormElement}
           </section>
         ) : null}
       </div>

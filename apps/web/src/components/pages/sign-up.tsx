@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import type { SyntheticEvent } from 'react';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { AlertCircle, Eye, EyeOff, ShieldCheck } from 'lucide-react';
+import { useForm } from 'react-hook-form';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import {
   getAuthErrorCode,
@@ -8,6 +9,7 @@ import {
   humanizeAuthError,
 } from '../../features/auth/auth-errors';
 import { signUp } from '../../features/auth/auth-client';
+import { signUpFormSchema, type SignUpFormValues } from '../../features/auth/auth-form-schemas';
 import {
   buildEmailVerificationCallbackUrl,
   buildSignInLink,
@@ -24,25 +26,25 @@ export function SignUpPage() {
   const redirectTo = searchParams.get('redirectTo') || '/';
   const invitedEmail = searchParams.get('email') || '';
   const isInviteJourney = redirectTo.startsWith('/invite/');
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState(invitedEmail);
-  const [password, setPassword] = useState('');
+  const form = useForm<SignUpFormValues>({
+    resolver: zodResolver(signUpFormSchema),
+    defaultValues: { name: '', email: invitedEmail, password: '' },
+  });
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = async (event: SyntheticEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const handleSubmit = async (values: SignUpFormValues) => {
     setError(null);
     setIsSubmitting(true);
 
     try {
       const result = await signUp.email({
-        name,
-        email,
-        password,
+        name: values.name,
+        email: values.email,
+        password: values.password,
         callbackURL: buildEmailVerificationCallbackUrl({
-          email,
+          email: values.email,
           origin: window.location.origin,
           redirectTo,
         }),
@@ -56,7 +58,7 @@ export function SignUpPage() {
         return;
       }
 
-      navigate(buildVerifyEmailLink(email, redirectTo));
+      navigate(buildVerifyEmailLink(values.email, redirectTo));
     } catch (caughtError) {
       const rawMessage =
         caughtError instanceof Error ? caughtError.message : 'Unable to create account.';
@@ -82,17 +84,13 @@ export function SignUpPage() {
         </p>
       </div>
 
-      <form className="space-y-5" onSubmit={handleSubmit}>
+      <form className="space-y-5" onSubmit={form.handleSubmit(handleSubmit)}>
         <div className="space-y-2">
           <Label htmlFor="name">Full name</Label>
-          <Input
-            id="name"
-            type="text"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            autoComplete="name"
-            required
-          />
+          <Input id="name" type="text" {...form.register('name')} autoComplete="name" />
+          {form.formState.errors.name ? (
+            <p className="text-sm text-destructive">{form.formState.errors.name.message}</p>
+          ) : null}
         </div>
 
         <div className="space-y-2">
@@ -100,12 +98,13 @@ export function SignUpPage() {
           <Input
             id="email"
             type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
+            {...form.register('email')}
             autoComplete="email"
             readOnly={Boolean(invitedEmail)}
-            required
           />
+          {form.formState.errors.email ? (
+            <p className="text-sm text-destructive">{form.formState.errors.email.message}</p>
+          ) : null}
         </div>
 
         <div className="space-y-2">
@@ -114,12 +113,10 @@ export function SignUpPage() {
             <Input
               id="password"
               type={showPassword ? 'text' : 'password'}
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
+              {...form.register('password')}
               autoComplete="new-password"
               minLength={8}
               className="pr-9"
-              required
             />
             <button
               type="button"
@@ -131,6 +128,9 @@ export function SignUpPage() {
               {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
             </button>
           </div>
+          {form.formState.errors.password ? (
+            <p className="text-sm text-destructive">{form.formState.errors.password.message}</p>
+          ) : null}
         </div>
 
         {error ? (

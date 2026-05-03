@@ -1,9 +1,14 @@
 import { useEffect, useState } from 'react';
-import type { SyntheticEvent } from 'react';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery } from '@tanstack/react-query';
+import { useForm } from 'react-hook-form';
 import { Link, useParams } from 'react-router';
 import { AlertCircle, Archive, CheckCircle2, LockKeyhole, RotateCcw } from 'lucide-react';
 import type { ProjectDetail } from '@/features/projects/project-api';
+import {
+  projectSettingsFormSchema,
+  type ProjectSettingsFormValues,
+} from '@/features/projects/project-form-schemas';
 import { buildProjectPath, buildProjectsPath } from '@/features/projects/project-routing';
 import { humanizeAuthError } from '@/features/auth/auth-errors';
 import type { OrganizationMemberListItem } from '@/features/organizations/organization-api';
@@ -22,9 +27,10 @@ function canManageProjects(role: string | null) {
 export function ProjectSettingsPage() {
   const { organizationSlug = '', projectSlug = '' } = useParams();
   const [projectOverride, setProjectOverride] = useState<ProjectDetail | null>(null);
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [projectOwnerMemberId, setProjectOwnerMemberId] = useState('');
+  const projectSettingsForm = useForm<ProjectSettingsFormValues>({
+    resolver: zodResolver(projectSettingsFormSchema),
+    defaultValues: { name: '', description: '', projectOwnerMemberId: '' },
+  });
   const [saveError, setSaveError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const projectsPath = organizationSlug ? buildProjectsPath(organizationSlug) : '/';
@@ -54,9 +60,11 @@ export function ProjectSettingsPage() {
         const updatedProject = response.project;
 
         setProjectOverride(updatedProject);
-        setName(updatedProject.name);
-        setDescription(updatedProject.description);
-        setProjectOwnerMemberId(updatedProject.projectOwner?.id ?? '');
+        projectSettingsForm.reset({
+          name: updatedProject.name,
+          description: updatedProject.description,
+          projectOwnerMemberId: updatedProject.projectOwner?.id ?? '',
+        });
         setStatus('Project settings saved.');
       },
       onError: (caughtError) => {
@@ -109,23 +117,23 @@ export function ProjectSettingsPage() {
     if (!queryProject) return;
 
     setProjectOverride(null);
-    setName(queryProject.name);
-    setDescription(queryProject.description);
-    setProjectOwnerMemberId(queryProject.projectOwner?.id ?? '');
-  }, [queryProject]);
+    projectSettingsForm.reset({
+      name: queryProject.name,
+      description: queryProject.description,
+      projectOwnerMemberId: queryProject.projectOwner?.id ?? '',
+    });
+  }, [projectSettingsForm, queryProject]);
 
-  const handleSave = (event: SyntheticEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
+  const handleSave = (values: ProjectSettingsFormValues) => {
     if (!organizationSlug || !projectSlug || !canManageProjects(currentRole)) return;
 
     setSaveError(null);
     setStatus(null);
     updateProjectMutation.mutate({
-      description,
-      name,
+      description: values.description,
+      name: values.name,
       organizationSlug,
-      projectOwnerMemberId: projectOwnerMemberId || null,
+      projectOwnerMemberId: values.projectOwnerMemberId || null,
       projectSlug,
     });
   };
@@ -236,33 +244,38 @@ export function ProjectSettingsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form className="space-y-4" onSubmit={handleSave}>
+          <form className="space-y-4" onSubmit={projectSettingsForm.handleSubmit(handleSave)}>
             <div className="space-y-2">
               <Label htmlFor="project-name">Name</Label>
               <Input
                 id="project-name"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
+                {...projectSettingsForm.register('name')}
                 disabled={!canEdit || isSaving}
-                required
               />
+              {projectSettingsForm.formState.errors.name ? (
+                <p className="text-sm text-destructive">
+                  {projectSettingsForm.formState.errors.name.message}
+                </p>
+              ) : null}
             </div>
             <div className="space-y-2">
               <Label htmlFor="project-description">Description</Label>
               <Input
                 id="project-description"
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
+                {...projectSettingsForm.register('description')}
                 disabled={!canEdit || isSaving}
-                required
               />
+              {projectSettingsForm.formState.errors.description ? (
+                <p className="text-sm text-destructive">
+                  {projectSettingsForm.formState.errors.description.message}
+                </p>
+              ) : null}
             </div>
             <div className="space-y-2">
               <Label htmlFor="project-owner">Project Owner</Label>
               <select
                 id="project-owner"
-                value={projectOwnerMemberId}
-                onChange={(event) => setProjectOwnerMemberId(event.target.value)}
+                {...projectSettingsForm.register('projectOwnerMemberId')}
                 disabled={!canEdit || isSaving}
                 className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
               >

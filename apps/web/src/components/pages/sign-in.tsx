@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import type { SyntheticEvent } from 'react';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { AlertCircle, Eye, EyeOff, ShieldCheck } from 'lucide-react';
+import { useForm } from 'react-hook-form';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import {
   getAuthErrorCode,
@@ -8,6 +9,7 @@ import {
   humanizeAuthError,
 } from '../../features/auth/auth-errors';
 import { signIn } from '../../features/auth/auth-client';
+import { signInFormSchema, type SignInFormValues } from '../../features/auth/auth-form-schemas';
 import { buildSignUpLink, buildVerifyEmailLink } from '../../features/auth/auth-routing';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -20,23 +22,25 @@ export function SignInPage() {
   const redirectTo = searchParams.get('redirectTo') || '/';
   const invitedEmail = searchParams.get('email') || '';
   const isInviteJourney = redirectTo.startsWith('/invite/');
-  const [email, setEmail] = useState(invitedEmail);
-  const [password, setPassword] = useState('');
+  const form = useForm<SignInFormValues>({
+    resolver: zodResolver(signInFormSchema),
+    defaultValues: { email: invitedEmail, password: '' },
+  });
+  const email = form.watch('email');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const verifyEmailLink = buildVerifyEmailLink(email, redirectTo);
 
-  const handleSubmit = async (event: SyntheticEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const handleSubmit = async (values: SignInFormValues) => {
     setError(null);
     setIsSubmitting(true);
 
     try {
       const result = await signIn.email({
-        email,
-        password,
+        email: values.email,
+        password: values.password,
         rememberMe: false,
         callbackURL: `${window.location.origin}${redirectTo}`,
       });
@@ -87,17 +91,13 @@ export function SignInPage() {
         </p>
       ) : null}
 
-      <form className="space-y-5" onSubmit={handleSubmit}>
+      <form className="space-y-5" onSubmit={form.handleSubmit(handleSubmit)}>
         <div className="space-y-2">
           <Label htmlFor="email">Email</Label>
-          <Input
-            id="email"
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            autoComplete="email"
-            required
-          />
+          <Input id="email" type="email" {...form.register('email')} autoComplete="email" />
+          {form.formState.errors.email ? (
+            <p className="text-sm text-destructive">{form.formState.errors.email.message}</p>
+          ) : null}
         </div>
 
         <div className="space-y-2">
@@ -114,11 +114,9 @@ export function SignInPage() {
             <Input
               id="password"
               type={showPassword ? 'text' : 'password'}
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
+              {...form.register('password')}
               autoComplete="current-password"
               className="pr-9"
-              required
             />
             <button
               type="button"
@@ -130,6 +128,9 @@ export function SignInPage() {
               {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
             </button>
           </div>
+          {form.formState.errors.password ? (
+            <p className="text-sm text-destructive">{form.formState.errors.password.message}</p>
+          ) : null}
         </div>
 
         {error ? (
