@@ -1,0 +1,115 @@
+apps/web/src/App.tsx
+  6ea41550882d072e 1,5-9
+apps/web/src/features/projects/project-api.ts
+  6ea41550882d072e 1,3-5
+apps/web/src/features/organizations/organization-api.ts
+  6ea41550882d072e 1-6
+apps/web/package.json
+  6ea41550882d072e 17-20,31-32
+AGENTS.md
+  6ea41550882d072e 1-40
+apps/web/src/components/pages/verify-email.tsx
+  6ea41550882d072e 2,19
+apps/backend-hono/test/projects.spec.ts
+  6ea41550882d072e 7,86-89,98-99,108-109,118,171,174,217,221
+apps/backend-hono/package.json
+  6ea41550882d072e 20,22,26-27
+apps/web/src/components/pages/project-detail.tsx
+  6ea41550882d072e 1-2,13,19,29,31-58,60-64,74,77,91,97,101,141-146
+apps/web/src/features/auth/auth-routing.ts
+  6ea41550882d072e 1
+apps/backend-hono/test/draft-controls.spec.ts
+  6ea41550882d072e 13,120-123,132-133,151-154,164-168,177-178,188-189,198,206-207,212,221-224,229,233,241-242,252-253,262-263,272-275,284-285,304-308,318-326
+apps/web/src/components/pages/home.tsx
+  6ea41550882d072e 1-3,6,15,38-42,45-46,49,98
+apps/web/src/components/pages/projects.tsx
+  6ea41550882d072e 1-3,8-10,24,28,44-45,47-66,68-99,101-113,122,128-134,137,142-146,191,195,254-255,334-335
+apps/web/src/types/cloudflare-workers.d.ts
+  6ea41550882d072e 1-3
+apps/backend-hono/test/trpc-test-utils.ts
+  6ea41550882d072e 1-35
+apps/backend-hono/AGENTS.md
+  6ea41550882d072e 1-48
+apps/web/src/components/pages/settings.tsx
+  6ea41550882d072e 2-3,5,7-8,34-35,40-49,53-55,57,59-66,69,71-74,76,110,131-135,138-145,216,220
+apps/web/src/features/controls/control-api.ts
+  6ea41550882d072e 1-9
+apps/backend-hono/src/lib/projects.ts
+  6ea41550882d072e 4,24,40,44,58,101,114,159-163,213,245,295,340,355
+apps/web/src/components/pages/reset-password.tsx
+  6ea41550882d072e 2,17
+apps/web/src/features/auth/auth-api.ts
+  6ea41550882d072e 12,24
+apps/backend-hono/test/control-approval-policy.spec.ts
+  6ea41550882d072e 7,110,118-119
+apps/backend-hono/src/trpc/controls-router.ts
+  6ea41550882d072e 1-527
+apps/web/src/components/pages/invitation.tsx
+  6ea41550882d072e 1-2,4,11-12,56-64,66-76,78-82,96,108,114,186,189
+apps/web/src/components/layouts/dashboard-sidebar.tsx
+  6ea41550882d072e 1-2,16,22,76-77,88-91
+apps/backend-hono/src/index.ts
+  6ea41550882d072e 1,3,5-7,23-28
+apps/web/src/components/pages/controls.tsx
+  6ea41550882d072e 1-3,7-13,61,63-102,104-287,289,309,315,318-319,334-342,344-346,348-349,352,357-360,362-363,366,371,374-375,390-400,403,409-413,416,422-426,429,435,439,448-452,455,461,464,470,473-507,546,550,593,595
+apps/backend-hono/src/trpc/context.ts
+  6ea41550882d072e 1-10
+apps/web/src/components/pages/sign-in.tsx
+  6ea41550882d072e 2,31
+apps/backend-hono/test/project-detail.spec.ts
+  6ea41550882d072e 7,161,170-171,177-178,251,254,257
+apps/backend-hono/test/organization-membership.spec.ts
+  6ea41550882d072e 8,90,94,98,657,660
+apps/backend-hono/src/trpc/router.ts
+  6ea41550882d072e 1-12
+apps/web/src/features/auth/organization-route.tsx
+  6ea41550882d072e 3,5-6,32-34,44
+apps/backend-hono/src/schemas/organization-schemas.ts
+  6ea41550882d072e 1-9
+apps/backend-hono/src/trpc/projects-router.ts
+  6ea41550882d072e 1-165
+apps/web/src/providers/index.tsx
+  6ea41550882d072e 1-7
+apps/backend-hono/src/trpc/core.ts
+  6ea41550882d072e 1-33
+apps/web/src/components/pages/sign-up.tsx
+  6ea41550882d072e 2,34
+apps/web/AGENTS.md
+  6ea41550882d072e 1-46
+docs/adr/003-organization-scoped-app-routes.md
+  6ea41550882d072e 19
+apps/backend-hono/src/trpc/organizations-router.ts
+  6ea41550882d072e 1-40
+apps/web/src/lib/trpc.ts
+  6ea41550882d072e 1-28
+apps/web/src/components/pages/project-settings.tsx
+  6ea41550882d072e 2-3,6,9-10,18,24,31,33-54,56-92,94-106,108-109,111-115,117,124-130,133-134,139-142,146-150,159,162,166-167,310
+apps/backend-hono/src/schemas/projects-schemas.ts
+  6ea41550882d072e 1-23
+apps/web/src/components/pages/forgot-password.tsx
+  6ea41550882d072e 2,20
+apps/backend-hono/src/schemas/controls-schemas.ts
+  6ea41550882d072e 1-76
+apps/backend-hono/src/lib/controls.ts
+  6ea41550882d072e 14,134,138,145,181,213,255,335,376,416,471,501,578,621,696,770,842,897,933,965,1065,1075,1078-1081,1089,1095,1098-1102,1106,1109,1115,1119,1128,1140,1184,1190,1204,1251,1261,1301,1323,1329,1440,1465
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "16ce322b72bebd862b6c1ce5b569a4e25df133bd",
+  "prompts": {
+    "6ea41550882d072e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_211a3af42ffeXM9HH65sZUvOwf",
+        "model": "openai/gpt-5.5"
+      },
+      "human_author": "Patryk Sztuczka",
+      "messages": [],
+      "total_additions": 3816,
+      "total_deletions": 3367,
+      "accepted_lines": 2038,
+      "overriden_lines": 0
+    }
+  }
+}
