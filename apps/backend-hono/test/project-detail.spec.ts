@@ -1,11 +1,10 @@
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 
-import app from '../src/index';
 import { db } from '../src/db/client';
 import { members, projects, users } from '../src/db/schema';
 import { auth } from '../src/lib/auth';
-import type { ProjectDetailResponse } from '../src/lib/projects';
+import { callTRPC } from './trpc-test-utils';
 
 const authHeaders = {
   origin: 'http://localhost:5173',
@@ -159,15 +158,7 @@ async function createProject(input: {
 }
 
 async function getProjectDetail(headers: Headers, organizationSlug: string, projectSlug: string) {
-  const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/projects/${projectSlug}`,
-    { headers },
-  );
-
-  return {
-    body: (await response.json()) as { project?: ProjectDetailResponse; error?: string },
-    status: response.status,
-  };
+  return callTRPC(headers, (caller) => caller.projects.detail({ organizationSlug, projectSlug }));
 }
 
 async function updateProject(
@@ -176,25 +167,15 @@ async function updateProject(
   projectSlug: string,
   body: Record<string, unknown>,
 ) {
-  const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/projects/${projectSlug}`,
-    {
-      body: JSON.stringify(body),
-      headers,
-      method: 'PATCH',
-    },
+  return callTRPC(headers, (caller) =>
+    caller.projects.update({ ...body, organizationSlug, projectSlug } as never),
   );
-
-  return {
-    body: (await response.json()) as { project?: ProjectDetailResponse; error?: string },
-    status: response.status,
-  };
 }
 
 describe('Project detail API', () => {
   it('requires authentication', async () => {
-    const response = await app.request(
-      'http://example.com/api/organizations/acme/projects/vendor-risk',
+    const response = await callTRPC(undefined, (caller) =>
+      caller.projects.detail({ organizationSlug: 'acme', projectSlug: 'vendor-risk' }),
     );
 
     expect(response.status).toBe(401);
@@ -267,13 +248,13 @@ describe('Project detail API', () => {
 
     await expect(
       getProjectDetail(owner.headers, owner.organization.slug, 'missing-project'),
-    ).resolves.toMatchObject({ status: 404 });
+    ).resolves.toMatchObject({ body: { status: 'unavailable' }, status: 200 });
     await expect(
       getProjectDetail(outsider.headers, owner.organization.slug, 'internal-controls'),
-    ).resolves.toMatchObject({ status: 404 });
+    ).resolves.toMatchObject({ body: { status: 'unavailable' }, status: 200 });
     await expect(
       getProjectDetail(outsider.headers, outsider.organization.slug, 'internal-controls'),
-    ).resolves.toMatchObject({ status: 404 });
+    ).resolves.toMatchObject({ body: { status: 'unavailable' }, status: 200 });
   });
 
   it('lets Organization owners edit Project settings without changing the slug', async () => {

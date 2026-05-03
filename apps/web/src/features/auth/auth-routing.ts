@@ -1,4 +1,4 @@
-import type { MembershipResolutionResponse } from './auth-api';
+import type { MembershipResolutionResponse } from '@/features/organizations/organization-api';
 
 export type PostLoginView = 'app' | 'organization-choice' | 'organization-creation';
 

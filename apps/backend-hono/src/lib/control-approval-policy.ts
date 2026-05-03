@@ -1,7 +1,7 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '../db/client';
 import { members, organizations } from '../db/schema';
-import type { OrganizationMembership } from './projects';
+import type { OrganizationMembership } from '../types/organization-types';
 
 const editableOrganizationRoles = new Set(['owner', 'admin']);
 

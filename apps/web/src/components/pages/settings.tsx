@@ -1,15 +1,11 @@
 import { useEffect, useState } from 'react';
-import type { FormEvent } from 'react';
+import type { SyntheticEvent } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { AlertCircle, CheckCircle2, Copy } from 'lucide-react';
-import {
-  createOrganizationInvitation,
-  getControlApprovalPolicy,
-  getMembershipResolution,
-  updateControlApprovalPolicy,
-  type ControlApprovalPolicy,
-  type MembershipResolutionResponse,
-} from '../../features/auth/auth-api';
+import { createOrganizationInvitation } from '../../features/auth/auth-api';
 import { humanizeAuthError } from '../../features/auth/auth-errors';
+import type { ControlApprovalPolicy } from '@/features/controls/control-api';
+import { queryClient, trpc } from '@/lib/trpc';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,8 +18,6 @@ const INVITE_ROLES: Array<{ value: string; label: string }> = [
 ];
 
 export function SettingsPage() {
-  const [resolution, setResolution] = useState<MembershipResolutionResponse | null>(null);
-
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState('member');
   const [inviteLink, setInviteLink] = useState<string | null>(null);
@@ -36,67 +30,50 @@ export function SettingsPage() {
   const [requiredApprovals, setRequiredApprovals] = useState('1');
   const [policyError, setPolicyError] = useState<string | null>(null);
   const [policyStatus, setPolicyStatus] = useState<string | null>(null);
-  const [isSubmittingPolicy, setIsSubmittingPolicy] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function loadResolution() {
-      try {
-        const next = await getMembershipResolution();
-        if (!cancelled) setResolution(next);
-      } catch {
-        if (!cancelled) setResolution(null);
-      }
-    }
-
-    void loadResolution();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const resolutionQuery = useQuery(trpc.organizations.membershipResolution.queryOptions());
+  const resolution = resolutionQuery.data ?? null;
 
   const activeOrg =
     resolution?.organizations.find((org) => org.id === resolution.activeOrganizationId) ?? null;
   const canManagePolicy = activeOrg?.role === 'owner' || activeOrg?.role === 'admin';
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadPolicy() {
-      if (!activeOrg) {
-        setPolicy(null);
-        return;
-      }
-
-      try {
-        const response = await getControlApprovalPolicy(activeOrg.slug);
-        if (cancelled) return;
-
+  const policyQuery = useQuery(
+    trpc.controls.approvalPolicy.queryOptions(
+      { organizationSlug: activeOrg?.slug ?? '' },
+      { enabled: Boolean(activeOrg) },
+    ),
+  );
+  const updatePolicyMutation = useMutation(
+    trpc.controls.updateApprovalPolicy.mutationOptions({
+      onSuccess: (response) => {
+        void queryClient.invalidateQueries();
         setPolicy(response.policy);
         setPolicyEnabled(response.policy.enabled);
         setRequiredApprovals(String(response.policy.requiredApprovals));
-      } catch (caughtError) {
-        if (cancelled) return;
-
-        const rawMessage =
-          caughtError instanceof Error
-            ? caughtError.message
-            : 'Unable to load Control Approval Policy.';
+        setPolicyStatus('Control Approval Policy saved.');
+      },
+      onError: (caughtError) => {
         setPolicyError(
-          humanizeAuthError(null, rawMessage, 'Unable to load Control Approval Policy.'),
+          humanizeAuthError(null, caughtError.message, 'Unable to save Control Approval Policy.'),
         );
-      }
+      },
+    }),
+  );
+
+  useEffect(() => {
+    if (!activeOrg) {
+      setPolicy(null);
+      return;
     }
 
-    void loadPolicy();
+    if (!policyQuery.data) return;
 
-    return () => {
-      cancelled = true;
-    };
-  }, [activeOrg]);
+    setPolicy(policyQuery.data.policy);
+    setPolicyEnabled(policyQuery.data.policy.enabled);
+    setRequiredApprovals(String(policyQuery.data.policy.requiredApprovals));
+  }, [activeOrg, policyQuery.data]);
 
-  const handleInviteSubmit = async (event: FormEvent<HTMLFormElement>) => {
+  const handleInviteSubmit = async (event: SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
     setInviteError(null);
     setInviteLink(null);
@@ -130,7 +107,7 @@ export function SettingsPage() {
     }
   };
 
-  const handlePolicySubmit = async (event: FormEvent<HTMLFormElement>) => {
+  const handlePolicySubmit = (event: SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!activeOrg || !policy) return;
 
@@ -151,30 +128,20 @@ export function SettingsPage() {
       return;
     }
 
-    setIsSubmittingPolicy(true);
-
-    try {
-      const response = await updateControlApprovalPolicy(activeOrg.slug, {
-        enabled: policyEnabled,
-        requiredApprovals: nextRequiredApprovals,
-      });
-
-      setPolicy(response.policy);
-      setPolicyEnabled(response.policy.enabled);
-      setRequiredApprovals(String(response.policy.requiredApprovals));
-      setPolicyStatus('Control Approval Policy saved.');
-    } catch (caughtError) {
-      const rawMessage =
-        caughtError instanceof Error
-          ? caughtError.message
-          : 'Unable to save Control Approval Policy.';
-      setPolicyError(
-        humanizeAuthError(null, rawMessage, 'Unable to save Control Approval Policy.'),
-      );
-    } finally {
-      setIsSubmittingPolicy(false);
-    }
+    updatePolicyMutation.mutate({
+      enabled: policyEnabled,
+      organizationSlug: activeOrg.slug,
+      requiredApprovals: nextRequiredApprovals,
+    });
   };
+
+  const policyLoadError = policyQuery.error ?? resolutionQuery.error;
+  const displayPolicyError =
+    policyError ??
+    (policyLoadError
+      ? humanizeAuthError(null, policyLoadError.message, 'Unable to load Control Approval Policy.')
+      : null);
+  const isSubmittingPolicy = updatePolicyMutation.isPending;
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-10">
@@ -246,11 +213,11 @@ export function SettingsPage() {
             </p>
           </div>
 
-          {policyError ? (
+          {displayPolicyError ? (
             <Alert variant="destructive">
               <AlertCircle />
               <AlertTitle>Couldn’t save policy</AlertTitle>
-              <AlertDescription>{policyError}</AlertDescription>
+              <AlertDescription>{displayPolicyError}</AlertDescription>
             </Alert>
           ) : null}
 

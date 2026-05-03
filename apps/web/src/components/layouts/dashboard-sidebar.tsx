@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   AlertTriangle,
   ChevronsUpDown,
@@ -12,16 +13,13 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router';
-import {
-  getMembershipResolution,
-  setActiveOrganization,
-  type MembershipResolutionResponse,
-} from '../../features/auth/auth-api';
+import { setActiveOrganization } from '../../features/auth/auth-api';
 import { signOut, useSession } from '../../features/auth/auth-client';
 import {
   buildOrganizationPath,
   buildOrganizationSwitchPath,
 } from '../../features/auth/auth-routing';
+import { queryClient, trpc } from '@/lib/trpc';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import {
   DropdownMenu,
@@ -74,21 +72,9 @@ export function DashboardSidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const { isMobile } = useSidebar();
-  const [resolution, setResolution] = useState<MembershipResolutionResponse | null>(null);
   const [switchingOrgId, setSwitchingOrgId] = useState<string | null>(null);
-
-  const loadResolution = async () => {
-    try {
-      const next = await getMembershipResolution();
-      setResolution(next);
-    } catch {
-      setResolution(null);
-    }
-  };
-
-  useEffect(() => {
-    void loadResolution();
-  }, []);
+  const resolutionQuery = useQuery(trpc.organizations.membershipResolution.queryOptions());
+  const resolution = resolutionQuery.data ?? null;
 
   const organizations = resolution?.organizations ?? [];
   const activeOrg =
@@ -99,8 +85,10 @@ export function DashboardSidebar() {
     setSwitchingOrgId(organizationId);
     try {
       await setActiveOrganization({ organizationId });
-      const next = await getMembershipResolution();
-      setResolution(next);
+      await queryClient.invalidateQueries();
+      const next = await queryClient.fetchQuery(
+        trpc.organizations.membershipResolution.queryOptions(),
+      );
       const activeOrg = next.organizations.find((org) => org.id === organizationId);
       if (activeOrg) {
         navigate(

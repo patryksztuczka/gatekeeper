@@ -1,13 +1,9 @@
-import { useEffect, useState } from 'react';
-import type { FormEvent } from 'react';
+import { useState } from 'react';
+import type { SyntheticEvent } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { AlertCircle, CheckCircle2 } from 'lucide-react';
 import { Link, Navigate, useParams } from 'react-router';
-import {
-  acceptOrganizationInvitation,
-  createOrganization,
-  getMembershipResolution,
-  type MembershipResolutionResponse,
-} from '../../features/auth/auth-api';
+import { acceptOrganizationInvitation, createOrganization } from '../../features/auth/auth-api';
 import { humanizeAuthError } from '../../features/auth/auth-errors';
 import {
   buildOrganizationPath,
@@ -16,6 +12,7 @@ import {
   isReservedOrganizationSlug,
   slugifyOrganizationName,
 } from '../../features/auth/auth-routing';
+import { queryClient, trpc } from '@/lib/trpc';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -31,10 +28,6 @@ function formatDateTime(value: string) {
 
 export function HomePage() {
   const { organizationSlug } = useParams();
-  const [resolution, setResolution] = useState<MembershipResolutionResponse | null>(null);
-  const [resolutionError, setResolutionError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-
   const [orgName, setOrgName] = useState('');
   const [orgSlug, setOrgSlug] = useState('');
   const [orgError, setOrgError] = useState<string | null>(null);
@@ -42,29 +35,18 @@ export function HomePage() {
   const [isCreatingOrg, setIsCreatingOrg] = useState(false);
 
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
+  const resolutionQuery = useQuery(trpc.organizations.membershipResolution.queryOptions());
+  const resolution = resolutionQuery.data ?? null;
+  const resolutionError = resolutionQuery.error
+    ? humanizeAuthError(null, resolutionQuery.error.message, 'Unable to load organization context.')
+    : null;
 
   const refresh = async () => {
-    setIsLoading(true);
-    setResolutionError(null);
-    try {
-      const next = await getMembershipResolution();
-      setResolution(next);
-    } catch (caughtError) {
-      const rawMessage =
-        caughtError instanceof Error ? caughtError.message : 'Unable to load organization context.';
-      setResolutionError(
-        humanizeAuthError(null, rawMessage, 'Unable to load organization context.'),
-      );
-    } finally {
-      setIsLoading(false);
-    }
+    await queryClient.invalidateQueries();
+    await resolutionQuery.refetch();
   };
 
-  useEffect(() => {
-    void refresh();
-  }, []);
-
-  const handleCreateOrganization = async (event: FormEvent<HTMLFormElement>) => {
+  const handleCreateOrganization = async (event: SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!orgSlug) {
       setOrgError('Organization slug is required.');
@@ -113,7 +95,7 @@ export function HomePage() {
     }
   };
 
-  if (isLoading && !resolution) {
+  if (resolutionQuery.isPending && !resolution) {
     return <p className="text-sm text-muted-foreground">Loading...</p>;
   }
 

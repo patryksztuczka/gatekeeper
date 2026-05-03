@@ -1,33 +1,16 @@
-import { useEffect, useState } from 'react';
-import type { FormEvent } from 'react';
+import { useState } from 'react';
+import type { SyntheticEvent } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { AlertCircle, Archive, CheckCircle2, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import { useParams, useSearchParams } from 'react-router';
-import {
-  archiveControl,
-  approveControlPublishRequest,
-  cancelDraftControl,
-  createControlProposedUpdate,
-  createDraftControl,
-  getControlApprovalPolicy,
-  getMembershipResolution,
-  listControlProposedUpdates,
-  listControlPublishRequests,
-  listControls,
-  listDraftControls,
-  publishControlPublishRequest,
-  publishControlProposedUpdate,
-  publishDraftControl,
-  rejectControlPublishRequest,
-  restoreControl,
-  submitControlProposedUpdatePublishRequest,
-  submitDraftControlPublishRequest,
-  withdrawControlPublishRequest,
-  type ControlListItem,
-  type ControlProposedUpdateListItem,
-  type ControlPublishRequestListItem,
-  type DraftControlListItem,
-} from '../../features/auth/auth-api';
 import { humanizeAuthError } from '../../features/auth/auth-errors';
+import type {
+  ControlListItem,
+  ControlProposedUpdateListItem,
+  ControlPublishRequestListItem,
+  DraftControlListItem,
+} from '@/features/controls/control-api';
+import { queryClient, trpc } from '@/lib/trpc';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -52,15 +35,6 @@ function toStatusFilter(value: string | null) {
 export function ControlsPage() {
   const { organizationSlug } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [controls, setControls] = useState<ControlListItem[]>([]);
-  const [draftControls, setDraftControls] = useState<DraftControlListItem[]>([]);
-  const [proposedUpdates, setProposedUpdates] = useState<ControlProposedUpdateListItem[]>([]);
-  const [publishRequests, setPublishRequests] = useState<ControlPublishRequestListItem[]>([]);
-  const [currentRole, setCurrentRole] = useState<string | null>(null);
-  const [currentMemberId, setCurrentMemberId] = useState<string | null>(null);
-  const [approvalPolicyEnabled, setApprovalPolicyEnabled] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isCreating, setIsCreating] = useState(false);
   const [publishingDraftId, setPublishingDraftId] = useState<string | null>(null);
   const [creatingProposalControlId, setCreatingProposalControlId] = useState<string | null>(null);
   const [publishingProposalId, setPublishingProposalId] = useState<string | null>(null);
@@ -84,77 +58,235 @@ export function ControlsPage() {
     !releaseImpact &&
     !acceptedEvidenceType &&
     !standardsFramework;
-  const hasActiveControlFilters = Boolean(
-    search || releaseImpact || acceptedEvidenceType || standardsFramework,
+  const hasOrganization = Boolean(organizationSlug);
+
+  const controlQuery = useQuery(
+    trpc.controls.list.queryOptions(
+      {
+        acceptedEvidenceType,
+        organizationSlug: organizationSlug ?? '',
+        releaseImpact,
+        search,
+        standardsFramework,
+        status: statusFilter === 'archived' ? 'archived' : 'active',
+      },
+      { enabled: hasOrganization && statusFilter !== 'draft' },
+    ),
+  );
+  const draftControlQuery = useQuery(
+    trpc.controls.listDrafts.queryOptions(
+      { organizationSlug: organizationSlug ?? '', search },
+      { enabled: hasOrganization && canListDrafts },
+    ),
+  );
+  const proposedUpdateQuery = useQuery(
+    trpc.controls.listProposedUpdates.queryOptions(
+      { organizationSlug: organizationSlug ?? '' },
+      { enabled: hasOrganization && !archivedView },
+    ),
+  );
+  const publishRequestQuery = useQuery(
+    trpc.controls.listPublishRequests.queryOptions(
+      { organizationSlug: organizationSlug ?? '' },
+      { enabled: hasOrganization && !archivedView },
+    ),
+  );
+  const approvalPolicyQuery = useQuery(
+    trpc.controls.approvalPolicy.queryOptions(
+      { organizationSlug: organizationSlug ?? '' },
+      { enabled: hasOrganization },
+    ),
+  );
+  const resolutionQuery = useQuery(
+    trpc.organizations.membershipResolution.queryOptions(undefined, { enabled: hasOrganization }),
   );
 
-  useEffect(() => {
-    const refresh = async () => {
-      if (!organizationSlug) return;
+  const createDraftMutation = useMutation(
+    trpc.controls.createDraft.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries();
+        setControlCode('');
+        setTitle('');
+        setStatus('Draft Control saved.');
+      },
+      onError: (caughtError) => {
+        setError(humanizeAuthError(null, caughtError.message, 'Unable to save Draft Control.'));
+      },
+    }),
+  );
+  const publishDraftMutation = useMutation(
+    trpc.controls.publishDraft.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries();
+        setStatus('Control published.');
+      },
+      onError: (caughtError) => {
+        setError(humanizeAuthError(null, caughtError.message, 'Unable to publish Control.'));
+      },
+      onSettled: () => setPublishingDraftId(null),
+    }),
+  );
+  const submitDraftPublishRequestMutation = useMutation(
+    trpc.controls.submitDraftPublishRequest.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries();
+        setStatus('Control Publish Request submitted.');
+      },
+      onError: (caughtError) => {
+        setError(
+          humanizeAuthError(null, caughtError.message, 'Unable to submit Control Publish Request.'),
+        );
+      },
+      onSettled: () => setPublishingDraftId(null),
+    }),
+  );
+  const archiveControlMutation = useMutation(
+    trpc.controls.archive.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries();
+        setArchiveControlId(null);
+        setArchiveReason('');
+        setStatus('Control archived.');
+      },
+      onError: (caughtError) => {
+        setError(humanizeAuthError(null, caughtError.message, 'Unable to archive Control.'));
+      },
+    }),
+  );
+  const restoreControlMutation = useMutation(
+    trpc.controls.restore.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries();
+        setStatus('Control restored.');
+      },
+      onError: (caughtError) => {
+        setError(humanizeAuthError(null, caughtError.message, 'Unable to restore Control.'));
+      },
+    }),
+  );
+  const cancelDraftMutation = useMutation(
+    trpc.controls.cancelDraft.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries();
+        setStatus('Draft Control canceled.');
+      },
+      onError: (caughtError) => {
+        setError(humanizeAuthError(null, caughtError.message, 'Unable to cancel Draft Control.'));
+      },
+    }),
+  );
+  const createProposedUpdateMutation = useMutation(
+    trpc.controls.createProposedUpdate.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries();
+        setStatus('Proposed update saved.');
+      },
+      onError: (caughtError) => {
+        setError(humanizeAuthError(null, caughtError.message, 'Unable to save proposed update.'));
+      },
+      onSettled: () => setCreatingProposalControlId(null),
+    }),
+  );
+  const publishProposedUpdateMutation = useMutation(
+    trpc.controls.publishProposedUpdate.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries();
+        setStatus('Proposed update published.');
+      },
+      onError: (caughtError) => {
+        setError(
+          humanizeAuthError(null, caughtError.message, 'Unable to publish proposed update.'),
+        );
+      },
+      onSettled: () => setPublishingProposalId(null),
+    }),
+  );
+  const submitProposedUpdateMutation = useMutation(
+    trpc.controls.submitProposedUpdatePublishRequest.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries();
+        setStatus('Control Publish Request submitted.');
+      },
+      onError: (caughtError) => {
+        setError(
+          humanizeAuthError(null, caughtError.message, 'Unable to submit Control Publish Request.'),
+        );
+      },
+      onSettled: () => setPublishingProposalId(null),
+    }),
+  );
+  const approvePublishRequestMutation = useMutation(
+    trpc.controls.approvePublishRequest.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries();
+        setStatus('Control Publish Request approved.');
+      },
+      onError: (caughtError) => {
+        setError(
+          humanizeAuthError(
+            null,
+            caughtError.message,
+            'Unable to approve Control Publish Request.',
+          ),
+        );
+      },
+      onSettled: () => setReviewingRequestId(null),
+    }),
+  );
+  const rejectPublishRequestMutation = useMutation(
+    trpc.controls.rejectPublishRequest.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries();
+        setRejectingRequestId(null);
+        setRejectionComment('');
+        setStatus('Control Publish Request rejected and returned to draft.');
+      },
+      onError: (caughtError) => {
+        setError(
+          humanizeAuthError(null, caughtError.message, 'Unable to reject Control Publish Request.'),
+        );
+      },
+      onSettled: () => setReviewingRequestId(null),
+    }),
+  );
+  const withdrawPublishRequestMutation = useMutation(
+    trpc.controls.withdrawPublishRequest.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries();
+        setStatus('Control Publish Request withdrawn.');
+      },
+      onError: (caughtError) => {
+        setError(
+          humanizeAuthError(
+            null,
+            caughtError.message,
+            'Unable to withdraw Control Publish Request.',
+          ),
+        );
+      },
+      onSettled: () => setReviewingRequestId(null),
+    }),
+  );
+  const publishPublishRequestMutation = useMutation(
+    trpc.controls.publishPublishRequest.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries();
+        setStatus('Control Publish Request published.');
+      },
+      onError: (caughtError) => {
+        setError(
+          humanizeAuthError(
+            null,
+            caughtError.message,
+            'Unable to publish Control Publish Request.',
+          ),
+        );
+      },
+      onSettled: () => setReviewingRequestId(null),
+    }),
+  );
 
-      setIsLoading(true);
-      setError(null);
-      try {
-        const [
-          controlResponse,
-          draftResponse,
-          proposalResponse,
-          publishRequestResponse,
-          policyResponse,
-          resolution,
-        ] = await Promise.all([
-          statusFilter === 'draft'
-            ? Promise.resolve({ controls: [] })
-            : listControls(organizationSlug, {
-                acceptedEvidenceType,
-                releaseImpact,
-                search,
-                standardsFramework,
-                status: statusFilter === 'archived' ? 'archived' : 'active',
-              }),
-          canListDrafts
-            ? listDraftControls(organizationSlug, search)
-            : Promise.resolve({ draftControls: [] }),
-          archivedView
-            ? Promise.resolve({ proposedUpdates: [] })
-            : listControlProposedUpdates(organizationSlug),
-          archivedView
-            ? Promise.resolve({ publishRequests: [] })
-            : listControlPublishRequests(organizationSlug),
-          getControlApprovalPolicy(organizationSlug),
-          getMembershipResolution(),
-        ]);
-        const organization = resolution.organizations.find((org) => org.slug === organizationSlug);
-
-        setControls(controlResponse.controls);
-        setDraftControls(draftResponse.draftControls);
-        setProposedUpdates(proposalResponse.proposedUpdates);
-        setPublishRequests(publishRequestResponse.publishRequests);
-        setApprovalPolicyEnabled(policyResponse.policy.enabled);
-        setCurrentRole(organization?.role ?? null);
-        setCurrentMemberId(organization?.memberId ?? null);
-      } catch (caughtError) {
-        const rawMessage =
-          caughtError instanceof Error ? caughtError.message : 'Unable to load Draft Controls.';
-        setError(humanizeAuthError(null, rawMessage, 'Unable to load Draft Controls.'));
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    void refresh();
-  }, [
-    acceptedEvidenceType,
-    archivedView,
-    canListDrafts,
-    organizationSlug,
-    releaseImpact,
-    search,
-    standardsFramework,
-    statusFilter,
-  ]);
-
-  const handleFilterControls = (event: FormEvent<HTMLFormElement>) => {
+  const handleFilterControls = (event: SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     const formData = new FormData(event.currentTarget);
@@ -174,30 +306,17 @@ export function ControlsPage() {
     setSearchParams(nextParams);
   };
 
-  const handleCreateDraftControl = async (event: FormEvent<HTMLFormElement>) => {
+  const handleCreateDraftControl = (event: SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!organizationSlug) return;
 
-    setIsCreating(true);
     setError(null);
     setStatus(null);
-    try {
-      const response = await createDraftControl(organizationSlug, { controlCode, title });
-      setDraftControls((currentDrafts) => [...currentDrafts, response.draftControl]);
-      setControlCode('');
-      setTitle('');
-      setStatus('Draft Control saved.');
-    } catch (caughtError) {
-      const rawMessage =
-        caughtError instanceof Error ? caughtError.message : 'Unable to save Draft Control.';
-      setError(humanizeAuthError(null, rawMessage, 'Unable to save Draft Control.'));
-    } finally {
-      setIsCreating(false);
-    }
+    createDraftMutation.mutate({ controlCode, organizationSlug, title });
   };
 
-  const handlePublishDraftControl = async (
-    event: FormEvent<HTMLFormElement>,
+  const handlePublishDraftControl = (
+    event: SyntheticEvent<HTMLFormElement>,
     draftControl: DraftControlListItem,
   ) => {
     event.preventDefault();
@@ -212,92 +331,48 @@ export function ControlsPage() {
     setPublishingDraftId(draftControl.id);
     setError(null);
     setStatus(null);
-    try {
-      const payload = {
-        acceptedEvidenceTypes,
-        applicabilityConditions: String(formData.get('applicabilityConditions') ?? ''),
-        businessMeaning: String(formData.get('businessMeaning') ?? ''),
-        releaseImpact: String(formData.get('releaseImpact') ?? ''),
-        verificationMethod: String(formData.get('verificationMethod') ?? ''),
-      };
+    const payload = {
+      acceptedEvidenceTypes,
+      applicabilityConditions: String(formData.get('applicabilityConditions') ?? ''),
+      businessMeaning: String(formData.get('businessMeaning') ?? ''),
+      draftControlId: draftControl.id,
+      organizationSlug,
+      releaseImpact: String(formData.get('releaseImpact') ?? ''),
+      verificationMethod: String(formData.get('verificationMethod') ?? ''),
+    };
 
-      if (approvalPolicyEnabled) {
-        const response = await submitDraftControlPublishRequest(
-          organizationSlug,
-          draftControl.id,
-          payload,
-        );
-        setPublishRequests((currentRequests) =>
-          upsertPublishRequest(currentRequests, response.publishRequest),
-        );
-        setStatus('Control Publish Request submitted.');
-        return;
-      }
-
-      const response = await publishDraftControl(organizationSlug, draftControl.id, payload);
-
-      if ((statusFilter === 'all' || statusFilter === 'active') && !hasActiveControlFilters) {
-        setControls((currentControls) => [...currentControls, response.control]);
-      }
-      setDraftControls((currentDrafts) =>
-        currentDrafts.filter((currentDraft) => currentDraft.id !== draftControl.id),
-      );
-      setStatus('Control published.');
-    } catch (caughtError) {
-      const rawMessage =
-        caughtError instanceof Error ? caughtError.message : 'Unable to publish Control.';
-      setError(humanizeAuthError(null, rawMessage, 'Unable to publish Control.'));
-    } finally {
-      setPublishingDraftId(null);
+    if (approvalPolicyEnabled) {
+      submitDraftPublishRequestMutation.mutate(payload);
+      return;
     }
+
+    publishDraftMutation.mutate(payload);
   };
 
-  const handleArchiveStateChange = async (control: ControlListItem, reason = '') => {
+  const handleArchiveStateChange = (control: ControlListItem, reason = '') => {
     if (!organizationSlug) return;
 
     setError(null);
     setStatus(null);
-    try {
-      if (archivedView) {
-        await restoreControl(organizationSlug, control.id);
-        setStatus('Control restored.');
-      } else {
-        await archiveControl(organizationSlug, control.id, { reason });
-        setArchiveControlId(null);
-        setArchiveReason('');
-        setStatus('Control archived.');
-      }
-      setControls((currentControls) =>
-        currentControls.filter((currentControl) => currentControl.id !== control.id),
-      );
-    } catch (caughtError) {
-      const action = archivedView ? 'restore' : 'archive';
-      const rawMessage =
-        caughtError instanceof Error ? caughtError.message : `Unable to ${action} Control.`;
-      setError(humanizeAuthError(null, rawMessage, `Unable to ${action} Control.`));
+
+    if (archivedView) {
+      restoreControlMutation.mutate({ controlId: control.id, organizationSlug });
+      return;
     }
+
+    archiveControlMutation.mutate({ controlId: control.id, organizationSlug, reason });
   };
 
-  const handleCancelDraftControl = async (draftControl: DraftControlListItem) => {
+  const handleCancelDraftControl = (draftControl: DraftControlListItem) => {
     if (!organizationSlug) return;
 
     setError(null);
     setStatus(null);
-    try {
-      await cancelDraftControl(organizationSlug, draftControl.id);
-      setDraftControls((currentDrafts) =>
-        currentDrafts.filter((currentDraft) => currentDraft.id !== draftControl.id),
-      );
-      setStatus('Draft Control canceled.');
-    } catch (caughtError) {
-      const rawMessage =
-        caughtError instanceof Error ? caughtError.message : 'Unable to cancel Draft Control.';
-      setError(humanizeAuthError(null, rawMessage, 'Unable to cancel Draft Control.'));
-    }
+    cancelDraftMutation.mutate({ draftControlId: draftControl.id, organizationSlug });
   };
 
-  const handleCreateControlProposedUpdate = async (
-    event: FormEvent<HTMLFormElement>,
+  const handleCreateControlProposedUpdate = (
+    event: SyntheticEvent<HTMLFormElement>,
     control: ControlListItem,
   ) => {
     event.preventDefault();
@@ -312,117 +387,56 @@ export function ControlsPage() {
     setCreatingProposalControlId(control.id);
     setError(null);
     setStatus(null);
-    try {
-      const response = await createControlProposedUpdate(organizationSlug, control.id, {
-        acceptedEvidenceTypes,
-        applicabilityConditions: String(formData.get('applicabilityConditions') ?? ''),
-        businessMeaning: String(formData.get('businessMeaning') ?? ''),
-        controlCode: String(formData.get('controlCode') ?? ''),
-        releaseImpact: String(formData.get('releaseImpact') ?? ''),
-        title: String(formData.get('title') ?? ''),
-        verificationMethod: String(formData.get('verificationMethod') ?? ''),
-      });
-
-      setProposedUpdates((currentUpdates) => [...currentUpdates, response.proposedUpdate]);
-      setStatus('Proposed update saved.');
-    } catch (caughtError) {
-      const rawMessage =
-        caughtError instanceof Error ? caughtError.message : 'Unable to save proposed update.';
-      setError(humanizeAuthError(null, rawMessage, 'Unable to save proposed update.'));
-    } finally {
-      setCreatingProposalControlId(null);
-    }
+    createProposedUpdateMutation.mutate({
+      acceptedEvidenceTypes,
+      applicabilityConditions: String(formData.get('applicabilityConditions') ?? ''),
+      businessMeaning: String(formData.get('businessMeaning') ?? ''),
+      controlCode: String(formData.get('controlCode') ?? ''),
+      controlId: control.id,
+      organizationSlug,
+      releaseImpact: String(formData.get('releaseImpact') ?? ''),
+      title: String(formData.get('title') ?? ''),
+      verificationMethod: String(formData.get('verificationMethod') ?? ''),
+    });
   };
 
-  const handlePublishControlProposedUpdate = async (
-    proposedUpdate: ControlProposedUpdateListItem,
-  ) => {
+  const handlePublishControlProposedUpdate = (proposedUpdate: ControlProposedUpdateListItem) => {
     if (!organizationSlug) return;
 
     setPublishingProposalId(proposedUpdate.id);
     setError(null);
     setStatus(null);
-    try {
-      const response = await publishControlProposedUpdate(
-        organizationSlug,
-        proposedUpdate.controlId,
-        proposedUpdate.id,
-      );
-
-      setControls((currentControls) =>
-        currentControls.map((control) =>
-          control.id === response.control.id ? response.control : control,
-        ),
-      );
-      setProposedUpdates((currentUpdates) =>
-        currentUpdates.filter((currentUpdate) => currentUpdate.id !== proposedUpdate.id),
-      );
-      setStatus('Proposed update published.');
-    } catch (caughtError) {
-      const rawMessage =
-        caughtError instanceof Error ? caughtError.message : 'Unable to publish proposed update.';
-      setError(humanizeAuthError(null, rawMessage, 'Unable to publish proposed update.'));
-    } finally {
-      setPublishingProposalId(null);
-    }
+    publishProposedUpdateMutation.mutate({
+      controlId: proposedUpdate.controlId,
+      organizationSlug,
+      proposedUpdateId: proposedUpdate.id,
+    });
   };
 
-  const handleSubmitControlProposedUpdate = async (
-    proposedUpdate: ControlProposedUpdateListItem,
-  ) => {
+  const handleSubmitControlProposedUpdate = (proposedUpdate: ControlProposedUpdateListItem) => {
     if (!organizationSlug) return;
 
     setPublishingProposalId(proposedUpdate.id);
     setError(null);
     setStatus(null);
-    try {
-      const response = await submitControlProposedUpdatePublishRequest(
-        organizationSlug,
-        proposedUpdate.controlId,
-        proposedUpdate.id,
-      );
-
-      setPublishRequests((currentRequests) =>
-        upsertPublishRequest(currentRequests, response.publishRequest),
-      );
-      setStatus('Control Publish Request submitted.');
-    } catch (caughtError) {
-      const rawMessage =
-        caughtError instanceof Error
-          ? caughtError.message
-          : 'Unable to submit Control Publish Request.';
-      setError(humanizeAuthError(null, rawMessage, 'Unable to submit Control Publish Request.'));
-    } finally {
-      setPublishingProposalId(null);
-    }
+    submitProposedUpdateMutation.mutate({
+      controlId: proposedUpdate.controlId,
+      organizationSlug,
+      proposedUpdateId: proposedUpdate.id,
+    });
   };
 
-  const handleApproveControlPublishRequest = async (request: ControlPublishRequestListItem) => {
+  const handleApproveControlPublishRequest = (request: ControlPublishRequestListItem) => {
     if (!organizationSlug) return;
 
     setReviewingRequestId(request.id);
     setError(null);
     setStatus(null);
-    try {
-      const response = await approveControlPublishRequest(organizationSlug, request.id);
-
-      setPublishRequests((currentRequests) =>
-        upsertPublishRequest(currentRequests, response.publishRequest),
-      );
-      setStatus('Control Publish Request approved.');
-    } catch (caughtError) {
-      const rawMessage =
-        caughtError instanceof Error
-          ? caughtError.message
-          : 'Unable to approve Control Publish Request.';
-      setError(humanizeAuthError(null, rawMessage, 'Unable to approve Control Publish Request.'));
-    } finally {
-      setReviewingRequestId(null);
-    }
+    approvePublishRequestMutation.mutate({ organizationSlug, publishRequestId: request.id });
   };
 
   const handleRejectControlPublishRequest = async (
-    event: FormEvent<HTMLFormElement>,
+    event: SyntheticEvent<HTMLFormElement>,
     request: ControlPublishRequestListItem,
   ) => {
     event.preventDefault();
@@ -431,87 +445,66 @@ export function ControlsPage() {
     setReviewingRequestId(request.id);
     setError(null);
     setStatus(null);
-    try {
-      const response = await rejectControlPublishRequest(organizationSlug, request.id, {
-        comment: rejectionComment,
-      });
-
-      setPublishRequests((currentRequests) =>
-        upsertPublishRequest(currentRequests, response.publishRequest),
-      );
-      setRejectingRequestId(null);
-      setRejectionComment('');
-      setStatus('Control Publish Request rejected and returned to draft.');
-    } catch (caughtError) {
-      const rawMessage =
-        caughtError instanceof Error
-          ? caughtError.message
-          : 'Unable to reject Control Publish Request.';
-      setError(humanizeAuthError(null, rawMessage, 'Unable to reject Control Publish Request.'));
-    } finally {
-      setReviewingRequestId(null);
-    }
+    rejectPublishRequestMutation.mutate({
+      comment: rejectionComment,
+      organizationSlug,
+      publishRequestId: request.id,
+    });
   };
 
-  const handleWithdrawControlPublishRequest = async (request: ControlPublishRequestListItem) => {
+  const handleWithdrawControlPublishRequest = (request: ControlPublishRequestListItem) => {
     if (!organizationSlug) return;
 
     setReviewingRequestId(request.id);
     setError(null);
     setStatus(null);
-    try {
-      const response = await withdrawControlPublishRequest(organizationSlug, request.id);
-
-      setPublishRequests((currentRequests) =>
-        upsertPublishRequest(currentRequests, response.publishRequest),
-      );
-      setStatus('Control Publish Request withdrawn.');
-    } catch (caughtError) {
-      const rawMessage =
-        caughtError instanceof Error
-          ? caughtError.message
-          : 'Unable to withdraw Control Publish Request.';
-      setError(humanizeAuthError(null, rawMessage, 'Unable to withdraw Control Publish Request.'));
-    } finally {
-      setReviewingRequestId(null);
-    }
+    withdrawPublishRequestMutation.mutate({ organizationSlug, publishRequestId: request.id });
   };
 
-  const handlePublishControlPublishRequest = async (request: ControlPublishRequestListItem) => {
+  const handlePublishControlPublishRequest = (request: ControlPublishRequestListItem) => {
     if (!organizationSlug) return;
 
     setReviewingRequestId(request.id);
     setError(null);
     setStatus(null);
-    try {
-      const response = await publishControlPublishRequest(organizationSlug, request.id);
-
-      setControls((currentControls) => upsertControl(currentControls, response.control));
-      setDraftControls((currentDrafts) =>
-        request.draftControlId
-          ? currentDrafts.filter((draft) => draft.id !== request.draftControlId)
-          : currentDrafts,
-      );
-      setProposedUpdates((currentUpdates) =>
-        request.proposedUpdateId
-          ? currentUpdates.filter((update) => update.id !== request.proposedUpdateId)
-          : currentUpdates,
-      );
-      setPublishRequests((currentRequests) =>
-        currentRequests.filter((currentRequest) => currentRequest.id !== request.id),
-      );
-      setStatus('Control Publish Request published.');
-    } catch (caughtError) {
-      const rawMessage =
-        caughtError instanceof Error
-          ? caughtError.message
-          : 'Unable to publish Control Publish Request.';
-      setError(humanizeAuthError(null, rawMessage, 'Unable to publish Control Publish Request.'));
-    } finally {
-      setReviewingRequestId(null);
-    }
+    publishPublishRequestMutation.mutate({ organizationSlug, publishRequestId: request.id });
   };
 
+  const controls: ControlListItem[] =
+    statusFilter === 'draft' ? [] : (controlQuery.data?.controls ?? []);
+  const draftControls: DraftControlListItem[] = canListDrafts
+    ? (draftControlQuery.data?.draftControls ?? [])
+    : [];
+  const proposedUpdates: ControlProposedUpdateListItem[] = archivedView
+    ? []
+    : (proposedUpdateQuery.data?.proposedUpdates ?? []);
+  const publishRequests: ControlPublishRequestListItem[] = archivedView
+    ? []
+    : (publishRequestQuery.data?.publishRequests ?? []);
+  const organization = resolutionQuery.data?.organizations.find(
+    (org) => org.slug === organizationSlug,
+  );
+  const currentRole = organization?.role ?? null;
+  const currentMemberId = organization?.memberId ?? null;
+  const approvalPolicyEnabled = approvalPolicyQuery.data?.policy.enabled ?? false;
+  const loadError =
+    controlQuery.error ??
+    draftControlQuery.error ??
+    proposedUpdateQuery.error ??
+    publishRequestQuery.error ??
+    approvalPolicyQuery.error ??
+    resolutionQuery.error;
+  const displayError =
+    error ??
+    (loadError ? humanizeAuthError(null, loadError.message, 'Unable to load Controls.') : null);
+  const isLoading =
+    hasOrganization &&
+    ((statusFilter !== 'draft' && controlQuery.isPending) ||
+      (canListDrafts && draftControlQuery.isPending) ||
+      (!archivedView && proposedUpdateQuery.isPending) ||
+      (!archivedView && publishRequestQuery.isPending) ||
+      approvalPolicyQuery.isPending ||
+      resolutionQuery.isPending);
   const canPublish = canPublishControls(currentRole);
   const canCompleteDrafts = canPublish || approvalPolicyEnabled;
   const emptyTitle = archivedView ? 'No archived Controls' : 'No active Controls yet';
@@ -550,11 +543,11 @@ export function ControlsPage() {
         </div>
       </header>
 
-      {error ? (
+      {displayError ? (
         <Alert variant="destructive">
           <AlertCircle />
           <AlertTitle>Something went wrong</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{displayError}</AlertDescription>
         </Alert>
       ) : null}
       {status ? (
@@ -597,9 +590,9 @@ export function ControlsPage() {
                 required
               />
             </div>
-            <Button className="self-end" type="submit" disabled={isCreating}>
+            <Button className="self-end" type="submit" disabled={createDraftMutation.isPending}>
               <Plus />
-              {isCreating ? 'Saving...' : 'Save Draft'}
+              {createDraftMutation.isPending ? 'Saving...' : 'Save Draft'}
             </Button>
           </form>
         </section>
@@ -1207,19 +1200,4 @@ export function ControlsPage() {
       ) : null}
     </div>
   );
-}
-
-function upsertPublishRequest(
-  requests: ControlPublishRequestListItem[],
-  nextRequest: ControlPublishRequestListItem,
-) {
-  return requests.some((request) => request.id === nextRequest.id)
-    ? requests.map((request) => (request.id === nextRequest.id ? nextRequest : request))
-    : [...requests, nextRequest];
-}
-
-function upsertControl(controls: ControlListItem[], nextControl: ControlListItem) {
-  return controls.some((control) => control.id === nextControl.id)
-    ? controls.map((control) => (control.id === nextControl.id ? nextControl : control))
-    : [nextControl, ...controls];
 }

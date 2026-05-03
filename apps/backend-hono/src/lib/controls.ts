@@ -11,7 +11,7 @@ import {
   organizations,
   users,
 } from '../db/schema';
-import type { OrganizationMembership } from './projects';
+import type { OrganizationMembership } from '../types/organization-types';
 
 export type DraftControlListItem = {
   author: {
@@ -112,10 +112,6 @@ type PublishDraftControlInput = {
   verificationMethod: string;
 };
 
-type ArchiveControlInput = {
-  reason: string;
-};
-
 type CreateControlProposedUpdateInput = PublishDraftControlInput & {
   controlCode: string;
   title: string;
@@ -135,18 +131,18 @@ export class ControlPublishInputError extends Error {}
 export class ControlProposedUpdateInputError extends Error {}
 export class ControlPublishRequestInputError extends Error {}
 
-export function canPublishControls(role: string): boolean {
+export function canPublishControls(role: string) {
   return publishControlRoles.has(role);
 }
 
-export function canArchiveControls(role: string): boolean {
+export function canArchiveControls(role: string) {
   return archiveControlRoles.has(role);
 }
 
 export async function listControls(
   organizationId: string,
   filters: ControlListFilters = defaultControlListFilters,
-): Promise<ControlListItem[]> {
+) {
   const rows = await db
     .select({
       acceptedEvidenceTypes: controlVersions.acceptedEvidenceTypes,
@@ -182,10 +178,7 @@ export async function listControls(
   );
 }
 
-export async function getControlDetail(
-  membership: OrganizationMembership,
-  controlId: string,
-): Promise<ControlListItem | null> {
+export async function getControlDetail(membership: OrganizationMembership, controlId: string) {
   const row = await db
     .select({
       acceptedEvidenceTypes: controlVersions.acceptedEvidenceTypes,
@@ -217,9 +210,7 @@ export async function getControlDetail(
   return toControlListItem(row);
 }
 
-export async function listControlProposedUpdates(
-  membership: OrganizationMembership,
-): Promise<ControlProposedUpdateListItem[]> {
+export async function listControlProposedUpdates(membership: OrganizationMembership) {
   const rows = await db
     .select({
       acceptedEvidenceTypes: controlProposedUpdates.acceptedEvidenceTypes,
@@ -261,9 +252,7 @@ export async function listControlProposedUpdates(
   }));
 }
 
-export async function listControlPublishRequests(
-  membership: OrganizationMembership,
-): Promise<ControlPublishRequestListItem[]> {
+export async function listControlPublishRequests(membership: OrganizationMembership) {
   const policy = await getApprovalPolicy(membership.organizationId);
   const rows = await db
     .select({
@@ -343,7 +332,7 @@ export async function listControlPublishRequests(
 export async function publishControlPublishRequest(
   membership: OrganizationMembership,
   publishRequestId: string,
-): Promise<ControlListItem | null> {
+) {
   const request = await db
     .select()
     .from(controlPublishRequests)
@@ -384,7 +373,7 @@ export async function publishControlPublishRequest(
 export async function listDraftControls(
   membership: OrganizationMembership,
   filters: DraftControlListFilters = defaultDraftControlListFilters,
-): Promise<DraftControlListItem[]> {
+) {
   const rows = await db
     .select({
       authorEmail: users.email,
@@ -424,7 +413,7 @@ export async function listDraftControls(
 export async function createDraftControl(
   membership: OrganizationMembership,
   input: CreateDraftControlInput,
-): Promise<DraftControlListItem> {
+) {
   validateDraftControlInput(input);
 
   const trimmedControlCode = input.controlCode.trim();
@@ -479,7 +468,7 @@ export async function createDraftControl(
 export async function cancelDraftControl(
   membership: OrganizationMembership,
   draftControlId: string,
-): Promise<boolean> {
+) {
   const draftControl = await db
     .select({ authorMemberId: draftControls.authorMemberId, id: draftControls.id })
     .from(draftControls)
@@ -509,7 +498,7 @@ export async function publishDraftControl(
   membership: OrganizationMembership,
   draftControlId: string,
   input: PublishDraftControlInput,
-): Promise<ControlListItem | null> {
+) {
   validatePublishInput(input);
 
   await ensureControlPublishAllowed({
@@ -586,7 +575,7 @@ export async function setControlArchivedForMembership(input: {
   controlId: string;
   membership: OrganizationMembership;
   reason?: string;
-}): Promise<ControlListItem | null> {
+}) {
   const control = await db
     .select({ id: controls.id })
     .from(controls)
@@ -629,7 +618,7 @@ export async function createControlProposedUpdate(
   membership: OrganizationMembership,
   controlId: string,
   input: CreateControlProposedUpdateInput,
-): Promise<ControlProposedUpdateListItem | null> {
+) {
   validateProposedUpdateInput(input);
 
   const control = await db
@@ -704,7 +693,7 @@ export async function submitDraftControlPublishRequest(
   membership: OrganizationMembership,
   draftControlId: string,
   input: PublishDraftControlInput,
-): Promise<ControlPublishRequestListItem | null> {
+) {
   validatePublishInput(input);
 
   const policy = await getApprovalPolicy(membership.organizationId);
@@ -778,7 +767,7 @@ export async function submitControlProposedUpdatePublishRequest(
   membership: OrganizationMembership,
   controlId: string,
   proposedUpdateId: string,
-): Promise<ControlPublishRequestListItem | null> {
+) {
   const policy = await getApprovalPolicy(membership.organizationId);
 
   if (!policy.enabled) {
@@ -850,7 +839,7 @@ export async function submitControlProposedUpdatePublishRequest(
 export async function approveControlPublishRequest(
   membership: OrganizationMembership,
   publishRequestId: string,
-): Promise<ControlPublishRequestListItem | null> {
+) {
   const request = await getReviewableControlPublishRequest(membership, publishRequestId);
 
   if (!request) {
@@ -905,7 +894,7 @@ export async function rejectControlPublishRequest(
   membership: OrganizationMembership,
   publishRequestId: string,
   input: RejectControlPublishRequestInput,
-): Promise<ControlPublishRequestListItem | null> {
+) {
   const request = await getReviewableControlPublishRequest(membership, publishRequestId);
   const comment = input.comment.trim();
 
@@ -941,7 +930,7 @@ export async function rejectControlPublishRequest(
 export async function withdrawControlPublishRequest(
   membership: OrganizationMembership,
   publishRequestId: string,
-): Promise<ControlPublishRequestListItem | null> {
+) {
   const request = await getReviewableControlPublishRequest(membership, publishRequestId);
 
   if (!request) {
@@ -973,7 +962,7 @@ export async function publishControlProposedUpdate(
   membership: OrganizationMembership,
   controlId: string,
   proposedUpdateId: string,
-): Promise<ControlListItem | null> {
+) {
   await ensureControlPublishAllowed({
     draftControlId: null,
     membership,
@@ -1073,7 +1062,7 @@ export async function publishControlProposedUpdate(
   return getControlDetail(membership, controlId);
 }
 
-export function normalizeDraftControlCreateBody(body: unknown): CreateDraftControlInput {
+export function normalizeDraftControlCreateBody(body: unknown) {
   const value = typeof body === 'object' && body !== null ? body : {};
   const record = value as Record<string, unknown>;
 
@@ -1083,9 +1072,13 @@ export function normalizeDraftControlCreateBody(body: unknown): CreateDraftContr
   };
 }
 
-export function normalizeDraftControlPublishBody(body: unknown): PublishDraftControlInput {
+export function normalizeDraftControlPublishBody(body: unknown) {
   const value = typeof body === 'object' && body !== null ? body : {};
   const record = value as Record<string, unknown>;
+  const releaseImpact: ReleaseImpact | '' =
+    typeof record.releaseImpact === 'string' && releaseImpacts.has(record.releaseImpact)
+      ? (record.releaseImpact as ReleaseImpact)
+      : '';
 
   return {
     acceptedEvidenceTypes: toStringArray(record.acceptedEvidenceTypes),
@@ -1093,37 +1086,37 @@ export function normalizeDraftControlPublishBody(body: unknown): PublishDraftCon
       typeof record.applicabilityConditions === 'string' ? record.applicabilityConditions : '',
     businessMeaning: typeof record.businessMeaning === 'string' ? record.businessMeaning : '',
     externalStandardsMappings: toExternalStandardsMappings(record.externalStandardsMappings),
-    releaseImpact:
-      typeof record.releaseImpact === 'string' && releaseImpacts.has(record.releaseImpact)
-        ? (record.releaseImpact as ReleaseImpact)
-        : '',
+    releaseImpact,
     verificationMethod:
       typeof record.verificationMethod === 'string' ? record.verificationMethod : '',
   };
 }
 
-export function normalizeControlListFilters(
-  query: Record<string, string | string[] | undefined>,
-): ControlListFilters {
+export function normalizeControlListFilters(query: Record<string, string | string[] | undefined>) {
   const releaseImpact = firstQueryValue(query.releaseImpact);
   const status = firstQueryValue(query.status);
+  const normalizedReleaseImpact: ReleaseImpact | '' = releaseImpacts.has(releaseImpact)
+    ? (releaseImpact as ReleaseImpact)
+    : '';
+  const normalizedStatus: ControlListFilters['status'] =
+    status === 'archived' ? 'archived' : 'active';
 
   return {
     acceptedEvidenceType: firstQueryValue(query.acceptedEvidenceType).trim(),
-    releaseImpact: releaseImpacts.has(releaseImpact) ? (releaseImpact as ReleaseImpact) : '',
+    releaseImpact: normalizedReleaseImpact,
     search: firstQueryValue(query.q).trim(),
     standardsFramework: firstQueryValue(query.standardsFramework).trim(),
-    status: status === 'archived' ? 'archived' : 'active',
+    status: normalizedStatus,
   };
 }
 
 export function normalizeDraftControlListFilters(
   query: Record<string, string | string[] | undefined>,
-): DraftControlListFilters {
+) {
   return { search: firstQueryValue(query.q).trim() };
 }
 
-export function normalizeControlArchiveBody(body: unknown): ArchiveControlInput {
+export function normalizeControlArchiveBody(body: unknown) {
   const value = typeof body === 'object' && body !== null ? body : {};
   const record = value as Record<string, unknown>;
 
@@ -1132,9 +1125,7 @@ export function normalizeControlArchiveBody(body: unknown): ArchiveControlInput 
   };
 }
 
-export function normalizeControlProposedUpdateBody(
-  body: unknown,
-): CreateControlProposedUpdateInput {
+export function normalizeControlProposedUpdateBody(body: unknown) {
   const value = typeof body === 'object' && body !== null ? body : {};
   const record = value as Record<string, unknown>;
   const publishInput = normalizeDraftControlPublishBody(body);
@@ -1146,9 +1137,7 @@ export function normalizeControlProposedUpdateBody(
   };
 }
 
-export function normalizeControlPublishRequestRejectionBody(
-  body: unknown,
-): RejectControlPublishRequestInput {
+export function normalizeControlPublishRequestRejectionBody(body: unknown) {
   const value = typeof body === 'object' && body !== null ? body : {};
   const record = value as Record<string, unknown>;
 
@@ -1192,13 +1181,13 @@ function validateProposedUpdateInput(input: CreateControlProposedUpdateInput) {
   validatePublishInput(input);
 }
 
-function toStringArray(value: unknown): string[] {
+function toStringArray(value: unknown) {
   return Array.isArray(value)
     ? value.filter((entry): entry is string => typeof entry === 'string' && Boolean(entry.trim()))
     : [];
 }
 
-function firstQueryValue(value: string | string[] | undefined): string {
+function firstQueryValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? (value[0] ?? '') : (value ?? '');
 }
 
@@ -1212,7 +1201,7 @@ const defaultControlListFilters: ControlListFilters = {
 
 const defaultDraftControlListFilters: DraftControlListFilters = { search: '' };
 
-function matchesControlFilters(control: ControlListItem, filters: ControlListFilters): boolean {
+function matchesControlFilters(control: ControlListItem, filters: ControlListFilters) {
   const version = control.currentVersion;
   const search = filters.search.toLowerCase();
 
@@ -1259,7 +1248,7 @@ function matchesControlFilters(control: ControlListItem, filters: ControlListFil
 function matchesDraftControlFilters(
   draftControl: DraftControlListItem,
   filters: DraftControlListFilters,
-): boolean {
+) {
   const search = filters.search.toLowerCase();
 
   return search
@@ -1269,7 +1258,7 @@ function matchesDraftControlFilters(
     : true;
 }
 
-function toExternalStandardsMappings(value: unknown): ExternalStandardsMapping[] {
+function toExternalStandardsMappings(value: unknown) {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -1309,7 +1298,7 @@ async function toControlListItem(row: {
   versionCreatedAt: Date;
   versionId: string;
   versionNumber: number;
-}): Promise<ControlListItem> {
+}) {
   const versions = await getControlVersions(row.controlId);
 
   return {
@@ -1331,13 +1320,13 @@ async function toControlListItem(row: {
       versionNumber: row.versionNumber,
     }),
     id: row.controlId,
-    status: 'active',
+    status: 'active' as const,
     title: row.title,
     versions,
   };
 }
 
-async function getControlVersions(controlId: string): Promise<ControlVersionResponse[]> {
+async function getControlVersions(controlId: string) {
   const rows = await db
     .select()
     .from(controlVersions)
@@ -1448,9 +1437,7 @@ async function updateControlPublishRequestApprovalCount(requestId: string) {
     .where(eq(controlPublishRequests.id, requestId));
 }
 
-function toPublishInput(
-  request: typeof controlPublishRequests.$inferSelect,
-): PublishDraftControlInput {
+function toPublishInput(request: typeof controlPublishRequests.$inferSelect) {
   return {
     acceptedEvidenceTypes: JSON.parse(request.acceptedEvidenceTypes) as string[],
     applicabilityConditions: request.applicabilityConditions,
@@ -1475,7 +1462,7 @@ function toControlVersionResponse(row: {
   title: string;
   verificationMethod: string;
   versionNumber: number;
-}): ControlVersionResponse {
+}) {
   return {
     acceptedEvidenceTypes: JSON.parse(row.acceptedEvidenceTypes) as string[],
     applicabilityConditions: row.applicabilityConditions,

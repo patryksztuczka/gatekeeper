@@ -1,21 +1,13 @@
 import { useEffect, useState } from 'react';
-import type { FormEvent } from 'react';
+import type { SyntheticEvent } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
 import { AlertCircle, Archive, CheckCircle2, LockKeyhole, RotateCcw } from 'lucide-react';
-import {
-  archiveProject,
-  getProjectDetail,
-  restoreProject,
-  updateProjectSettings,
-  type ProjectDetail,
-} from '@/features/projects/project-api';
+import type { ProjectDetail } from '@/features/projects/project-api';
 import { buildProjectPath, buildProjectsPath } from '@/features/projects/project-routing';
-import {
-  getMembershipResolution,
-  listOrganizationMembers,
-  type OrganizationMemberListItem,
-} from '@/features/auth/auth-api';
 import { humanizeAuthError } from '@/features/auth/auth-errors';
+import type { OrganizationMemberListItem } from '@/features/organizations/organization-api';
+import { queryClient, trpc } from '@/lib/trpc';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -23,147 +15,139 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 
-type ProjectSettingsState =
-  | { status: 'loading' }
-  | { status: 'available'; project: ProjectDetail }
-  | { status: 'unavailable' }
-  | { status: 'error'; message: string };
-
-function canManageProjects(role: string | null): boolean {
+function canManageProjects(role: string | null) {
   return role === 'owner' || role === 'admin';
 }
 
 export function ProjectSettingsPage() {
   const { organizationSlug = '', projectSlug = '' } = useParams();
-  const [state, setState] = useState<ProjectSettingsState>({ status: 'loading' });
-  const [members, setMembers] = useState<OrganizationMemberListItem[]>([]);
-  const [currentRole, setCurrentRole] = useState<string | null>(null);
+  const [projectOverride, setProjectOverride] = useState<ProjectDetail | null>(null);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [projectOwnerMemberId, setProjectOwnerMemberId] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
-  const [isArchiving, setIsArchiving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const projectsPath = organizationSlug ? buildProjectsPath(organizationSlug) : '/';
+  const hasProjectIdentity = Boolean(organizationSlug && projectSlug);
+
+  const detailQuery = useQuery(
+    trpc.projects.detail.queryOptions(
+      { organizationSlug, projectSlug },
+      { enabled: hasProjectIdentity },
+    ),
+  );
+  const memberQuery = useQuery(
+    trpc.organizations.members.queryOptions(
+      { organizationSlug },
+      { enabled: Boolean(organizationSlug) },
+    ),
+  );
+  const resolutionQuery = useQuery(
+    trpc.organizations.membershipResolution.queryOptions(undefined, {
+      enabled: Boolean(organizationSlug),
+    }),
+  );
+  const updateProjectMutation = useMutation(
+    trpc.projects.update.mutationOptions({
+      onSuccess: (response) => {
+        void queryClient.invalidateQueries();
+        const updatedProject = response.project;
+
+        setProjectOverride(updatedProject);
+        setName(updatedProject.name);
+        setDescription(updatedProject.description);
+        setProjectOwnerMemberId(updatedProject.projectOwner?.id ?? '');
+        setStatus('Project settings saved.');
+      },
+      onError: (caughtError) => {
+        setSaveError(
+          humanizeAuthError(null, caughtError.message, 'Unable to save Project settings.'),
+        );
+      },
+    }),
+  );
+  const archiveProjectMutation = useMutation(
+    trpc.projects.archive.mutationOptions({
+      onSuccess: (response) => {
+        void queryClient.invalidateQueries();
+        setProjectOverride(response.project);
+        setStatus('Project archived.');
+      },
+      onError: (caughtError) => {
+        setSaveError(humanizeAuthError(null, caughtError.message, 'Unable to archive Project.'));
+      },
+    }),
+  );
+  const restoreProjectMutation = useMutation(
+    trpc.projects.restore.mutationOptions({
+      onSuccess: (response) => {
+        void queryClient.invalidateQueries();
+        setProjectOverride(response.project);
+        setStatus('Project restored.');
+      },
+      onError: (caughtError) => {
+        setSaveError(humanizeAuthError(null, caughtError.message, 'Unable to restore Project.'));
+      },
+    }),
+  );
+
+  const queryProject = detailQuery.data?.status === 'available' ? detailQuery.data.project : null;
+  const project = projectOverride ?? queryProject;
+  const members: OrganizationMemberListItem[] = memberQuery.data?.members ?? [];
+  const organization = resolutionQuery.data?.organizations.find(
+    (org) => org.slug === organizationSlug,
+  );
+  const currentRole = organization?.role ?? null;
+  const loadError = detailQuery.error ?? memberQuery.error ?? resolutionQuery.error;
+  const loadErrorMessage = loadError
+    ? humanizeAuthError(null, loadError.message, 'Unable to load Project settings.')
+    : null;
+  const isSaving = updateProjectMutation.isPending;
+  const isArchiving = archiveProjectMutation.isPending || restoreProjectMutation.isPending;
 
   useEffect(() => {
-    let cancelled = false;
+    if (!queryProject) return;
 
-    async function loadSettings() {
-      if (!organizationSlug || !projectSlug) {
-        setState({ status: 'unavailable' });
-        return;
-      }
+    setProjectOverride(null);
+    setName(queryProject.name);
+    setDescription(queryProject.description);
+    setProjectOwnerMemberId(queryProject.projectOwner?.id ?? '');
+  }, [queryProject]);
 
-      setState({ status: 'loading' });
-      setSaveError(null);
-      setStatus(null);
-
-      try {
-        const [projectResult, memberResponse, resolution] = await Promise.all([
-          getProjectDetail({ organizationSlug, projectSlug }),
-          listOrganizationMembers(organizationSlug),
-          getMembershipResolution(),
-        ]);
-
-        if (cancelled) return;
-
-        if (projectResult.status === 'unavailable') {
-          setState({ status: 'unavailable' });
-          return;
-        }
-
-        const organization = resolution.organizations.find((org) => org.slug === organizationSlug);
-
-        setMembers(memberResponse.members);
-        setCurrentRole(organization?.role ?? null);
-        setName(projectResult.project.name);
-        setDescription(projectResult.project.description);
-        setProjectOwnerMemberId(projectResult.project.projectOwner?.id ?? '');
-        setState({ status: 'available', project: projectResult.project });
-      } catch (caughtError) {
-        if (cancelled) return;
-        const rawMessage =
-          caughtError instanceof Error ? caughtError.message : 'Unable to load Project settings.';
-        setState({
-          status: 'error',
-          message: humanizeAuthError(null, rawMessage, 'Unable to load Project settings.'),
-        });
-      }
-    }
-
-    void loadSettings();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [organizationSlug, projectSlug]);
-
-  const handleSave = async (event: FormEvent<HTMLFormElement>) => {
+  const handleSave = (event: SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     if (!organizationSlug || !projectSlug || !canManageProjects(currentRole)) return;
 
-    setIsSaving(true);
+    setSaveError(null);
+    setStatus(null);
+    updateProjectMutation.mutate({
+      description,
+      name,
+      organizationSlug,
+      projectOwnerMemberId: projectOwnerMemberId || null,
+      projectSlug,
+    });
+  };
+
+  const handleArchiveStateChange = () => {
+    if (!organizationSlug || !projectSlug || !canManageProjects(currentRole) || !project) return;
+
     setSaveError(null);
     setStatus(null);
 
-    try {
-      const project = await updateProjectSettings({
-        description,
-        name,
-        organizationSlug,
-        projectOwnerMemberId: projectOwnerMemberId || null,
-        projectSlug,
-      });
-
-      setState({ status: 'available', project });
-      setName(project.name);
-      setDescription(project.description);
-      setProjectOwnerMemberId(project.projectOwner?.id ?? '');
-      setStatus('Project settings saved.');
-    } catch (caughtError) {
-      const rawMessage =
-        caughtError instanceof Error ? caughtError.message : 'Unable to save Project settings.';
-      setSaveError(humanizeAuthError(null, rawMessage, 'Unable to save Project settings.'));
-    } finally {
-      setIsSaving(false);
+    if (project.archivedAt) {
+      restoreProjectMutation.mutate({ organizationSlug, projectSlug });
+    } else {
+      archiveProjectMutation.mutate({ organizationSlug, projectSlug });
     }
   };
 
-  const handleArchiveStateChange = async () => {
-    if (
-      !organizationSlug ||
-      !projectSlug ||
-      !canManageProjects(currentRole) ||
-      state.status !== 'available'
-    ) {
-      return;
-    }
-
-    setIsArchiving(true);
-    setSaveError(null);
-    setStatus(null);
-
-    try {
-      const project = state.project.archivedAt
-        ? await restoreProject({ organizationSlug, projectSlug })
-        : await archiveProject({ organizationSlug, projectSlug });
-
-      setState({ status: 'available', project });
-      setStatus(project.archivedAt ? 'Project archived.' : 'Project restored.');
-    } catch (caughtError) {
-      const action = state.project.archivedAt ? 'restore' : 'archive';
-      const rawMessage =
-        caughtError instanceof Error ? caughtError.message : `Unable to ${action} Project.`;
-      setSaveError(humanizeAuthError(null, rawMessage, `Unable to ${action} Project.`));
-    } finally {
-      setIsArchiving(false);
-    }
-  };
-
-  if (state.status === 'loading') {
+  if (
+    hasProjectIdentity &&
+    (detailQuery.isPending || memberQuery.isPending || resolutionQuery.isPending) &&
+    !project
+  ) {
     return (
       <div className="mx-auto w-full max-w-3xl space-y-6">
         <Skeleton className="h-8 w-56" />
@@ -172,16 +156,15 @@ export function ProjectSettingsPage() {
     );
   }
 
-  if (state.status === 'unavailable' || state.status === 'error') {
+  if (!project || detailQuery.data?.status === 'unavailable' || loadErrorMessage) {
     return (
       <div className="mx-auto w-full max-w-3xl space-y-4">
-        <Alert variant={state.status === 'error' ? 'destructive' : 'default'}>
+        <Alert variant={loadErrorMessage ? 'destructive' : 'default'}>
           <AlertCircle className="size-4" />
           <AlertTitle>Project settings unavailable</AlertTitle>
           <AlertDescription>
-            {state.status === 'error'
-              ? state.message
-              : 'This Project could not be found, or you do not have access to it.'}
+            {loadErrorMessage ??
+              'This Project could not be found, or you do not have access to it.'}
           </AlertDescription>
         </Alert>
         <Button asChild variant="outline">
@@ -191,7 +174,6 @@ export function ProjectSettingsPage() {
     );
   }
 
-  const { project } = state;
   const projectPath = organizationSlug
     ? buildProjectPath(organizationSlug, project.slug)
     : projectsPath;
@@ -325,7 +307,7 @@ export function ProjectSettingsPage() {
               type="button"
               variant={project.archivedAt ? 'default' : 'outline'}
               disabled={isArchiving}
-              onClick={() => void handleArchiveStateChange()}
+              onClick={handleArchiveStateChange}
             >
               {project.archivedAt ? <RotateCcw /> : <Archive />}
               {isArchiving

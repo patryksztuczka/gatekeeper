@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { FormEvent } from 'react';
+import type { SyntheticEvent } from 'react';
 import { AlertCircle, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router';
 import { requestPasswordReset } from '../../features/auth/auth-api';
@@ -17,7 +17,7 @@ export function ForgotPasswordPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
     setStatus(null);

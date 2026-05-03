@@ -1,16 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router';
-import {
-  acceptOrganizationInvitation,
-  getInvitationEntry,
-  type InvitationEntryResponse,
-} from '../../features/auth/auth-api';
+import { acceptOrganizationInvitation } from '../../features/auth/auth-api';
 import { signOut } from '../../features/auth/auth-client';
 import {
   buildSignInLink,
   buildSignUpLink,
   buildVerifyEmailLink,
 } from '../../features/auth/auth-routing';
+import type { InvitationEntryResponse } from '../../features/organizations/organization-api';
+import { queryClient, trpc } from '@/lib/trpc';
 
 const statusMessages: Record<
   InvitationEntryResponse['status'],
@@ -52,50 +51,35 @@ function getInviteRoleLabel(role: string | null) {
 export function InvitationPage() {
   const navigate = useNavigate();
   const { invitationId } = useParams();
-  const [invitationEntry, setInvitationEntry] = useState<InvitationEntryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [isAccepting, setIsAccepting] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    let isCancelled = false;
-
-    async function loadInvitation() {
-      if (!invitationId) {
-        setError('Invitation not found.');
-        setIsLoading(false);
-        return;
-      }
-
-      setIsLoading(true);
+  const invitationQuery = useQuery(
+    trpc.organizations.invitationEntryState.queryOptions(
+      { invitationId: invitationId ?? '' },
+      { enabled: Boolean(invitationId) },
+    ),
+  );
+  const acceptInvitationMutation = useMutation({
+    mutationFn: acceptOrganizationInvitation,
+    onMutate: () => {
       setError(null);
+      setStatus(null);
+    },
+    onSuccess: () => {
+      setStatus('Invitation accepted. Redirecting to the app...');
+      void queryClient.invalidateQueries();
+      navigate('/');
+    },
+    onError: (caughtError) => {
+      setError(caughtError instanceof Error ? caughtError.message : 'Unable to accept invitation.');
+    },
+  });
 
-      try {
-        const nextInvitationEntry = await getInvitationEntry(invitationId);
-
-        if (!isCancelled) {
-          setInvitationEntry(nextInvitationEntry);
-        }
-      } catch (caughtError) {
-        if (!isCancelled) {
-          setError(
-            caughtError instanceof Error ? caughtError.message : 'Unable to load invitation.',
-          );
-        }
-      } finally {
-        if (!isCancelled) {
-          setIsLoading(false);
-        }
-      }
-    }
-
-    void loadInvitation();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [invitationId]);
+  const invitationEntry = invitationQuery.data ?? null;
+  const errorMessage = !invitationId
+    ? 'Invitation not found.'
+    : invitationQuery.error?.message || error;
+  const isLoading = Boolean(invitationId) && invitationQuery.isPending;
 
   const inviteTarget = invitationId ? `/invite/${invitationId}` : '/sign-in';
   const inviteEmail = invitationEntry?.invitation?.email;
@@ -109,19 +93,7 @@ export function InvitationPage() {
       return;
     }
 
-    setError(null);
-    setStatus(null);
-    setIsAccepting(true);
-
-    try {
-      await acceptOrganizationInvitation(invitationEntry.invitation.id);
-      setStatus('Invitation accepted. Redirecting to the app...');
-      navigate('/');
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : 'Unable to accept invitation.');
-    } finally {
-      setIsAccepting(false);
-    }
+    acceptInvitationMutation.mutate(invitationEntry.invitation.id);
   };
 
   const handleSwitchAccount = async () => {
@@ -133,13 +105,13 @@ export function InvitationPage() {
     return <p className="text-sm">Loading invitation...</p>;
   }
 
-  if (error || !invitationEntry) {
+  if (errorMessage || !invitationEntry) {
     return (
       <div>
         <p className="text-xs uppercase">Invite link</p>
         <h2 className="mt-2 text-2xl font-bold">Invitation unavailable</h2>
         <p className="mt-4 border border-red-700 bg-red-100 p-3 text-sm">
-          {error || 'Unable to load invitation.'}
+          {errorMessage || 'Unable to load invitation.'}
         </p>
       </div>
     );
@@ -211,10 +183,10 @@ export function InvitationPage() {
           <button
             type="button"
             onClick={handleAccept}
-            disabled={isAccepting}
+            disabled={acceptInvitationMutation.isPending}
             className="border border-black bg-black px-4 py-2 text-sm font-bold text-white disabled:opacity-60"
           >
-            {isAccepting ? 'Accepting invitation...' : 'Accept invitation'}
+            {acceptInvitationMutation.isPending ? 'Accepting invitation...' : 'Accept invitation'}
           </button>
         </div>
       ) : null}

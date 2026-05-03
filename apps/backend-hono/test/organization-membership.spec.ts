@@ -1,11 +1,11 @@
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import app from '../src/index';
 import { db } from '../src/db/client';
 import { invitations, sessions, users } from '../src/db/schema';
 import { auth } from '../src/lib/auth';
 import type { MembershipResolutionResponse } from '../src/lib/auth-organization';
+import { callTRPC } from './trpc-test-utils';
 
 const authHeaders = {
   origin: 'http://localhost:5173',
@@ -87,39 +87,15 @@ async function createOrganization(
 }
 
 async function getMembershipResolution(headers: Headers) {
-  const response = await app.request('http://example.com/api/auth/membership-resolution', {
-    headers,
-  });
+  const response = await callTRPC(headers, (caller) => caller.organizations.membershipResolution());
 
   expect(response.status).toBe(200);
 
-  return (await response.json()) as MembershipResolutionResponse;
+  return response.body as MembershipResolutionResponse;
 }
 
 async function getInvitationEntry(invitationId: string, headers?: Headers) {
-  const response = await app.request(`http://example.com/api/auth/invitations/${invitationId}`, {
-    headers,
-  });
-
-  return {
-    body: (await response.json()) as {
-      action: string;
-      invitation: {
-        email: string;
-        id: string;
-        organizationId: string;
-        organizationName: string;
-        role: string | null;
-      } | null;
-      status: string;
-      viewer: {
-        email: string | null;
-        emailVerified: boolean | null;
-        isAuthenticated: boolean;
-      };
-    },
-    status: response.status,
-  };
+  return callTRPC(headers, (caller) => caller.organizations.invitationEntryState({ invitationId }));
 }
 
 function getLatestInviteLink() {
@@ -678,10 +654,10 @@ describe('organization membership resolution', () => {
       });
     });
 
-    it('returns not found for invalid invite links', async () => {
+    it('returns an invalid state for invalid invite links', async () => {
       const invitationEntry = await getInvitationEntry(crypto.randomUUID());
 
-      expect(invitationEntry.status).toBe(404);
+      expect(invitationEntry.status).toBe(200);
       expect(invitationEntry.body).toMatchObject({
         action: 'unavailable',
         invitation: null,

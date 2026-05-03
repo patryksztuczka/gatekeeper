@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { FormEvent } from 'react';
+import type { SyntheticEvent } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { resetPassword } from '../../features/auth/auth-api';
 
@@ -14,7 +14,7 @@ export function ResetPasswordPage() {
 
   const isInvalidLink = errorCode === 'INVALID_TOKEN' || !token;
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     if (!token) {

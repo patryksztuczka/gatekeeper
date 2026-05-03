@@ -1,11 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, Navigate, Outlet, useParams } from 'react-router';
-import {
-  getMembershipResolution,
-  setActiveOrganization,
-  type MembershipResolutionResponse,
-} from './auth-api';
+import { setActiveOrganization } from './auth-api';
 import { AuthGuardSkeleton } from './auth-guard-skeleton';
+import type { MembershipResolutionResponse } from '@/features/organizations/organization-api';
+import { queryClient, trpc } from '@/lib/trpc';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 
@@ -31,7 +29,9 @@ export function OrganizationRoute() {
       setState({ status: 'loading' });
 
       try {
-        const resolution = await getMembershipResolution();
+        const resolution = await queryClient.fetchQuery(
+          trpc.organizations.membershipResolution.queryOptions(),
+        );
         const organization = resolution.organizations.find((org) => org.slug === organizationSlug);
 
         if (!organization) {
@@ -41,6 +41,7 @@ export function OrganizationRoute() {
 
         if (resolution.activeOrganizationId !== organization.id) {
           await setActiveOrganization({ organizationId: organization.id });
+          await queryClient.invalidateQueries();
         }
 
         if (!cancelled) {

@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
 import {
   AlertCircle,
@@ -8,25 +9,14 @@ import {
   RotateCcw,
   UserRound,
 } from 'lucide-react';
-import { getMembershipResolution } from '@/features/auth/auth-api';
-import {
-  getProjectDetail,
-  restoreProject,
-  type ProjectDetail,
-} from '@/features/projects/project-api';
 import { buildProjectSettingsPath, buildProjectsPath } from '@/features/projects/project-routing';
+import { queryClient, trpc } from '@/lib/trpc';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 
-type ProjectDetailState =
-  | { status: 'loading' }
-  | { status: 'available'; project: ProjectDetail }
-  | { status: 'unavailable' }
-  | { status: 'error' };
-
-function formatDate(value: string): string {
+function formatDate(value: string) {
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: 'medium',
   }).format(new Date(value));
@@ -34,44 +24,44 @@ function formatDate(value: string): string {
 
 export function ProjectDetailPage() {
   const { organizationSlug = '', projectSlug = '' } = useParams();
-  const [state, setState] = useState<ProjectDetailState>({ status: 'loading' });
-  const [currentRole, setCurrentRole] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const projectsPath = organizationSlug ? buildProjectsPath(organizationSlug) : '/';
+  const hasProjectIdentity = Boolean(organizationSlug && projectSlug);
 
-  useEffect(() => {
-    let cancelled = false;
+  const detailQuery = useQuery(
+    trpc.projects.detail.queryOptions(
+      { organizationSlug, projectSlug },
+      { enabled: hasProjectIdentity },
+    ),
+  );
+  const resolutionQuery = useQuery(
+    trpc.organizations.membershipResolution.queryOptions(undefined, {
+      enabled: Boolean(organizationSlug),
+    }),
+  );
+  const restoreProjectMutation = useMutation(
+    trpc.projects.restore.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries();
+      },
+      onError: (caughtError) => {
+        setActionError(caughtError.message || 'Unable to restore Project.');
+      },
+    }),
+  );
+  const organization = resolutionQuery.data?.organizations.find(
+    (org) => org.slug === organizationSlug,
+  );
+  const currentRole = organization?.role ?? null;
+  const result = restoreProjectMutation.data
+    ? { status: 'available' as const, project: restoreProjectMutation.data.project }
+    : detailQuery.data;
 
-    async function loadProject() {
-      if (!organizationSlug || !projectSlug) {
-        setState({ status: 'unavailable' });
-        return;
-      }
-
-      setState({ status: 'loading' });
-      setActionError(null);
-
-      try {
-        const [result, resolution] = await Promise.all([
-          getProjectDetail({ organizationSlug, projectSlug }),
-          getMembershipResolution(),
-        ]);
-        const organization = resolution.organizations.find((org) => org.slug === organizationSlug);
-        if (!cancelled) setState(result);
-        if (!cancelled) setCurrentRole(organization?.role ?? null);
-      } catch {
-        if (!cancelled) setState({ status: 'error' });
-      }
-    }
-
-    void loadProject();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [organizationSlug, projectSlug]);
-
-  if (state.status === 'loading') {
+  if (
+    hasProjectIdentity &&
+    (detailQuery.isPending || resolutionQuery.isPending) &&
+    !restoreProjectMutation.data
+  ) {
     return (
       <div className="mx-auto w-full max-w-5xl space-y-6">
         <Skeleton className="h-8 w-56" />
@@ -81,10 +71,10 @@ export function ProjectDetailPage() {
     );
   }
 
-  if (state.status === 'unavailable' || state.status === 'error') {
+  if (!result || result.status === 'unavailable' || detailQuery.error || resolutionQuery.error) {
     return (
       <div className="mx-auto w-full max-w-3xl space-y-4">
-        <Alert variant={state.status === 'error' ? 'destructive' : 'default'}>
+        <Alert variant={detailQuery.error || resolutionQuery.error ? 'destructive' : 'default'}>
           <AlertCircle className="size-4" />
           <AlertTitle>Project unavailable</AlertTitle>
           <AlertDescription>
@@ -98,24 +88,17 @@ export function ProjectDetailPage() {
     );
   }
 
-  const { project } = state;
+  const { project } = result;
   const settingsPath = organizationSlug
     ? buildProjectSettingsPath(organizationSlug, project.slug)
     : projectsPath;
   const canManage = currentRole === 'owner' || currentRole === 'admin';
 
-  const handleRestore = async () => {
+  const handleRestore = () => {
     if (!organizationSlug || !projectSlug || !canManage) return;
 
     setActionError(null);
-    try {
-      const restoredProject = await restoreProject({ organizationSlug, projectSlug });
-      setState({ status: 'available', project: restoredProject });
-    } catch (caughtError) {
-      setActionError(
-        caughtError instanceof Error ? caughtError.message : 'Unable to restore Project.',
-      );
-    }
+    restoreProjectMutation.mutate({ organizationSlug, projectSlug });
   };
 
   return (
@@ -155,7 +138,12 @@ export function ProjectDetailPage() {
             <Link to={projectsPath}>All Projects</Link>
           </Button>
           {project.archivedAt && canManage ? (
-            <Button type="button" variant="outline" onClick={() => void handleRestore()}>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={restoreProjectMutation.isPending}
+              onClick={handleRestore}
+            >
               <RotateCcw />
               Restore
             </Button>

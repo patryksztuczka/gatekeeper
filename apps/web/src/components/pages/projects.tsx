@@ -1,18 +1,13 @@
-import { useEffect, useState } from 'react';
-import type { FormEvent } from 'react';
+import { useState } from 'react';
+import type { SyntheticEvent } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { AlertCircle, Archive, CheckCircle2, Plus, RotateCcw } from 'lucide-react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
-import {
-  createProject,
-  getMembershipResolution,
-  listOrganizationMembers,
-  listProjects,
-  type OrganizationMemberListItem,
-  type ProjectListItem,
-} from '../../features/auth/auth-api';
 import { humanizeAuthError } from '../../features/auth/auth-errors';
 import { buildOrganizationPath, slugifyProjectName } from '../../features/auth/auth-routing';
-import { archiveProject, restoreProject } from '@/features/projects/project-api';
+import type { OrganizationMemberListItem } from '@/features/organizations/organization-api';
+import type { ProjectListItem } from '@/features/projects/project-api';
+import { queryClient, trpc } from '@/lib/trpc';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -26,11 +21,11 @@ function formatDate(value: string) {
   });
 }
 
-function canCreateProjects(role: string | null): boolean {
+function canCreateProjects(role: string | null) {
   return role === 'owner' || role === 'admin';
 }
 
-function isArchivedView(value: string | null): boolean {
+function isArchivedView(value: string | null) {
   return value === 'archived';
 }
 
@@ -38,12 +33,7 @@ export function ProjectsPage() {
   const { organizationSlug } = useParams();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [projects, setProjects] = useState<ProjectListItem[]>([]);
-  const [members, setMembers] = useState<OrganizationMemberListItem[]>([]);
-  const [currentRole, setCurrentRole] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [name, setName] = useState('');
@@ -51,35 +41,76 @@ export function ProjectsPage() {
   const [slug, setSlug] = useState('');
   const [projectOwnerMemberId, setProjectOwnerMemberId] = useState('');
   const archivedView = isArchivedView(searchParams.get('status'));
+  const projectStatus = archivedView ? 'archived' : 'active';
+  const hasOrganization = Boolean(organizationSlug);
 
-  useEffect(() => {
-    const refresh = async () => {
-      if (!organizationSlug) return;
+  const projectQuery = useQuery(
+    trpc.projects.list.queryOptions(
+      { organizationSlug: organizationSlug ?? '', status: projectStatus },
+      { enabled: hasOrganization },
+    ),
+  );
+  const memberQuery = useQuery(
+    trpc.organizations.members.queryOptions(
+      { organizationSlug: organizationSlug ?? '' },
+      { enabled: hasOrganization },
+    ),
+  );
+  const resolutionQuery = useQuery(
+    trpc.organizations.membershipResolution.queryOptions(undefined, { enabled: hasOrganization }),
+  );
+  const createProjectMutation = useMutation(
+    trpc.projects.create.mutationOptions({
+      onSuccess: (response) => {
+        void queryClient.invalidateQueries();
+        if (!organizationSlug) return;
 
-      setIsLoading(true);
-      setError(null);
-      try {
-        const [projectResponse, memberResponse, resolution] = await Promise.all([
-          listProjects(organizationSlug, archivedView ? 'archived' : 'active'),
-          listOrganizationMembers(organizationSlug),
-          getMembershipResolution(),
-        ]);
-        const organization = resolution.organizations.find((org) => org.slug === organizationSlug);
+        resetForm();
+        setIsModalOpen(false);
+        setStatus('Project created.');
+        navigate(buildOrganizationPath(organizationSlug, `/p/${response.project.slug}`));
+      },
+      onError: (caughtError) => {
+        setError(humanizeAuthError(null, caughtError.message, 'Unable to create Project.'));
+      },
+    }),
+  );
+  const archiveProjectMutation = useMutation(
+    trpc.projects.archive.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries();
+        setStatus('Project archived.');
+      },
+      onError: (caughtError) => {
+        setError(humanizeAuthError(null, caughtError.message, 'Unable to archive Project.'));
+      },
+    }),
+  );
+  const restoreProjectMutation = useMutation(
+    trpc.projects.restore.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries();
+        setStatus('Project restored.');
+      },
+      onError: (caughtError) => {
+        setError(humanizeAuthError(null, caughtError.message, 'Unable to restore Project.'));
+      },
+    }),
+  );
 
-        setProjects(projectResponse.projects);
-        setMembers(memberResponse.members);
-        setCurrentRole(organization?.role ?? null);
-      } catch (caughtError) {
-        const rawMessage =
-          caughtError instanceof Error ? caughtError.message : 'Unable to load Projects.';
-        setError(humanizeAuthError(null, rawMessage, 'Unable to load Projects.'));
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    void refresh();
-  }, [archivedView, organizationSlug]);
+  const projects = projectQuery.data?.projects ?? [];
+  const members: OrganizationMemberListItem[] = memberQuery.data?.members ?? [];
+  const organization = resolutionQuery.data?.organizations.find(
+    (org) => org.slug === organizationSlug,
+  );
+  const currentRole = organization?.role ?? null;
+  const loadError = projectQuery.error ?? memberQuery.error ?? resolutionQuery.error;
+  const displayError =
+    error ??
+    (loadError ? humanizeAuthError(null, loadError.message, 'Unable to load Projects.') : null);
+  const isLoading =
+    hasOrganization &&
+    (projectQuery.isPending || memberQuery.isPending || resolutionQuery.isPending);
 
   const resetForm = () => {
     setName('');
@@ -88,53 +119,31 @@ export function ProjectsPage() {
     setProjectOwnerMemberId('');
   };
 
-  const handleCreateProject = async (event: FormEvent<HTMLFormElement>) => {
+  const handleCreateProject = (event: SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!organizationSlug) return;
 
-    setIsCreating(true);
     setError(null);
     setStatus(null);
-    try {
-      const response = await createProject(organizationSlug, {
-        description,
-        name,
-        projectOwnerMemberId: projectOwnerMemberId || null,
-        slug,
-      });
-      resetForm();
-      setIsModalOpen(false);
-      setStatus('Project created.');
-      navigate(buildOrganizationPath(organizationSlug, `/p/${response.project.slug}`));
-    } catch (caughtError) {
-      const rawMessage =
-        caughtError instanceof Error ? caughtError.message : 'Unable to create Project.';
-      setError(humanizeAuthError(null, rawMessage, 'Unable to create Project.'));
-    } finally {
-      setIsCreating(false);
-    }
+    createProjectMutation.mutate({
+      description,
+      name,
+      organizationSlug,
+      projectOwnerMemberId: projectOwnerMemberId || null,
+      slug,
+    });
   };
 
-  const handleArchiveStateChange = async (project: ProjectListItem) => {
+  const handleArchiveStateChange = (project: ProjectListItem) => {
     if (!organizationSlug) return;
 
     setError(null);
     setStatus(null);
-    try {
-      if (archivedView) {
-        await restoreProject({ organizationSlug, projectSlug: project.slug });
-        setProjects((currentProjects) => currentProjects.filter(({ id }) => id !== project.id));
-        setStatus('Project restored.');
-      } else {
-        await archiveProject({ organizationSlug, projectSlug: project.slug });
-        setProjects((currentProjects) => currentProjects.filter(({ id }) => id !== project.id));
-        setStatus('Project archived.');
-      }
-    } catch (caughtError) {
-      const action = archivedView ? 'restore' : 'archive';
-      const rawMessage =
-        caughtError instanceof Error ? caughtError.message : `Unable to ${action} Project.`;
-      setError(humanizeAuthError(null, rawMessage, `Unable to ${action} Project.`));
+
+    if (archivedView) {
+      restoreProjectMutation.mutate({ organizationSlug, projectSlug: project.slug });
+    } else {
+      archiveProjectMutation.mutate({ organizationSlug, projectSlug: project.slug });
     }
   };
 
@@ -179,11 +188,11 @@ export function ProjectsPage() {
         </div>
       </header>
 
-      {error ? (
+      {displayError ? (
         <Alert variant="destructive">
           <AlertCircle />
           <AlertTitle>Something went wrong</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{displayError}</AlertDescription>
         </Alert>
       ) : null}
       {status ? (
@@ -242,7 +251,8 @@ export function ProjectsPage() {
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => void handleArchiveStateChange(project)}
+                    disabled={archiveProjectMutation.isPending || restoreProjectMutation.isPending}
+                    onClick={() => handleArchiveStateChange(project)}
                   >
                     {archivedView ? <RotateCcw /> : <Archive />}
                     {archivedView ? 'Restore' : 'Archive'}
@@ -321,8 +331,8 @@ export function ProjectsPage() {
                 >
                   Cancel
                 </Button>
-                <Button type="submit" disabled={isCreating}>
-                  {isCreating ? 'Creating...' : 'Create Project'}
+                <Button type="submit" disabled={createProjectMutation.isPending}>
+                  {createProjectMutation.isPending ? 'Creating...' : 'Create Project'}
                 </Button>
               </div>
             </form>

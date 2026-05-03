@@ -1,10 +1,10 @@
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import app from '../src/index';
 import { db } from '../src/db/client';
 import { organizations, users } from '../src/db/schema';
 import { auth } from '../src/lib/auth';
+import { callTRPC } from './trpc-test-utils';
 
 const authHeaders = {
   origin: 'http://localhost:5173',
@@ -107,15 +107,7 @@ async function createSignedInMember(input: {
 }
 
 async function getPolicyRequest(organizationSlug: string, headers: Headers) {
-  const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/control-approval-policy`,
-    { headers },
-  );
-
-  return {
-    body: (await response.json()) as Record<string, unknown>,
-    status: response.status,
-  };
+  return callTRPC(headers, (caller) => caller.controls.approvalPolicy({ organizationSlug }));
 }
 
 async function updatePolicyRequest(
@@ -123,19 +115,9 @@ async function updatePolicyRequest(
   headers: Headers,
   body: Record<string, unknown>,
 ) {
-  const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/control-approval-policy`,
-    {
-      body: JSON.stringify(body),
-      headers,
-      method: 'PATCH',
-    },
+  return callTRPC(headers, (caller) =>
+    caller.controls.updateApprovalPolicy({ ...body, organizationSlug } as never),
   );
-
-  return {
-    body: (await response.json()) as Record<string, unknown>,
-    status: response.status,
-  };
 }
 
 beforeEach(() => {

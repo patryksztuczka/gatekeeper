@@ -1,52 +1,9 @@
 import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm';
 import { db } from '../db/client';
 import { members, organizations, projects, users } from '../db/schema';
-
-export type ProjectListItem = {
-  archivedAt: string | null;
-  createdAt: string;
-  description: string;
-  id: string;
-  name: string;
-  projectOwner: {
-    email: string;
-    id: string;
-    name: string;
-  } | null;
-  slug: string;
-};
+import type { OrganizationMembership } from '../types/organization-types';
 
 export type ProjectListStatus = 'active' | 'archived';
-
-export type ProjectDetailResponse = {
-  id: string;
-  name: string;
-  description: string;
-  slug: string;
-  archivedAt: string | null;
-  createdAt: string;
-  projectOwner: {
-    email: string;
-    id: string;
-    name: string;
-    role: string;
-  } | null;
-};
-
-export type OrganizationMemberListItem = {
-  email: string;
-  id: string;
-  name: string;
-  role: string;
-};
-
-export type OrganizationMembership = {
-  id: string;
-  organizationId: string;
-  organizationName: string;
-  organizationSlug: string;
-  role: string;
-};
 
 type CreateProjectInput = {
   description: string;
@@ -64,10 +21,7 @@ type UpdateProjectInput = {
 const editableOrganizationRoles = new Set(['owner', 'admin']);
 const projectSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-export async function getOrganizationMembership(
-  organizationSlug: string,
-  userId: string,
-): Promise<OrganizationMembership | null> {
+export async function getOrganizationMembership(organizationSlug: string, userId: string) {
   return db
     .select({
       id: members.id,
@@ -83,13 +37,11 @@ export async function getOrganizationMembership(
     .then((rows) => rows[0] ?? null);
 }
 
-export function canManageProjects(role: string): boolean {
+export function canManageProjects(role: string) {
   return editableOrganizationRoles.has(role);
 }
 
-export async function listOrganizationMembers(
-  organizationId: string,
-): Promise<OrganizationMemberListItem[]> {
+export async function listOrganizationMembers(organizationId: string) {
   return db
     .select({
       email: users.email,
@@ -103,10 +55,7 @@ export async function listOrganizationMembers(
     .orderBy(asc(users.name), asc(users.email));
 }
 
-export async function listProjects(
-  organizationId: string,
-  status: ProjectListStatus,
-): Promise<ProjectListItem[]> {
+export async function listProjects(organizationId: string, status: ProjectListStatus) {
   const rows = await db
     .select({
       archivedAt: projects.archivedAt,
@@ -149,7 +98,7 @@ export async function getProjectDetailForMember(input: {
   organizationSlug: string;
   projectSlug: string;
   userId: string;
-}): Promise<ProjectDetailResponse | null> {
+}) {
   const membership = await getOrganizationMembership(input.organizationSlug, input.userId);
 
   if (!membership) {
@@ -162,7 +111,7 @@ export async function getProjectDetailForMember(input: {
 export async function getProjectDetailForMembership(
   membership: OrganizationMembership,
   projectSlug: string,
-): Promise<ProjectDetailResponse | null> {
+) {
   const project = await db
     .select()
     .from(projects)
@@ -207,10 +156,11 @@ export async function getProjectDetailForMembership(
   };
 }
 
-export async function createProject(
-  organizationId: string,
-  input: CreateProjectInput,
-): Promise<ProjectListItem> {
+export type ProjectDetailResponse = NonNullable<
+  Awaited<ReturnType<typeof getProjectDetailForMembership>>
+>;
+
+export async function createProject(organizationId: string, input: CreateProjectInput) {
   validateProjectInput(input);
 
   const existingProject = await db
@@ -260,7 +210,7 @@ export async function setProjectArchivedForMembership(input: {
   archived: boolean;
   membership: OrganizationMembership;
   projectSlug: string;
-}): Promise<ProjectDetailResponse | null> {
+}) {
   const existingProject = await db
     .select({ id: projects.id })
     .from(projects)
@@ -292,7 +242,7 @@ export async function updateProjectForMembership(input: {
   membership: OrganizationMembership;
   projectSlug: string;
   updates: UpdateProjectInput;
-}): Promise<ProjectDetailResponse | null> {
+}) {
   validateProjectUpdateInput(input.updates);
 
   const existingProject = await db
@@ -342,7 +292,7 @@ export async function updateProjectForMembership(input: {
   return getProjectDetailForMembership(input.membership, input.projectSlug);
 }
 
-export function slugifyProjectName(value: string): string {
+export function slugifyProjectName(value: string) {
   const normalizedValue = Array.from(value.normalize('NFKD'))
     .filter((character) => character.charCodeAt(0) <= 0x7f)
     .join('');
@@ -387,7 +337,7 @@ function validateProjectNameAndDescription(name: string, description: string) {
   }
 }
 
-export function normalizeProjectCreateBody(body: unknown): CreateProjectInput {
+export function normalizeProjectCreateBody(body: unknown) {
   const value = typeof body === 'object' && body !== null ? body : {};
   const record = value as Record<string, unknown>;
 
@@ -402,7 +352,7 @@ export function normalizeProjectCreateBody(body: unknown): CreateProjectInput {
   };
 }
 
-export function normalizeProjectUpdateBody(body: unknown): UpdateProjectInput {
+export function normalizeProjectUpdateBody(body: unknown) {
   const value = typeof body === 'object' && body !== null ? body : {};
   const record = value as Record<string, unknown>;
 

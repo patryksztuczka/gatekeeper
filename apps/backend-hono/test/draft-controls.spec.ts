@@ -1,7 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import app from '../src/index';
 import { db } from '../src/db/client';
 import {
   controlPublishRequestApprovals,
@@ -11,6 +10,7 @@ import {
   users,
 } from '../src/db/schema';
 import { auth } from '../src/lib/auth';
+import { callTRPC } from './trpc-test-utils';
 
 const authHeaders = {
   origin: 'http://localhost:5173',
@@ -117,33 +117,11 @@ async function createDraftControlRequest(
   headers: Headers,
   body: Record<string, unknown>,
 ) {
-  const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/controls/drafts`,
-    {
-      body: JSON.stringify(body),
-      headers,
-      method: 'POST',
-    },
+  return callTRPC(
+    headers,
+    (caller) => caller.controls.createDraft({ ...body, organizationSlug } as never),
+    201,
   );
-
-  return {
-    body: (await response.json()) as Record<string, unknown>,
-    status: response.status,
-  };
-}
-
-function toQueryString(params: Record<string, string | undefined>) {
-  const query = new URLSearchParams();
-
-  for (const [key, value] of Object.entries(params)) {
-    if (value) {
-      query.set(key, value);
-    }
-  }
-
-  const value = query.toString();
-
-  return value ? `?${value}` : '';
 }
 
 async function listDraftControlsRequest(
@@ -151,15 +129,9 @@ async function listDraftControlsRequest(
   headers: Headers,
   query: Record<string, string | undefined> = {},
 ) {
-  const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/controls/drafts${toQueryString(query)}`,
-    { headers },
+  return callTRPC(headers, (caller) =>
+    caller.controls.listDrafts({ organizationSlug, search: query.q } as never),
   );
-
-  return {
-    body: (await response.json()) as Record<string, unknown>,
-    status: response.status,
-  };
 }
 
 const completePublishBody = {
@@ -176,19 +148,11 @@ async function publishDraftControlRequest(
   headers: Headers,
   body: Record<string, unknown> = completePublishBody,
 ) {
-  const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/controls/drafts/${draftControlId}/publish`,
-    {
-      body: JSON.stringify(body),
-      headers,
-      method: 'POST',
-    },
+  return callTRPC(
+    headers,
+    (caller) => caller.controls.publishDraft({ ...body, draftControlId, organizationSlug } as never),
+    201,
   );
-
-  return {
-    body: (await response.json()) as Record<string, unknown>,
-    status: response.status,
-  };
 }
 
 async function submitDraftControlPublishRequest(
@@ -197,19 +161,12 @@ async function submitDraftControlPublishRequest(
   headers: Headers,
   body: Record<string, unknown> = completePublishBody,
 ) {
-  const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/controls/drafts/${draftControlId}/publish-requests`,
-    {
-      body: JSON.stringify(body),
-      headers,
-      method: 'POST',
-    },
+  return callTRPC(
+    headers,
+    (caller) =>
+      caller.controls.submitDraftPublishRequest({ ...body, draftControlId, organizationSlug } as never),
+    201,
   );
-
-  return {
-    body: (await response.json()) as Record<string, unknown>,
-    status: response.status,
-  };
 }
 
 async function listControlsRequest(
@@ -217,17 +174,9 @@ async function listControlsRequest(
   headers: Headers,
   query: Record<string, string | undefined> = {},
 ) {
-  const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/controls${toQueryString(query)}`,
-    {
-      headers,
-    },
+  return callTRPC(headers, (caller) =>
+    caller.controls.list({ ...query, organizationSlug, search: query.q } as never),
   );
-
-  return {
-    body: (await response.json()) as Record<string, unknown>,
-    status: response.status,
-  };
 }
 
 async function archiveControlRequest(
@@ -236,19 +185,9 @@ async function archiveControlRequest(
   headers: Headers,
   body: Record<string, unknown> = {},
 ) {
-  const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/controls/${controlId}/archive`,
-    {
-      body: JSON.stringify(body),
-      headers,
-      method: 'PATCH',
-    },
+  return callTRPC(headers, (caller) =>
+    caller.controls.archive({ ...body, controlId, organizationSlug } as never),
   );
-
-  return {
-    body: (await response.json()) as Record<string, unknown>,
-    status: response.status,
-  };
 }
 
 async function restoreControlRequest(
@@ -256,18 +195,7 @@ async function restoreControlRequest(
   controlId: string,
   headers: Headers,
 ) {
-  const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/controls/${controlId}/restore`,
-    {
-      headers,
-      method: 'PATCH',
-    },
-  );
-
-  return {
-    body: (await response.json()) as Record<string, unknown>,
-    status: response.status,
-  };
+  return callTRPC(headers, (caller) => caller.controls.restore({ controlId, organizationSlug }));
 }
 
 async function cancelDraftControlRequest(
@@ -275,30 +203,13 @@ async function cancelDraftControlRequest(
   draftControlId: string,
   headers: Headers,
 ) {
-  const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/controls/drafts/${draftControlId}`,
-    {
-      headers,
-      method: 'DELETE',
-    },
+  return callTRPC(headers, (caller) =>
+    caller.controls.cancelDraft({ draftControlId, organizationSlug }),
   );
-
-  return {
-    body: (await response.json()) as Record<string, unknown>,
-    status: response.status,
-  };
 }
 
 async function getControlRequest(organizationSlug: string, controlId: string, headers: Headers) {
-  const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/controls/${controlId}`,
-    { headers },
-  );
-
-  return {
-    body: (await response.json()) as Record<string, unknown>,
-    status: response.status,
-  };
+  return callTRPC(headers, (caller) => caller.controls.detail({ controlId, organizationSlug }));
 }
 
 async function createControlProposedUpdateRequest(
@@ -307,43 +218,19 @@ async function createControlProposedUpdateRequest(
   headers: Headers,
   body: Record<string, unknown>,
 ) {
-  const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/controls/${controlId}/proposed-updates`,
-    {
-      body: JSON.stringify(body),
-      headers,
-      method: 'POST',
-    },
+  return callTRPC(
+    headers,
+    (caller) => caller.controls.createProposedUpdate({ ...body, controlId, organizationSlug } as never),
+    201,
   );
-
-  return {
-    body: (await response.json()) as Record<string, unknown>,
-    status: response.status,
-  };
 }
 
 async function listControlProposedUpdatesRequest(organizationSlug: string, headers: Headers) {
-  const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/controls/proposed-updates`,
-    { headers },
-  );
-
-  return {
-    body: (await response.json()) as Record<string, unknown>,
-    status: response.status,
-  };
+  return callTRPC(headers, (caller) => caller.controls.listProposedUpdates({ organizationSlug }));
 }
 
 async function listControlPublishRequestsRequest(organizationSlug: string, headers: Headers) {
-  const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/controls/publish-requests`,
-    { headers },
-  );
-
-  return {
-    body: (await response.json()) as Record<string, unknown>,
-    status: response.status,
-  };
+  return callTRPC(headers, (caller) => caller.controls.listPublishRequests({ organizationSlug }));
 }
 
 async function approveControlPublishRequest(
@@ -351,18 +238,9 @@ async function approveControlPublishRequest(
   publishRequestId: string,
   headers: Headers,
 ) {
-  const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/controls/publish-requests/${publishRequestId}/approve`,
-    {
-      headers,
-      method: 'POST',
-    },
+  return callTRPC(headers, (caller) =>
+    caller.controls.approvePublishRequest({ organizationSlug, publishRequestId }),
   );
-
-  return {
-    body: (await response.json()) as Record<string, unknown>,
-    status: response.status,
-  };
 }
 
 async function rejectControlPublishRequest(
@@ -371,19 +249,9 @@ async function rejectControlPublishRequest(
   headers: Headers,
   body: Record<string, unknown>,
 ) {
-  const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/controls/publish-requests/${publishRequestId}/reject`,
-    {
-      body: JSON.stringify(body),
-      headers,
-      method: 'POST',
-    },
+  return callTRPC(headers, (caller) =>
+    caller.controls.rejectPublishRequest({ ...body, organizationSlug, publishRequestId } as never),
   );
-
-  return {
-    body: (await response.json()) as Record<string, unknown>,
-    status: response.status,
-  };
 }
 
 async function withdrawControlPublishRequest(
@@ -391,18 +259,9 @@ async function withdrawControlPublishRequest(
   publishRequestId: string,
   headers: Headers,
 ) {
-  const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/controls/publish-requests/${publishRequestId}/withdraw`,
-    {
-      headers,
-      method: 'POST',
-    },
+  return callTRPC(headers, (caller) =>
+    caller.controls.withdrawPublishRequest({ organizationSlug, publishRequestId }),
   );
-
-  return {
-    body: (await response.json()) as Record<string, unknown>,
-    status: response.status,
-  };
 }
 
 async function publishControlPublishRequest(
@@ -410,18 +269,11 @@ async function publishControlPublishRequest(
   publishRequestId: string,
   headers: Headers,
 ) {
-  const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/controls/publish-requests/${publishRequestId}/publish`,
-    {
-      headers,
-      method: 'POST',
-    },
+  return callTRPC(
+    headers,
+    (caller) => caller.controls.publishPublishRequest({ organizationSlug, publishRequestId }),
+    201,
   );
-
-  return {
-    body: (await response.json()) as Record<string, unknown>,
-    status: response.status,
-  };
 }
 
 async function updateControlApprovalPolicyRequest(
@@ -429,19 +281,9 @@ async function updateControlApprovalPolicyRequest(
   headers: Headers,
   body: Record<string, unknown>,
 ) {
-  const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/control-approval-policy`,
-    {
-      body: JSON.stringify(body),
-      headers,
-      method: 'PATCH',
-    },
+  return callTRPC(headers, (caller) =>
+    caller.controls.updateApprovalPolicy({ ...body, organizationSlug } as never),
   );
-
-  return {
-    body: (await response.json()) as Record<string, unknown>,
-    status: response.status,
-  };
 }
 
 async function enableControlApprovalPolicy(organizationSlug: string, headers: Headers) {
@@ -459,18 +301,12 @@ async function publishControlProposedUpdateRequest(
   proposedUpdateId: string,
   headers: Headers,
 ) {
-  const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/controls/${controlId}/proposed-updates/${proposedUpdateId}/publish`,
-    {
-      headers,
-      method: 'POST',
-    },
+  return callTRPC(
+    headers,
+    (caller) =>
+      caller.controls.publishProposedUpdate({ controlId, organizationSlug, proposedUpdateId }),
+    201,
   );
-
-  return {
-    body: (await response.json()) as Record<string, unknown>,
-    status: response.status,
-  };
 }
 
 async function submitControlProposedUpdatePublishRequest(
@@ -479,18 +315,16 @@ async function submitControlProposedUpdatePublishRequest(
   proposedUpdateId: string,
   headers: Headers,
 ) {
-  const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/controls/${controlId}/proposed-updates/${proposedUpdateId}/publish-requests`,
-    {
-      headers,
-      method: 'POST',
-    },
+  return callTRPC(
+    headers,
+    (caller) =>
+      caller.controls.submitProposedUpdatePublishRequest({
+        controlId,
+        organizationSlug,
+        proposedUpdateId,
+      }),
+    201,
   );
-
-  return {
-    body: (await response.json()) as Record<string, unknown>,
-    status: response.status,
-  };
 }
 
 beforeEach(() => {

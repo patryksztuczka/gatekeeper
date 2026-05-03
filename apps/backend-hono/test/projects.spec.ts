@@ -1,10 +1,10 @@
 import { and, eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import app from '../src/index';
 import { db } from '../src/db/client';
 import { members, projects, users } from '../src/db/schema';
 import { auth } from '../src/lib/auth';
+import { callTRPC } from './trpc-test-utils';
 
 const authHeaders = {
   origin: 'http://localhost:5173',
@@ -83,19 +83,11 @@ async function createProjectRequest(
   headers: Headers,
   body: Record<string, unknown>,
 ) {
-  const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/projects`,
-    {
-      body: JSON.stringify(body),
-      headers,
-      method: 'POST',
-    },
+  return callTRPC(
+    headers,
+    (caller) => caller.projects.create({ ...body, organizationSlug } as never),
+    201,
   );
-
-  return {
-    body: (await response.json()) as Record<string, unknown>,
-    status: response.status,
-  };
 }
 
 async function archiveProjectRequest(
@@ -103,15 +95,9 @@ async function archiveProjectRequest(
   projectSlug: string,
   headers: Headers,
 ) {
-  const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/projects/${projectSlug}/archive`,
-    { headers, method: 'PATCH' },
+  return callTRPC(headers, (caller) =>
+    caller.projects.archive({ organizationSlug, projectSlug }),
   );
-
-  return {
-    body: (await response.json()) as Record<string, unknown>,
-    status: response.status,
-  };
 }
 
 async function restoreProjectRequest(
@@ -119,15 +105,9 @@ async function restoreProjectRequest(
   projectSlug: string,
   headers: Headers,
 ) {
-  const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/projects/${projectSlug}/restore`,
-    { headers, method: 'PATCH' },
+  return callTRPC(headers, (caller) =>
+    caller.projects.restore({ organizationSlug, projectSlug }),
   );
-
-  return {
-    body: (await response.json()) as Record<string, unknown>,
-    status: response.status,
-  };
 }
 
 async function listProjectsRequest(
@@ -135,16 +115,7 @@ async function listProjectsRequest(
   headers: Headers,
   status: 'active' | 'archived' = 'active',
 ) {
-  const query = status === 'archived' ? '?status=archived' : '';
-  const response = await app.request(
-    `http://example.com/api/organizations/${organizationSlug}/projects${query}`,
-    { headers },
-  );
-
-  return {
-    body: (await response.json()) as Record<string, unknown>,
-    status: response.status,
-  };
+  return callTRPC(headers, (caller) => caller.projects.list({ organizationSlug, status }));
 }
 
 beforeEach(() => {
@@ -197,13 +168,10 @@ describe('organization projects', () => {
       slug: 'soc-2-readiness',
     });
 
-    const listResponse = await app.request(
-      `http://example.com/api/organizations/${organization.slug}/projects`,
-      { headers },
-    );
+    const listResponse = await listProjectsRequest(organization.slug, headers);
 
     expect(listResponse.status).toBe(200);
-    expect(await listResponse.json()).toMatchObject({
+    expect(listResponse.body).toMatchObject({
       projects: [
         {
           name: 'SOC 2 Readiness',
@@ -246,14 +214,11 @@ describe('organization projects', () => {
       name: 'Member Project',
       slug: 'member-project',
     });
-    const listResponse = await app.request(
-      `http://example.com/api/organizations/${organization.slug}/projects`,
-      { headers: memberHeaders },
-    );
+    const listResponse = await listProjectsRequest(organization.slug, memberHeaders);
 
     expect(forbiddenCreateResponse.status).toBe(403);
     expect(listResponse.status).toBe(200);
-    expect(await listResponse.json()).toMatchObject({
+    expect(listResponse.body).toMatchObject({
       projects: [{ slug: 'vendor-review' }],
     });
   });

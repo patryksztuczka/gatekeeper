@@ -16,7 +16,7 @@ Organization slugs reserve top-level public route names such as `sign-in`, `sign
 
 Project pages use `/:organizationSlug/projects` for the Projects list and `/:organizationSlug/p/:projectSlug` for Project detail. The `/p` segment keeps Project detail URLs compact while avoiding collisions with organization-level pages such as settings, audit, controls, checklists, exceptions, and projects.
 
-Project API endpoints also take the organization slug explicitly, using paths such as `/api/organizations/:organizationSlug/projects`, and validate membership and role against that Organization rather than relying only on the session's active organization.
+Project API calls also take the organization slug explicitly, and validate membership and role against that Organization rather than relying only on the session's active organization.
 
 When an authenticated user visits `/`, the app resolves their organization membership and redirects to their active organization route when possible; otherwise it shows the existing organization choice or creation flow.
 
