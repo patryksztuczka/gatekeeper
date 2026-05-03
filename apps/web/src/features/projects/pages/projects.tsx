@@ -4,14 +4,14 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { AlertCircle, Archive, CheckCircle2, Plus, RotateCcw } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
-import { humanizeAuthError } from '../../features/auth/auth-errors';
-import { buildOrganizationPath, slugifyProjectName } from '../../features/auth/auth-routing';
-import type { OrganizationMemberListItem } from '@/features/organizations/organization-api';
-import type { ProjectListItem } from '@/features/projects/project-api';
+import { humanizeAuthError } from '@/features/auth/api/auth-errors';
+import { buildOrganizationPath, slugifyProjectName } from '@/features/auth/routing/auth-routing';
+import type { OrganizationMemberListItem } from '@/features/organizations/api/organization-api';
+import type { ProjectListItem } from '@/features/projects/api/project-api';
 import {
   createProjectFormSchema,
   type CreateProjectFormValues,
-} from '@/features/projects/project-form-schemas';
+} from '@/features/projects/schemas/project-form-schemas';
 import { queryClient, trpc } from '@/lib/trpc';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';

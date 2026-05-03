@@ -2,11 +2,11 @@ import { useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { Link, useSearchParams } from 'react-router';
-import { resetPassword } from '../../features/auth/auth-api';
+import { resetPassword } from '@/features/auth/api/auth-api';
 import {
   resetPasswordFormSchema,
   type ResetPasswordFormValues,
-} from '../../features/auth/auth-form-schemas';
+} from '@/features/auth/schemas/auth-form-schemas';
 
 export function ResetPasswordPage() {
   const [searchParams] = useSearchParams();

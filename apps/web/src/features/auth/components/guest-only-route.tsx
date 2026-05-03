@@ -1,5 +1,5 @@
 import { Navigate, Outlet } from 'react-router';
-import { useSession } from './auth-client';
+import { useSession } from '@/features/auth/api/auth-client';
 import { AuthGuardSkeleton } from './auth-guard-skeleton';
 
 export function GuestOnlyRoute() {

@@ -3,7 +3,7 @@ import {
   buildSignInLink,
   buildVerifyEmailLink,
   getVerificationCallbackState,
-} from '../../features/auth/auth-routing';
+} from '@/features/auth/routing/auth-routing';
 
 export function VerifyEmailCallbackPage() {
   const [searchParams] = useSearchParams();

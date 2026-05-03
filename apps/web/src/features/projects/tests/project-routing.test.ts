@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildProjectPath, buildProjectSettingsPath, buildProjectsPath } from './project-routing';
+import {
+  buildProjectPath,
+  buildProjectSettingsPath,
+  buildProjectsPath,
+} from '@/features/projects/routing/project-routing';
 
 describe('project routing helpers', () => {
   it('builds organization-local Project routes', () => {

@@ -9,7 +9,10 @@ import {
   RotateCcw,
   UserRound,
 } from 'lucide-react';
-import { buildProjectSettingsPath, buildProjectsPath } from '@/features/projects/project-routing';
+import {
+  buildProjectSettingsPath,
+  buildProjectsPath,
+} from '@/features/projects/routing/project-routing';
 import { queryClient, trpc } from '@/lib/trpc';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';

@@ -7,14 +7,14 @@ import {
   getAuthErrorCode,
   getAuthErrorMessage,
   humanizeAuthError,
-} from '../../features/auth/auth-errors';
-import { signUp } from '../../features/auth/auth-client';
-import { signUpFormSchema, type SignUpFormValues } from '../../features/auth/auth-form-schemas';
+} from '@/features/auth/api/auth-errors';
+import { signUp } from '@/features/auth/api/auth-client';
+import { signUpFormSchema, type SignUpFormValues } from '@/features/auth/schemas/auth-form-schemas';
 import {
   buildEmailVerificationCallbackUrl,
   buildSignInLink,
   buildVerifyEmailLink,
-} from '../../features/auth/auth-routing';
+} from '@/features/auth/routing/auth-routing';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';

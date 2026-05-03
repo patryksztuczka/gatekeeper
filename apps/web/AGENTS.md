@@ -11,9 +11,10 @@ This node covers React pages, routing, API consumption, mutation patterns, and U
 - `src/App.tsx` wraps the router with app providers.
 - `src/providers/router.tsx` owns route registration.
 - `src/lib/trpc.ts` owns the singleton `QueryClient` and tRPC client.
-- `src/features/auth/auth-client.ts` owns the Better Auth React client and backend base URL.
-- `src/features/auth/auth-api.ts` contains existing REST helpers that have not moved to tRPC yet.
-- `src/components/pages/*` contains route-level pages.
+- `src/features/auth/api/auth-client.ts` owns the Better Auth React client and backend base URL.
+- `src/features/auth/api/auth-api.ts` contains existing REST helpers that have not moved to tRPC yet.
+- Feature folders use `api/`, `schemas/`, `routing/`, `components/`, `pages/`, and `tests/` as needed.
+- `src/features/*/pages/*` contains route-level pages owned by each feature.
 
 ## Current API Pattern
 

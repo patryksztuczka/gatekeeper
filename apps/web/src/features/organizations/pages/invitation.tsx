@@ -1,14 +1,14 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router';
-import { acceptOrganizationInvitation } from '../../features/auth/auth-api';
-import { signOut } from '../../features/auth/auth-client';
+import { acceptOrganizationInvitation } from '@/features/auth/api/auth-api';
+import { signOut } from '@/features/auth/api/auth-client';
 import {
   buildSignInLink,
   buildSignUpLink,
   buildVerifyEmailLink,
-} from '../../features/auth/auth-routing';
-import type { InvitationEntryResponse } from '../../features/organizations/organization-api';
+} from '@/features/auth/routing/auth-routing';
+import type { InvitationEntryResponse } from '@/features/organizations/api/organization-api';
 import { queryClient, trpc } from '@/lib/trpc';
 
 const statusMessages: Record<

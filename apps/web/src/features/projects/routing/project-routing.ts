@@ -1,4 +1,4 @@
-import { buildOrganizationPath } from '../auth/auth-routing';
+import { buildOrganizationPath } from '@/features/auth/routing/auth-routing';
 
 export function buildProjectPath(organizationSlug: string, projectSlug: string): string {
   return buildOrganizationPath(organizationSlug, `/p/${projectSlug}`);

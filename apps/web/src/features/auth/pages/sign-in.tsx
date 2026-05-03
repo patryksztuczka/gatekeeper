@@ -7,10 +7,10 @@ import {
   getAuthErrorCode,
   getAuthErrorMessage,
   humanizeAuthError,
-} from '../../features/auth/auth-errors';
-import { signIn } from '../../features/auth/auth-client';
-import { signInFormSchema, type SignInFormValues } from '../../features/auth/auth-form-schemas';
-import { buildSignUpLink, buildVerifyEmailLink } from '../../features/auth/auth-routing';
+} from '@/features/auth/api/auth-errors';
+import { signIn } from '@/features/auth/api/auth-client';
+import { signInFormSchema, type SignInFormValues } from '@/features/auth/schemas/auth-form-schemas';
+import { buildSignUpLink, buildVerifyEmailLink } from '@/features/auth/routing/auth-routing';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';

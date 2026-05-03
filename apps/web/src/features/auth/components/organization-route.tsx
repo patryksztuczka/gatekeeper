@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, Navigate, Outlet, useParams } from 'react-router';
-import { setActiveOrganization } from './auth-api';
+import { setActiveOrganization } from '@/features/auth/api/auth-api';
 import { AuthGuardSkeleton } from './auth-guard-skeleton';
-import type { MembershipResolutionResponse } from '@/features/organizations/organization-api';
+import type { MembershipResolutionResponse } from '@/features/organizations/api/organization-api';
 import { queryClient, trpc } from '@/lib/trpc';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';

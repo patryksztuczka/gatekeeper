@@ -2,16 +2,16 @@ import { useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { Link, useSearchParams } from 'react-router';
-import { sendVerificationEmail } from '../../features/auth/auth-api';
+import { sendVerificationEmail } from '@/features/auth/api/auth-api';
 import {
   verifyEmailFormSchema,
   type VerifyEmailFormValues,
-} from '../../features/auth/auth-form-schemas';
+} from '@/features/auth/schemas/auth-form-schemas';
 import {
   buildEmailVerificationCallbackUrl,
   buildSignInLink,
   buildSignUpLink,
-} from '../../features/auth/auth-routing';
+} from '@/features/auth/routing/auth-routing';
 
 export function VerifyEmailPage() {
   const [searchParams] = useSearchParams();

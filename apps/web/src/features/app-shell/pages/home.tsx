@@ -4,19 +4,19 @@ import { useQuery } from '@tanstack/react-query';
 import { AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { Link, Navigate, useParams } from 'react-router';
-import { acceptOrganizationInvitation, createOrganization } from '../../features/auth/auth-api';
-import { humanizeAuthError } from '../../features/auth/auth-errors';
+import { acceptOrganizationInvitation, createOrganization } from '@/features/auth/api/auth-api';
+import { humanizeAuthError } from '@/features/auth/api/auth-errors';
 import {
   buildOrganizationPath,
   generateOrganizationSlug,
   getPostLoginView,
   isReservedOrganizationSlug,
   slugifyOrganizationName,
-} from '../../features/auth/auth-routing';
+} from '@/features/auth/routing/auth-routing';
 import {
   createOrganizationFormSchema,
   type CreateOrganizationFormValues,
-} from '@/features/organizations/organization-form-schemas';
+} from '@/features/organizations/schemas/organization-form-schemas';
 import { queryClient, trpc } from '@/lib/trpc';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';

@@ -3,13 +3,13 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { AlertCircle, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { Link, useSearchParams } from 'react-router';
-import { requestPasswordReset } from '../../features/auth/auth-api';
-import { humanizeAuthError } from '../../features/auth/auth-errors';
+import { requestPasswordReset } from '@/features/auth/api/auth-api';
+import { humanizeAuthError } from '@/features/auth/api/auth-errors';
 import {
   forgotPasswordFormSchema,
   type ForgotPasswordFormValues,
-} from '../../features/auth/auth-form-schemas';
-import { buildPasswordResetCallbackUrl } from '../../features/auth/auth-routing';
+} from '@/features/auth/schemas/auth-form-schemas';
+import { buildPasswordResetCallbackUrl } from '@/features/auth/routing/auth-routing';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';

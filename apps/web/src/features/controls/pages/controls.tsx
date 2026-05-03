@@ -3,13 +3,13 @@ import type { SyntheticEvent } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { AlertCircle, Archive, CheckCircle2, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import { useParams, useSearchParams } from 'react-router';
-import { humanizeAuthError } from '../../features/auth/auth-errors';
+import { humanizeAuthError } from '@/features/auth/api/auth-errors';
 import type {
   ControlListItem,
   ControlProposedUpdateListItem,
   ControlPublishRequestListItem,
   DraftControlListItem,
-} from '@/features/controls/control-api';
+} from '@/features/controls/api/control-api';
 import { queryClient, trpc } from '@/lib/trpc';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';

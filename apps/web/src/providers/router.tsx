@@ -1,9 +1,9 @@
 import { createBrowserRouter, RouterProvider } from 'react-router';
 import { AuthLayout } from '../components/layouts/auth-layout';
 import { DashboardLayout } from '../components/layouts/dashboard-layout';
-import { GuestOnlyRoute } from '../features/auth/guest-only-route';
-import { OrganizationRoute } from '../features/auth/organization-route';
-import { ProtectedRoute } from '../features/auth/protected-route';
+import { GuestOnlyRoute } from '../features/auth/components/guest-only-route';
+import { OrganizationRoute } from '../features/auth/components/organization-route';
+import { ProtectedRoute } from '../features/auth/components/protected-route';
 
 const router = createBrowserRouter([
   {
@@ -17,14 +17,14 @@ const router = createBrowserRouter([
               {
                 path: '/sign-in',
                 lazy: async () => {
-                  const { SignInPage } = await import('../components/pages/sign-in');
+                  const { SignInPage } = await import('../features/auth/pages/sign-in');
                   return { Component: SignInPage };
                 },
               },
               {
                 path: '/sign-up',
                 lazy: async () => {
-                  const { SignUpPage } = await import('../components/pages/sign-up');
+                  const { SignUpPage } = await import('../features/auth/pages/sign-up');
                   return { Component: SignUpPage };
                 },
               },
@@ -32,7 +32,7 @@ const router = createBrowserRouter([
                 path: '/forgot-password',
                 lazy: async () => {
                   const { ForgotPasswordPage } =
-                    await import('../components/pages/forgot-password');
+                    await import('../features/auth/pages/forgot-password');
                   return { Component: ForgotPasswordPage };
                 },
               },
@@ -46,14 +46,14 @@ const router = createBrowserRouter([
           {
             path: '/invite/:invitationId',
             lazy: async () => {
-              const { InvitationPage } = await import('../components/pages/invitation');
+              const { InvitationPage } = await import('../features/organizations/pages/invitation');
               return { Component: InvitationPage };
             },
           },
           {
             path: '/verify-email',
             lazy: async () => {
-              const { VerifyEmailPage } = await import('../components/pages/verify-email');
+              const { VerifyEmailPage } = await import('../features/auth/pages/verify-email');
               return { Component: VerifyEmailPage };
             },
           },
@@ -61,14 +61,14 @@ const router = createBrowserRouter([
             path: '/verify-email/callback',
             lazy: async () => {
               const { VerifyEmailCallbackPage } =
-                await import('../components/pages/verify-email-callback');
+                await import('../features/auth/pages/verify-email-callback');
               return { Component: VerifyEmailCallbackPage };
             },
           },
           {
             path: '/reset-password',
             lazy: async () => {
-              const { ResetPasswordPage } = await import('../components/pages/reset-password');
+              const { ResetPasswordPage } = await import('../features/auth/pages/reset-password');
               return { Component: ResetPasswordPage };
             },
           },
@@ -80,7 +80,7 @@ const router = createBrowserRouter([
           {
             path: '/',
             lazy: async () => {
-              const { HomePage } = await import('../components/pages/home');
+              const { HomePage } = await import('../features/app-shell/pages/home');
               return { Component: HomePage };
             },
           },
@@ -94,28 +94,29 @@ const router = createBrowserRouter([
                   {
                     index: true,
                     lazy: async () => {
-                      const { HomePage } = await import('../components/pages/home');
+                      const { HomePage } = await import('../features/app-shell/pages/home');
                       return { Component: HomePage };
                     },
                   },
                   {
                     path: 'settings',
                     lazy: async () => {
-                      const { SettingsPage } = await import('../components/pages/settings');
+                      const { SettingsPage } =
+                        await import('../features/organizations/pages/settings');
                       return { Component: SettingsPage };
                     },
                   },
                   {
                     path: 'projects',
                     lazy: async () => {
-                      const { ProjectsPage } = await import('../components/pages/projects');
+                      const { ProjectsPage } = await import('../features/projects/pages/projects');
                       return { Component: ProjectsPage };
                     },
                   },
                   {
                     path: 'controls',
                     lazy: async () => {
-                      const { ControlsPage } = await import('../components/pages/controls');
+                      const { ControlsPage } = await import('../features/controls/pages/controls');
                       return { Component: ControlsPage };
                     },
                   },
@@ -123,7 +124,7 @@ const router = createBrowserRouter([
                     path: 'p/:projectSlug',
                     lazy: async () => {
                       const { ProjectDetailPage } =
-                        await import('../components/pages/project-detail');
+                        await import('../features/projects/pages/project-detail');
                       return { Component: ProjectDetailPage };
                     },
                   },
@@ -131,14 +132,15 @@ const router = createBrowserRouter([
                     path: 'p/:projectSlug/settings',
                     lazy: async () => {
                       const { ProjectSettingsPage } =
-                        await import('../components/pages/project-settings');
+                        await import('../features/projects/pages/project-settings');
                       return { Component: ProjectSettingsPage };
                     },
                   },
                   ...['checklists', 'exceptions', 'audit'].map((path) => ({
                     path,
                     lazy: async () => {
-                      const { StaticAppPage } = await import('../components/pages/static-app-page');
+                      const { StaticAppPage } =
+                        await import('../features/app-shell/pages/static-app-page');
                       return { Component: StaticAppPage };
                     },
                   })),

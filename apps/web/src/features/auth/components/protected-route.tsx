@@ -1,7 +1,7 @@
 import { Navigate, Outlet, useLocation } from 'react-router';
-import { useSession } from './auth-client';
+import { useSession } from '@/features/auth/api/auth-client';
 import { AuthGuardSkeleton } from './auth-guard-skeleton';
-import { buildVerifyEmailLink } from './auth-routing';
+import { buildVerifyEmailLink } from '@/features/auth/routing/auth-routing';
 
 export function ProtectedRoute() {
   const location = useLocation();

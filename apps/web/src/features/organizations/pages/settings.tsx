@@ -3,17 +3,17 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { AlertCircle, CheckCircle2, Copy } from 'lucide-react';
 import { useForm } from 'react-hook-form';
-import { createOrganizationInvitation } from '../../features/auth/auth-api';
-import { humanizeAuthError } from '../../features/auth/auth-errors';
-import type { ControlApprovalPolicy } from '@/features/controls/control-api';
+import { createOrganizationInvitation } from '@/features/auth/api/auth-api';
+import { humanizeAuthError } from '@/features/auth/api/auth-errors';
+import type { ControlApprovalPolicy } from '@/features/controls/api/control-api';
 import {
   controlApprovalPolicyFormSchema,
   type ControlApprovalPolicyFormValues,
-} from '@/features/controls/control-form-schemas';
+} from '@/features/controls/schemas/control-form-schemas';
 import {
   inviteMemberFormSchema,
   type InviteMemberFormValues,
-} from '@/features/organizations/organization-form-schemas';
+} from '@/features/organizations/schemas/organization-form-schemas';
 import { queryClient, trpc } from '@/lib/trpc';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';

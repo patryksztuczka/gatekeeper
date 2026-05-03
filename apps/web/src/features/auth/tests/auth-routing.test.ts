@@ -10,7 +10,7 @@ import {
   isReservedOrganizationSlug,
   slugifyOrganizationName,
   slugifyProjectName,
-} from './auth-routing';
+} from '@/features/auth/routing/auth-routing';
 
 describe('auth routing helpers', () => {
   it('maps membership-resolution statuses to frontend views', () => {

@@ -13,12 +13,12 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router';
-import { setActiveOrganization } from '../../features/auth/auth-api';
-import { signOut, useSession } from '../../features/auth/auth-client';
+import { setActiveOrganization } from '@/features/auth/api/auth-api';
+import { signOut, useSession } from '@/features/auth/api/auth-client';
 import {
   buildOrganizationPath,
   buildOrganizationSwitchPath,
-} from '../../features/auth/auth-routing';
+} from '@/features/auth/routing/auth-routing';
 import { queryClient, trpc } from '@/lib/trpc';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import {
