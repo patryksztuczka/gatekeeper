@@ -1,9 +1,21 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '../../db/client';
 import { members, organizations } from '../../db/schema';
-import type { OrganizationMembership } from '../../types/organization-types';
+import type { AuthorizedOrganizationMember } from '../../types/organization-types';
+import type { OrganizationAuthorizationPolicy } from '../identity-organization/organization-authorization';
 
-const editableOrganizationRoles = new Set(['owner', 'admin']);
+const controlApprovalPolicyManagerRoles = ['owner', 'admin'] as const;
+
+export const controlApprovalPolicyAuthorizationActions = {
+  update: {
+    allowedRoles: controlApprovalPolicyManagerRoles,
+    deniedMessage: 'Only Organization owners and admins can edit Control Approval Policy.',
+  },
+  view: {
+    allowedRoles: 'any-member',
+    deniedMessage: 'Only Organization members can view Control Approval Policy.',
+  },
+} satisfies Record<string, OrganizationAuthorizationPolicy>;
 
 export type ControlApprovalPolicyResponse = {
   enabled: boolean;
@@ -17,10 +29,6 @@ type ControlApprovalPolicyUpdateInput = {
 };
 
 export class ControlApprovalPolicyInputError extends Error {}
-
-export function canManageControlApprovalPolicy(role: string): boolean {
-  return editableOrganizationRoles.has(role);
-}
 
 export function normalizeControlApprovalPolicyUpdateBody(
   body: unknown,
@@ -76,7 +84,7 @@ export async function getControlApprovalPolicy(
 }
 
 export async function updateControlApprovalPolicy(
-  membership: OrganizationMembership,
+  membership: AuthorizedOrganizationMember,
   input: ControlApprovalPolicyUpdateInput,
 ): Promise<ControlApprovalPolicyResponse> {
   const maxRequiredApprovals = await getMaxRequiredApprovals(membership.organizationId);

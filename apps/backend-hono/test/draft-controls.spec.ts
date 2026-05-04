@@ -150,7 +150,8 @@ async function publishDraftControlRequest(
 ) {
   return callTRPC(
     headers,
-    (caller) => caller.controls.publishDraft({ ...body, draftControlId, organizationSlug } as never),
+    (caller) =>
+      caller.controls.publishDraft({ ...body, draftControlId, organizationSlug } as never),
     201,
   );
 }
@@ -164,7 +165,11 @@ async function submitDraftControlPublishRequest(
   return callTRPC(
     headers,
     (caller) =>
-      caller.controls.submitDraftPublishRequest({ ...body, draftControlId, organizationSlug } as never),
+      caller.controls.submitDraftPublishRequest({
+        ...body,
+        draftControlId,
+        organizationSlug,
+      } as never),
     201,
   );
 }
@@ -220,7 +225,8 @@ async function createControlProposedUpdateRequest(
 ) {
   return callTRPC(
     headers,
-    (caller) => caller.controls.createProposedUpdate({ ...body, controlId, organizationSlug } as never),
+    (caller) =>
+      caller.controls.createProposedUpdate({ ...body, controlId, organizationSlug } as never),
     201,
   );
 }
@@ -887,7 +893,7 @@ describe('Draft Controls', () => {
       approveControlPublishRequest(organization.slug, publishRequest.id, member.headers),
     ).resolves.toMatchObject({
       body: { error: 'Only Organization owners and admins can approve Control Publish Requests.' },
-      status: 400,
+      status: 403,
     });
 
     const adminApproveResponse = await approveControlPublishRequest(
@@ -1550,8 +1556,8 @@ describe('Draft Controls', () => {
     await expect(
       getControlRequest(organization.slug, control.id, member.headers),
     ).resolves.toMatchObject({
-      body: { error: 'Control unavailable' },
-      status: 404,
+      body: { error: 'Only Organization owners and admins can view archived Controls.' },
+      status: 403,
     });
     await expect(
       restoreControlRequest(organization.slug, control.id, member.headers),

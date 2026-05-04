@@ -1,7 +1,6 @@
-export type OrganizationMembership = {
+export type AuthorizedOrganizationMember = {
   id: string;
   organizationId: string;
-  organizationName: string;
   organizationSlug: string;
   role: string;
 };

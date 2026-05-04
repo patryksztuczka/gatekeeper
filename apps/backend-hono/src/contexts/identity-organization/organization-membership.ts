@@ -1,6 +1,14 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { db } from '../../db/client';
 import { members, organizations, users } from '../../db/schema';
+import type { OrganizationAuthorizationPolicy } from './organization-authorization';
+
+export const organizationMembershipAuthorizationActions = {
+  listMembers: {
+    allowedRoles: 'any-member',
+    deniedMessage: 'Only Organization members can view Organization Members.',
+  },
+} satisfies Record<string, OrganizationAuthorizationPolicy>;
 
 export async function getOrganizationMembership(organizationSlug: string, userId: string) {
   return db

@@ -28,6 +28,10 @@ _Avoid_: Invite when precision matters.
 The Organization an authenticated User is currently operating within.
 _Avoid_: Current account, tenant.
 
+**Organization-Scoped Authorization**:
+The decision that an authenticated User may perform a domain action as an Organization Member within one Organization.
+_Avoid_: Generic role check when the action-specific permission matters.
+
 ## Relationships
 
 - A **User** may belong to many **Organizations**.
@@ -40,6 +44,8 @@ _Avoid_: Current account, tenant.
 - A **User** may have multiple pending **Organization Invitations**.
 - Product access is blocked until the **User** completes email verification.
 - The **Active Organization** determines which Organization-scoped work the **User** is operating within.
+- **Organization-Scoped Authorization** resolves the **Organization Member** for an Organization and decides whether that member may perform a domain action.
+- Missing Organizations and non-member access are reported the same way to avoid revealing Organization existence.
 
 ## Example dialogue
 

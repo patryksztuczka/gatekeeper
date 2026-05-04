@@ -1,12 +1,15 @@
 import { TRPCError } from '@trpc/server';
-import { getOrganizationMembership } from '../identity-organization/organization-membership';
 import {
-  canManageProjects,
+  authorizeOrganizationAction,
+  OrganizationAuthorizationError,
+} from '../identity-organization/organization-authorization';
+import {
   createProject,
-  getProjectDetailForMember,
+  getProjectDetailForMembership,
   listProjects,
   normalizeProjectCreateBody,
   normalizeProjectUpdateBody,
+  projectAuthorizationActions,
   ProjectInputError,
   setProjectArchivedForMembership,
   updateProjectForMembership,
@@ -19,17 +22,14 @@ import {
 } from './projects-schemas';
 import { protectedProcedure, router } from '../../trpc/core';
 
-async function getMembershipOrThrow(input: { organizationSlug: string; userId: string }) {
-  const membership = await getOrganizationMembership(input.organizationSlug, input.userId);
-
-  if (!membership) {
-    throw new TRPCError({ code: 'NOT_FOUND', message: 'Organization not found' });
+function toProjectInputError(caughtError: unknown): never {
+  if (caughtError instanceof OrganizationAuthorizationError) {
+    throw new TRPCError({
+      code: caughtError.reason === 'not-found' ? 'NOT_FOUND' : 'FORBIDDEN',
+      message: caughtError.message,
+    });
   }
 
-  return membership;
-}
-
-function toProjectInputError(caughtError: unknown): never {
   if (caughtError instanceof ProjectInputError) {
     throw new TRPCError({ code: 'BAD_REQUEST', message: caughtError.message });
   }
@@ -39,40 +39,54 @@ function toProjectInputError(caughtError: unknown): never {
 
 export const projectsRouter = router({
   list: protectedProcedure.input(projectListInput).query(async ({ ctx, input }) => {
-    const membership = await getMembershipOrThrow({
-      organizationSlug: input.organizationSlug,
-      userId: ctx.session.user.id,
-    });
+    try {
+      const membership = await authorizeOrganizationAction({
+        action:
+          input.status === 'archived'
+            ? projectAuthorizationActions.listArchived
+            : projectAuthorizationActions.listActive,
+        organizationSlug: input.organizationSlug,
+        userId: ctx.session.user.id,
+      });
 
-    return {
-      projects: await listProjects(membership.organizationId, input.status),
-    };
+      return {
+        projects: await listProjects(membership.organizationId, input.status),
+      };
+    } catch (caughtError) {
+      toProjectInputError(caughtError);
+    }
   }),
 
   detail: protectedProcedure.input(projectIdentityInput).query(async ({ ctx, input }) => {
-    const project = await getProjectDetailForMember({
-      organizationSlug: input.organizationSlug,
-      projectSlug: input.projectSlug,
-      userId: ctx.session.user.id,
-    });
+    let membership;
+
+    try {
+      membership = await authorizeOrganizationAction({
+        action: projectAuthorizationActions.view,
+        organizationSlug: input.organizationSlug,
+        userId: ctx.session.user.id,
+      });
+    } catch (caughtError) {
+      if (caughtError instanceof OrganizationAuthorizationError) {
+        return { status: 'unavailable' as const };
+      }
+
+      throw caughtError;
+    }
+
+    const project = await getProjectDetailForMembership(membership, input.projectSlug);
 
     return project ? { status: 'available' as const, project } : { status: 'unavailable' as const };
   }),
 
   create: protectedProcedure.input(projectCreateInput).mutation(async ({ ctx, input }) => {
-    const membership = await getMembershipOrThrow({
-      organizationSlug: input.organizationSlug,
-      userId: ctx.session.user.id,
-    });
-
-    if (!canManageProjects(membership.role)) {
-      throw new TRPCError({
-        code: 'FORBIDDEN',
-        message: 'Only Organization owners and admins can create Projects.',
-      });
-    }
-
     try {
+      const membership = await authorizeOrganizationAction({
+        action: projectAuthorizationActions.create,
+        organizationSlug: input.organizationSlug,
+        userId: ctx.session.user.id,
+      });
+
       return {
         project: await createProject(membership.organizationId, normalizeProjectCreateBody(input)),
       };
@@ -82,19 +96,12 @@ export const projectsRouter = router({
   }),
 
   update: protectedProcedure.input(projectUpdateInput).mutation(async ({ ctx, input }) => {
-    const membership = await getMembershipOrThrow({
-      organizationSlug: input.organizationSlug,
-      userId: ctx.session.user.id,
-    });
-
-    if (!canManageProjects(membership.role)) {
-      throw new TRPCError({
-        code: 'FORBIDDEN',
-        message: 'Only Organization owners and admins can edit Projects.',
-      });
-    }
-
     try {
+      const membership = await authorizeOrganizationAction({
+        action: projectAuthorizationActions.update,
+        organizationSlug: input.organizationSlug,
+        userId: ctx.session.user.id,
+      });
       const project = await updateProjectForMembership({
         membership,
         projectSlug: input.projectSlug,
@@ -112,54 +119,48 @@ export const projectsRouter = router({
   }),
 
   archive: protectedProcedure.input(projectIdentityInput).mutation(async ({ ctx, input }) => {
-    const membership = await getMembershipOrThrow({
-      organizationSlug: input.organizationSlug,
-      userId: ctx.session.user.id,
-    });
-
-    if (!canManageProjects(membership.role)) {
-      throw new TRPCError({
-        code: 'FORBIDDEN',
-        message: 'Only Organization owners and admins can archive Projects.',
+    try {
+      const membership = await authorizeOrganizationAction({
+        action: projectAuthorizationActions.archive,
+        organizationSlug: input.organizationSlug,
+        userId: ctx.session.user.id,
       });
+      const project = await setProjectArchivedForMembership({
+        archived: true,
+        membership,
+        projectSlug: input.projectSlug,
+      });
+
+      if (!project) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Project unavailable' });
+      }
+
+      return { project };
+    } catch (caughtError) {
+      toProjectInputError(caughtError);
     }
-
-    const project = await setProjectArchivedForMembership({
-      archived: true,
-      membership,
-      projectSlug: input.projectSlug,
-    });
-
-    if (!project) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Project unavailable' });
-    }
-
-    return { project };
   }),
 
   restore: protectedProcedure.input(projectIdentityInput).mutation(async ({ ctx, input }) => {
-    const membership = await getMembershipOrThrow({
-      organizationSlug: input.organizationSlug,
-      userId: ctx.session.user.id,
-    });
-
-    if (!canManageProjects(membership.role)) {
-      throw new TRPCError({
-        code: 'FORBIDDEN',
-        message: 'Only Organization owners and admins can restore Projects.',
+    try {
+      const membership = await authorizeOrganizationAction({
+        action: projectAuthorizationActions.restore,
+        organizationSlug: input.organizationSlug,
+        userId: ctx.session.user.id,
       });
+      const project = await setProjectArchivedForMembership({
+        archived: false,
+        membership,
+        projectSlug: input.projectSlug,
+      });
+
+      if (!project) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Project unavailable' });
+      }
+
+      return { project };
+    } catch (caughtError) {
+      toProjectInputError(caughtError);
     }
-
-    const project = await setProjectArchivedForMembership({
-      archived: false,
-      membership,
-      projectSlug: input.projectSlug,
-    });
-
-    if (!project) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Project unavailable' });
-    }
-
-    return { project };
   }),
 });

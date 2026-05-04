@@ -11,7 +11,8 @@ import {
   organizations,
   users,
 } from '../../db/schema';
-import type { OrganizationMembership } from '../../types/organization-types';
+import type { AuthorizedOrganizationMember } from '../../types/organization-types';
+import type { OrganizationAuthorizationPolicy } from '../identity-organization/organization-authorization';
 
 export type DraftControlListItem = {
   author: {
@@ -122,22 +123,96 @@ type RejectControlPublishRequestInput = {
 };
 
 const draftReviewerRoles = new Set(['owner', 'admin']);
-const publishControlRoles = new Set(['owner', 'admin']);
-const archiveControlRoles = new Set(['owner', 'admin']);
+const controlPublisherRoles = ['owner', 'admin'] as const;
 const releaseImpacts = new Set(['advisory', 'blocking', 'needs review']);
+
+export const controlLibraryAuthorizationActions = {
+  approvePublishRequest: {
+    allowedRoles: controlPublisherRoles,
+    deniedMessage: 'Only Organization owners and admins can approve Control Publish Requests.',
+  },
+  archive: {
+    allowedRoles: controlPublisherRoles,
+    deniedMessage: 'Only Organization owners and admins can archive Controls.',
+  },
+  cancelDraft: {
+    allowedRoles: 'any-member',
+    deniedMessage: 'Only Organization members can cancel Draft Controls.',
+  },
+  createDraft: {
+    allowedRoles: 'any-member',
+    deniedMessage: 'Only Organization members can create Draft Controls.',
+  },
+  createProposedUpdate: {
+    allowedRoles: 'any-member',
+    deniedMessage: 'Only Organization members can propose Control updates.',
+  },
+  listActive: {
+    allowedRoles: 'any-member',
+    deniedMessage: 'Only Organization members can view active Controls.',
+  },
+  listArchived: {
+    allowedRoles: controlPublisherRoles,
+    deniedMessage: 'Only Organization owners and admins can view archived Controls.',
+  },
+  listDrafts: {
+    allowedRoles: 'any-member',
+    deniedMessage: 'Only Organization members can view Draft Controls.',
+  },
+  listProposedUpdates: {
+    allowedRoles: 'any-member',
+    deniedMessage: 'Only Organization members can view proposed Control updates.',
+  },
+  listPublishRequests: {
+    allowedRoles: 'any-member',
+    deniedMessage: 'Only Organization members can view Control Publish Requests.',
+  },
+  publishDraft: {
+    allowedRoles: controlPublisherRoles,
+    deniedMessage: 'Only Organization owners and admins can publish Controls.',
+  },
+  publishProposedUpdate: {
+    allowedRoles: controlPublisherRoles,
+    deniedMessage: 'Only Organization owners and admins can publish Controls.',
+  },
+  publishPublishRequest: {
+    allowedRoles: controlPublisherRoles,
+    deniedMessage: 'Only Organization owners and admins can publish Control Publish Requests.',
+  },
+  rejectPublishRequest: {
+    allowedRoles: controlPublisherRoles,
+    deniedMessage: 'Only Organization owners and admins can reject Control Publish Requests.',
+  },
+  restore: {
+    allowedRoles: controlPublisherRoles,
+    deniedMessage: 'Only Organization owners and admins can restore Controls.',
+  },
+  submitDraftPublishRequest: {
+    allowedRoles: 'any-member',
+    deniedMessage: 'Only Organization members can submit Control Publish Requests.',
+  },
+  submitProposedUpdatePublishRequest: {
+    allowedRoles: 'any-member',
+    deniedMessage: 'Only Organization members can submit Control Publish Requests.',
+  },
+  viewActive: {
+    allowedRoles: 'any-member',
+    deniedMessage: 'Only Organization members can view Controls.',
+  },
+  viewArchived: {
+    allowedRoles: controlPublisherRoles,
+    deniedMessage: 'Only Organization owners and admins can view archived Controls.',
+  },
+  withdrawPublishRequest: {
+    allowedRoles: 'any-member',
+    deniedMessage: 'Only Organization members can withdraw Control Publish Requests.',
+  },
+} satisfies Record<string, OrganizationAuthorizationPolicy>;
 
 export class DraftControlInputError extends Error {}
 export class ControlPublishInputError extends Error {}
 export class ControlProposedUpdateInputError extends Error {}
 export class ControlPublishRequestInputError extends Error {}
-
-export function canPublishControls(role: string) {
-  return publishControlRoles.has(role);
-}
-
-export function canArchiveControls(role: string) {
-  return archiveControlRoles.has(role);
-}
 
 export async function listControls(
   organizationId: string,
@@ -178,7 +253,10 @@ export async function listControls(
   );
 }
 
-export async function getControlDetail(membership: OrganizationMembership, controlId: string) {
+export async function getControlDetail(
+  membership: AuthorizedOrganizationMember,
+  controlId: string,
+) {
   const row = await db
     .select({
       acceptedEvidenceTypes: controlVersions.acceptedEvidenceTypes,
@@ -203,14 +281,14 @@ export async function getControlDetail(membership: OrganizationMembership, contr
     .limit(1)
     .then((rows) => rows[0] ?? null);
 
-  if (!row || (row.archivedAt && !archiveControlRoles.has(membership.role))) {
+  if (!row) {
     return null;
   }
 
   return toControlListItem(row);
 }
 
-export async function listControlProposedUpdates(membership: OrganizationMembership) {
+export async function listControlProposedUpdates(membership: AuthorizedOrganizationMember) {
   const rows = await db
     .select({
       acceptedEvidenceTypes: controlProposedUpdates.acceptedEvidenceTypes,
@@ -252,7 +330,7 @@ export async function listControlProposedUpdates(membership: OrganizationMembers
   }));
 }
 
-export async function listControlPublishRequests(membership: OrganizationMembership) {
+export async function listControlPublishRequests(membership: AuthorizedOrganizationMember) {
   const policy = await getApprovalPolicy(membership.organizationId);
   const rows = await db
     .select({
@@ -330,7 +408,7 @@ export async function listControlPublishRequests(membership: OrganizationMembers
 }
 
 export async function publishControlPublishRequest(
-  membership: OrganizationMembership,
+  membership: AuthorizedOrganizationMember,
   publishRequestId: string,
 ) {
   const request = await db
@@ -349,12 +427,6 @@ export async function publishControlPublishRequest(
     return null;
   }
 
-  if (!publishControlRoles.has(membership.role)) {
-    throw new ControlPublishInputError(
-      'Only Organization owners and admins can publish Control Publish Requests.',
-    );
-  }
-
   if (request.status !== 'submitted') {
     throw new ControlPublishInputError('Only submitted Control Publish Requests can be published.');
   }
@@ -371,7 +443,7 @@ export async function publishControlPublishRequest(
 }
 
 export async function listDraftControls(
-  membership: OrganizationMembership,
+  membership: AuthorizedOrganizationMember,
   filters: DraftControlListFilters = defaultDraftControlListFilters,
 ) {
   const rows = await db
@@ -411,7 +483,7 @@ export async function listDraftControls(
 }
 
 export async function createDraftControl(
-  membership: OrganizationMembership,
+  membership: AuthorizedOrganizationMember,
   input: CreateDraftControlInput,
 ) {
   validateDraftControlInput(input);
@@ -466,7 +538,7 @@ export async function createDraftControl(
 }
 
 export async function cancelDraftControl(
-  membership: OrganizationMembership,
+  membership: AuthorizedOrganizationMember,
   draftControlId: string,
 ) {
   const draftControl = await db
@@ -495,7 +567,7 @@ export async function cancelDraftControl(
 }
 
 export async function publishDraftControl(
-  membership: OrganizationMembership,
+  membership: AuthorizedOrganizationMember,
   draftControlId: string,
   input: PublishDraftControlInput,
 ) {
@@ -573,7 +645,7 @@ export async function publishDraftControl(
 export async function setControlArchivedForMembership(input: {
   archived: boolean;
   controlId: string;
-  membership: OrganizationMembership;
+  membership: AuthorizedOrganizationMember;
   reason?: string;
 }) {
   const control = await db
@@ -615,7 +687,7 @@ export async function setControlArchivedForMembership(input: {
 }
 
 export async function createControlProposedUpdate(
-  membership: OrganizationMembership,
+  membership: AuthorizedOrganizationMember,
   controlId: string,
   input: CreateControlProposedUpdateInput,
 ) {
@@ -690,7 +762,7 @@ export async function createControlProposedUpdate(
 }
 
 export async function submitDraftControlPublishRequest(
-  membership: OrganizationMembership,
+  membership: AuthorizedOrganizationMember,
   draftControlId: string,
   input: PublishDraftControlInput,
 ) {
@@ -764,7 +836,7 @@ export async function submitDraftControlPublishRequest(
 }
 
 export async function submitControlProposedUpdatePublishRequest(
-  membership: OrganizationMembership,
+  membership: AuthorizedOrganizationMember,
   controlId: string,
   proposedUpdateId: string,
 ) {
@@ -837,19 +909,13 @@ export async function submitControlProposedUpdatePublishRequest(
 }
 
 export async function approveControlPublishRequest(
-  membership: OrganizationMembership,
+  membership: AuthorizedOrganizationMember,
   publishRequestId: string,
 ) {
   const request = await getReviewableControlPublishRequest(membership, publishRequestId);
 
   if (!request) {
     return null;
-  }
-
-  if (!publishControlRoles.has(membership.role)) {
-    throw new ControlPublishRequestInputError(
-      'Only Organization owners and admins can approve Control Publish Requests.',
-    );
   }
 
   if (request.authorMemberId === membership.id) {
@@ -891,7 +957,7 @@ export async function approveControlPublishRequest(
 }
 
 export async function rejectControlPublishRequest(
-  membership: OrganizationMembership,
+  membership: AuthorizedOrganizationMember,
   publishRequestId: string,
   input: RejectControlPublishRequestInput,
 ) {
@@ -900,12 +966,6 @@ export async function rejectControlPublishRequest(
 
   if (!request) {
     return null;
-  }
-
-  if (!publishControlRoles.has(membership.role)) {
-    throw new ControlPublishRequestInputError(
-      'Only Organization owners and admins can reject Control Publish Requests.',
-    );
   }
 
   if (!comment) {
@@ -928,7 +988,7 @@ export async function rejectControlPublishRequest(
 }
 
 export async function withdrawControlPublishRequest(
-  membership: OrganizationMembership,
+  membership: AuthorizedOrganizationMember,
   publishRequestId: string,
 ) {
   const request = await getReviewableControlPublishRequest(membership, publishRequestId);
@@ -959,7 +1019,7 @@ export async function withdrawControlPublishRequest(
 }
 
 export async function publishControlProposedUpdate(
-  membership: OrganizationMembership,
+  membership: AuthorizedOrganizationMember,
   controlId: string,
   proposedUpdateId: string,
 ) {
@@ -1356,7 +1416,7 @@ async function getApprovalPolicy(organizationId: string) {
 
 async function ensureControlPublishAllowed(input: {
   draftControlId: string | null;
-  membership: OrganizationMembership;
+  membership: AuthorizedOrganizationMember;
   proposedUpdateId: string | null;
 }) {
   const policy = await getApprovalPolicy(input.membership.organizationId);
@@ -1388,7 +1448,7 @@ async function ensureControlPublishAllowed(input: {
 }
 
 async function getReviewableControlPublishRequest(
-  membership: OrganizationMembership,
+  membership: AuthorizedOrganizationMember,
   publishRequestId: string,
 ) {
   return db

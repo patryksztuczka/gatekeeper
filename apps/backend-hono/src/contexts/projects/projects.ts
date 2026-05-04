@@ -1,8 +1,8 @@
 import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm';
 import { db } from '../../db/client';
 import { members, projects, users } from '../../db/schema';
-import type { OrganizationMembership } from '../../types/organization-types';
-import { getOrganizationMembership } from '../identity-organization/organization-membership';
+import type { AuthorizedOrganizationMember } from '../../types/organization-types';
+import type { OrganizationAuthorizationPolicy } from '../identity-organization/organization-authorization';
 
 export type ProjectListStatus = 'active' | 'archived';
 
@@ -19,12 +19,39 @@ type UpdateProjectInput = {
   projectOwnerMemberId: string | null;
 };
 
-const editableOrganizationRoles = new Set(['owner', 'admin']);
+const projectManagerRoles = ['owner', 'admin'] as const;
 const projectSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-export function canManageProjects(role: string) {
-  return editableOrganizationRoles.has(role);
-}
+export const projectAuthorizationActions = {
+  archive: {
+    allowedRoles: projectManagerRoles,
+    deniedMessage: 'Only Organization owners and admins can archive Projects.',
+  },
+  create: {
+    allowedRoles: projectManagerRoles,
+    deniedMessage: 'Only Organization owners and admins can create Projects.',
+  },
+  listActive: {
+    allowedRoles: 'any-member',
+    deniedMessage: 'Only Organization members can view Projects.',
+  },
+  listArchived: {
+    allowedRoles: 'any-member',
+    deniedMessage: 'Only Organization members can view Archived Projects.',
+  },
+  restore: {
+    allowedRoles: projectManagerRoles,
+    deniedMessage: 'Only Organization owners and admins can restore Projects.',
+  },
+  update: {
+    allowedRoles: projectManagerRoles,
+    deniedMessage: 'Only Organization owners and admins can edit Projects.',
+  },
+  view: {
+    allowedRoles: 'any-member',
+    deniedMessage: 'Only Organization members can view Projects.',
+  },
+} satisfies Record<string, OrganizationAuthorizationPolicy>;
 
 export async function listProjects(organizationId: string, status: ProjectListStatus) {
   const rows = await db
@@ -65,22 +92,8 @@ export async function listProjects(organizationId: string, status: ProjectListSt
   }));
 }
 
-export async function getProjectDetailForMember(input: {
-  organizationSlug: string;
-  projectSlug: string;
-  userId: string;
-}) {
-  const membership = await getOrganizationMembership(input.organizationSlug, input.userId);
-
-  if (!membership) {
-    return null;
-  }
-
-  return getProjectDetailForMembership(membership, input.projectSlug);
-}
-
 export async function getProjectDetailForMembership(
-  membership: OrganizationMembership,
+  membership: AuthorizedOrganizationMember,
   projectSlug: string,
 ) {
   const project = await db
@@ -179,7 +192,7 @@ export async function createProject(organizationId: string, input: CreateProject
 
 export async function setProjectArchivedForMembership(input: {
   archived: boolean;
-  membership: OrganizationMembership;
+  membership: AuthorizedOrganizationMember;
   projectSlug: string;
 }) {
   const existingProject = await db
@@ -210,7 +223,7 @@ export async function setProjectArchivedForMembership(input: {
 }
 
 export async function updateProjectForMembership(input: {
-  membership: OrganizationMembership;
+  membership: AuthorizedOrganizationMember;
   projectSlug: string;
   updates: UpdateProjectInput;
 }) {

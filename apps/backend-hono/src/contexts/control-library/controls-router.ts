@@ -1,6 +1,6 @@
 import { TRPCError } from '@trpc/server';
 import {
-  canManageControlApprovalPolicy,
+  controlApprovalPolicyAuthorizationActions,
   ControlApprovalPolicyInputError,
   getControlApprovalPolicy,
   normalizeControlApprovalPolicyUpdateBody,
@@ -8,9 +8,8 @@ import {
 } from './control-approval-policy';
 import {
   approveControlPublishRequest,
-  canArchiveControls,
-  canPublishControls,
   cancelDraftControl,
+  controlLibraryAuthorizationActions,
   ControlProposedUpdateInputError,
   ControlPublishInputError,
   ControlPublishRequestInputError,
@@ -38,7 +37,12 @@ import {
   submitDraftControlPublishRequest,
   withdrawControlPublishRequest,
 } from './controls';
-import { getOrganizationMembership } from '../identity-organization/organization-membership';
+import {
+  authorizeOrganizationAction,
+  authorizeOrganizationMemberAction,
+  OrganizationAuthorizationError,
+  type OrganizationAuthorizationPolicy,
+} from '../identity-organization/organization-authorization';
 import {
   archiveControlInput,
   controlIdentityInput,
@@ -57,17 +61,14 @@ import {
 import { organizationSlugInput } from '../identity-organization/organization-schemas';
 import { protectedProcedure, router } from '../../trpc/core';
 
-async function getMembershipOrThrow(input: { organizationSlug: string; userId: string }) {
-  const membership = await getOrganizationMembership(input.organizationSlug, input.userId);
-
-  if (!membership) {
-    throw new TRPCError({ code: 'NOT_FOUND', message: 'Organization not found' });
+function throwKnownInputError(caughtError: unknown): never {
+  if (caughtError instanceof OrganizationAuthorizationError) {
+    throw new TRPCError({
+      code: caughtError.reason === 'not-found' ? 'NOT_FOUND' : 'FORBIDDEN',
+      message: caughtError.message,
+    });
   }
 
-  return membership;
-}
-
-function throwKnownInputError(caughtError: unknown): never {
   if (
     caughtError instanceof DraftControlInputError ||
     caughtError instanceof ControlPublishInputError ||
@@ -81,9 +82,22 @@ function throwKnownInputError(caughtError: unknown): never {
   throw caughtError;
 }
 
+async function authorizeControlAction(input: {
+  action: OrganizationAuthorizationPolicy;
+  organizationSlug: string;
+  userId: string;
+}) {
+  try {
+    return await authorizeOrganizationAction(input);
+  } catch (caughtError) {
+    throwKnownInputError(caughtError);
+  }
+}
+
 export const controlsRouter = router({
   approvalPolicy: protectedProcedure.input(organizationSlugInput).query(async ({ ctx, input }) => {
-    const membership = await getMembershipOrThrow({
+    const membership = await authorizeControlAction({
+      action: controlApprovalPolicyAuthorizationActions.view,
       organizationSlug: input.organizationSlug,
       userId: ctx.session.user.id,
     });
@@ -94,19 +108,13 @@ export const controlsRouter = router({
   updateApprovalPolicy: protectedProcedure
     .input(updateControlApprovalPolicyInput)
     .mutation(async ({ ctx, input }) => {
-      const membership = await getMembershipOrThrow({
-        organizationSlug: input.organizationSlug,
-        userId: ctx.session.user.id,
-      });
-
-      if (!canManageControlApprovalPolicy(membership.role)) {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message: 'Only Organization owners and admins can edit Control Approval Policy.',
-        });
-      }
-
       try {
+        const membership = await authorizeOrganizationAction({
+          action: controlApprovalPolicyAuthorizationActions.update,
+          organizationSlug: input.organizationSlug,
+          userId: ctx.session.user.id,
+        });
+
         return {
           policy: await updateControlApprovalPolicy(
             membership,
@@ -119,10 +127,6 @@ export const controlsRouter = router({
     }),
 
   list: protectedProcedure.input(controlListInput).query(async ({ ctx, input }) => {
-    const membership = await getMembershipOrThrow({
-      organizationSlug: input.organizationSlug,
-      userId: ctx.session.user.id,
-    });
     const filters = normalizeControlListFilters({
       acceptedEvidenceType: input.acceptedEvidenceType,
       q: input.search,
@@ -131,18 +135,21 @@ export const controlsRouter = router({
       status: input.status,
     });
 
-    if (filters.status === 'archived' && !canArchiveControls(membership.role)) {
-      throw new TRPCError({
-        code: 'FORBIDDEN',
-        message: 'Only Organization owners and admins can view archived Controls.',
-      });
-    }
+    const membership = await authorizeControlAction({
+      action:
+        filters.status === 'archived'
+          ? controlLibraryAuthorizationActions.listArchived
+          : controlLibraryAuthorizationActions.listActive,
+      organizationSlug: input.organizationSlug,
+      userId: ctx.session.user.id,
+    });
 
     return { controls: await listControls(membership.organizationId, filters) };
   }),
 
   detail: protectedProcedure.input(controlIdentityInput).query(async ({ ctx, input }) => {
-    const membership = await getMembershipOrThrow({
+    const membership = await authorizeControlAction({
+      action: controlLibraryAuthorizationActions.viewActive,
       organizationSlug: input.organizationSlug,
       userId: ctx.session.user.id,
     });
@@ -152,11 +159,23 @@ export const controlsRouter = router({
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Control unavailable' });
     }
 
+    if (control.archivedAt) {
+      try {
+        authorizeOrganizationMemberAction({
+          action: controlLibraryAuthorizationActions.viewArchived,
+          member: membership,
+        });
+      } catch (caughtError) {
+        throwKnownInputError(caughtError);
+      }
+    }
+
     return { control };
   }),
 
   listDrafts: protectedProcedure.input(draftControlListInput).query(async ({ ctx, input }) => {
-    const membership = await getMembershipOrThrow({
+    const membership = await authorizeControlAction({
+      action: controlLibraryAuthorizationActions.listDrafts,
       organizationSlug: input.organizationSlug,
       userId: ctx.session.user.id,
     });
@@ -172,7 +191,8 @@ export const controlsRouter = router({
   listProposedUpdates: protectedProcedure
     .input(organizationSlugInput)
     .query(async ({ ctx, input }) => {
-      const membership = await getMembershipOrThrow({
+      const membership = await authorizeControlAction({
+        action: controlLibraryAuthorizationActions.listProposedUpdates,
         organizationSlug: input.organizationSlug,
         userId: ctx.session.user.id,
       });
@@ -183,7 +203,8 @@ export const controlsRouter = router({
   listPublishRequests: protectedProcedure
     .input(organizationSlugInput)
     .query(async ({ ctx, input }) => {
-      const membership = await getMembershipOrThrow({
+      const membership = await authorizeControlAction({
+        action: controlLibraryAuthorizationActions.listPublishRequests,
         organizationSlug: input.organizationSlug,
         userId: ctx.session.user.id,
       });
@@ -194,12 +215,13 @@ export const controlsRouter = router({
   createDraft: protectedProcedure
     .input(createDraftControlInput)
     .mutation(async ({ ctx, input }) => {
-      const membership = await getMembershipOrThrow({
-        organizationSlug: input.organizationSlug,
-        userId: ctx.session.user.id,
-      });
-
       try {
+        const membership = await authorizeOrganizationAction({
+          action: controlLibraryAuthorizationActions.createDraft,
+          organizationSlug: input.organizationSlug,
+          userId: ctx.session.user.id,
+        });
+
         return {
           draftControl: await createDraftControl(
             membership,
@@ -214,35 +236,33 @@ export const controlsRouter = router({
   cancelDraft: protectedProcedure
     .input(draftControlIdentityInput)
     .mutation(async ({ ctx, input }) => {
-      const membership = await getMembershipOrThrow({
-        organizationSlug: input.organizationSlug,
-        userId: ctx.session.user.id,
-      });
-      const canceled = await cancelDraftControl(membership, input.draftControlId);
+      try {
+        const membership = await authorizeOrganizationAction({
+          action: controlLibraryAuthorizationActions.cancelDraft,
+          organizationSlug: input.organizationSlug,
+          userId: ctx.session.user.id,
+        });
+        const canceled = await cancelDraftControl(membership, input.draftControlId);
 
-      if (!canceled) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'Draft Control unavailable' });
+        if (!canceled) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Draft Control unavailable' });
+        }
+
+        return { canceled: true };
+      } catch (caughtError) {
+        throwKnownInputError(caughtError);
       }
-
-      return { canceled: true };
     }),
 
   publishDraft: protectedProcedure
     .input(publishDraftControlInput)
     .mutation(async ({ ctx, input }) => {
-      const membership = await getMembershipOrThrow({
-        organizationSlug: input.organizationSlug,
-        userId: ctx.session.user.id,
-      });
-
-      if (!canPublishControls(membership.role)) {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message: 'Only Organization owners and admins can publish Controls.',
-        });
-      }
-
       try {
+        const membership = await authorizeOrganizationAction({
+          action: controlLibraryAuthorizationActions.publishDraft,
+          organizationSlug: input.organizationSlug,
+          userId: ctx.session.user.id,
+        });
         const control = await publishDraftControl(
           membership,
           input.draftControlId,
@@ -262,12 +282,12 @@ export const controlsRouter = router({
   submitDraftPublishRequest: protectedProcedure
     .input(submitDraftPublishRequestInput)
     .mutation(async ({ ctx, input }) => {
-      const membership = await getMembershipOrThrow({
-        organizationSlug: input.organizationSlug,
-        userId: ctx.session.user.id,
-      });
-
       try {
+        const membership = await authorizeOrganizationAction({
+          action: controlLibraryAuthorizationActions.submitDraftPublishRequest,
+          organizationSlug: input.organizationSlug,
+          userId: ctx.session.user.id,
+        });
         const publishRequest = await submitDraftControlPublishRequest(
           membership,
           input.draftControlId,
@@ -287,12 +307,12 @@ export const controlsRouter = router({
   createProposedUpdate: protectedProcedure
     .input(createProposedUpdateInput)
     .mutation(async ({ ctx, input }) => {
-      const membership = await getMembershipOrThrow({
-        organizationSlug: input.organizationSlug,
-        userId: ctx.session.user.id,
-      });
-
       try {
+        const membership = await authorizeOrganizationAction({
+          action: controlLibraryAuthorizationActions.createProposedUpdate,
+          organizationSlug: input.organizationSlug,
+          userId: ctx.session.user.id,
+        });
         const proposedUpdate = await createControlProposedUpdate(
           membership,
           input.controlId,
@@ -312,19 +332,12 @@ export const controlsRouter = router({
   publishProposedUpdate: protectedProcedure
     .input(proposedUpdateIdentityInput)
     .mutation(async ({ ctx, input }) => {
-      const membership = await getMembershipOrThrow({
-        organizationSlug: input.organizationSlug,
-        userId: ctx.session.user.id,
-      });
-
-      if (!canPublishControls(membership.role)) {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message: 'Only Organization owners and admins can publish Controls.',
-        });
-      }
-
       try {
+        const membership = await authorizeOrganizationAction({
+          action: controlLibraryAuthorizationActions.publishProposedUpdate,
+          organizationSlug: input.organizationSlug,
+          userId: ctx.session.user.id,
+        });
         const control = await publishControlProposedUpdate(
           membership,
           input.controlId,
@@ -344,12 +357,12 @@ export const controlsRouter = router({
   submitProposedUpdatePublishRequest: protectedProcedure
     .input(proposedUpdateIdentityInput)
     .mutation(async ({ ctx, input }) => {
-      const membership = await getMembershipOrThrow({
-        organizationSlug: input.organizationSlug,
-        userId: ctx.session.user.id,
-      });
-
       try {
+        const membership = await authorizeOrganizationAction({
+          action: controlLibraryAuthorizationActions.submitProposedUpdatePublishRequest,
+          organizationSlug: input.organizationSlug,
+          userId: ctx.session.user.id,
+        });
         const publishRequest = await submitControlProposedUpdatePublishRequest(
           membership,
           input.controlId,
@@ -367,67 +380,61 @@ export const controlsRouter = router({
     }),
 
   archive: protectedProcedure.input(archiveControlInput).mutation(async ({ ctx, input }) => {
-    const membership = await getMembershipOrThrow({
-      organizationSlug: input.organizationSlug,
-      userId: ctx.session.user.id,
-    });
-
-    if (!canArchiveControls(membership.role)) {
-      throw new TRPCError({
-        code: 'FORBIDDEN',
-        message: 'Only Organization owners and admins can archive Controls.',
+    try {
+      const membership = await authorizeOrganizationAction({
+        action: controlLibraryAuthorizationActions.archive,
+        organizationSlug: input.organizationSlug,
+        userId: ctx.session.user.id,
       });
+      const control = await setControlArchivedForMembership({
+        archived: true,
+        controlId: input.controlId,
+        membership,
+        reason: normalizeControlArchiveBody(input).reason,
+      });
+
+      if (!control) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Control unavailable' });
+      }
+
+      return { control };
+    } catch (caughtError) {
+      throwKnownInputError(caughtError);
     }
-
-    const control = await setControlArchivedForMembership({
-      archived: true,
-      controlId: input.controlId,
-      membership,
-      reason: normalizeControlArchiveBody(input).reason,
-    });
-
-    if (!control) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Control unavailable' });
-    }
-
-    return { control };
   }),
 
   restore: protectedProcedure.input(controlIdentityInput).mutation(async ({ ctx, input }) => {
-    const membership = await getMembershipOrThrow({
-      organizationSlug: input.organizationSlug,
-      userId: ctx.session.user.id,
-    });
-
-    if (!canArchiveControls(membership.role)) {
-      throw new TRPCError({
-        code: 'FORBIDDEN',
-        message: 'Only Organization owners and admins can restore Controls.',
+    try {
+      const membership = await authorizeOrganizationAction({
+        action: controlLibraryAuthorizationActions.restore,
+        organizationSlug: input.organizationSlug,
+        userId: ctx.session.user.id,
       });
+      const control = await setControlArchivedForMembership({
+        archived: false,
+        controlId: input.controlId,
+        membership,
+      });
+
+      if (!control) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Control unavailable' });
+      }
+
+      return { control };
+    } catch (caughtError) {
+      throwKnownInputError(caughtError);
     }
-
-    const control = await setControlArchivedForMembership({
-      archived: false,
-      controlId: input.controlId,
-      membership,
-    });
-
-    if (!control) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Control unavailable' });
-    }
-
-    return { control };
   }),
 
   approvePublishRequest: protectedProcedure
     .input(publishRequestIdentityInput)
     .mutation(async ({ ctx, input }) => {
-      const membership = await getMembershipOrThrow({
-        organizationSlug: input.organizationSlug,
-        userId: ctx.session.user.id,
-      });
-
       try {
+        const membership = await authorizeOrganizationAction({
+          action: controlLibraryAuthorizationActions.approvePublishRequest,
+          organizationSlug: input.organizationSlug,
+          userId: ctx.session.user.id,
+        });
         const publishRequest = await approveControlPublishRequest(
           membership,
           input.publishRequestId,
@@ -449,12 +456,12 @@ export const controlsRouter = router({
   rejectPublishRequest: protectedProcedure
     .input(rejectPublishRequestInput)
     .mutation(async ({ ctx, input }) => {
-      const membership = await getMembershipOrThrow({
-        organizationSlug: input.organizationSlug,
-        userId: ctx.session.user.id,
-      });
-
       try {
+        const membership = await authorizeOrganizationAction({
+          action: controlLibraryAuthorizationActions.rejectPublishRequest,
+          organizationSlug: input.organizationSlug,
+          userId: ctx.session.user.id,
+        });
         const publishRequest = await rejectControlPublishRequest(
           membership,
           input.publishRequestId,
@@ -477,12 +484,12 @@ export const controlsRouter = router({
   withdrawPublishRequest: protectedProcedure
     .input(publishRequestIdentityInput)
     .mutation(async ({ ctx, input }) => {
-      const membership = await getMembershipOrThrow({
-        organizationSlug: input.organizationSlug,
-        userId: ctx.session.user.id,
-      });
-
       try {
+        const membership = await authorizeOrganizationAction({
+          action: controlLibraryAuthorizationActions.withdrawPublishRequest,
+          organizationSlug: input.organizationSlug,
+          userId: ctx.session.user.id,
+        });
         const publishRequest = await withdrawControlPublishRequest(
           membership,
           input.publishRequestId,
@@ -504,12 +511,12 @@ export const controlsRouter = router({
   publishPublishRequest: protectedProcedure
     .input(publishRequestIdentityInput)
     .mutation(async ({ ctx, input }) => {
-      const membership = await getMembershipOrThrow({
-        organizationSlug: input.organizationSlug,
-        userId: ctx.session.user.id,
-      });
-
       try {
+        const membership = await authorizeOrganizationAction({
+          action: controlLibraryAuthorizationActions.publishPublishRequest,
+          organizationSlug: input.organizationSlug,
+          userId: ctx.session.user.id,
+        });
         const control = await publishControlPublishRequest(membership, input.publishRequestId);
 
         if (!control) {

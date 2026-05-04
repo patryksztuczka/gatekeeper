@@ -95,9 +95,7 @@ async function archiveProjectRequest(
   projectSlug: string,
   headers: Headers,
 ) {
-  return callTRPC(headers, (caller) =>
-    caller.projects.archive({ organizationSlug, projectSlug }),
-  );
+  return callTRPC(headers, (caller) => caller.projects.archive({ organizationSlug, projectSlug }));
 }
 
 async function restoreProjectRequest(
@@ -105,9 +103,7 @@ async function restoreProjectRequest(
   projectSlug: string,
   headers: Headers,
 ) {
-  return callTRPC(headers, (caller) =>
-    caller.projects.restore({ organizationSlug, projectSlug }),
-  );
+  return callTRPC(headers, (caller) => caller.projects.restore({ organizationSlug, projectSlug }));
 }
 
 async function listProjectsRequest(

@@ -1,6 +1,13 @@
 import { TRPCError } from '@trpc/server';
 import { resolveInvitationEntryState, resolveMembershipResolution } from './auth-organization';
-import { getOrganizationMembership, listOrganizationMembers } from './organization-membership';
+import {
+  listOrganizationMembers,
+  organizationMembershipAuthorizationActions,
+} from './organization-membership';
+import {
+  authorizeOrganizationAction,
+  OrganizationAuthorizationError,
+} from './organization-authorization';
 import { invitationEntryStateInput, organizationSlugInput } from './organization-schemas';
 import { protectedProcedure, publicProcedure, router } from '../../trpc/core';
 
@@ -29,12 +36,23 @@ export const organizationsRouter = router({
     }),
 
   members: protectedProcedure.input(organizationSlugInput).query(async ({ ctx, input }) => {
-    const membership = await getOrganizationMembership(input.organizationSlug, ctx.session.user.id);
+    try {
+      const membership = await authorizeOrganizationAction({
+        action: organizationMembershipAuthorizationActions.listMembers,
+        organizationSlug: input.organizationSlug,
+        userId: ctx.session.user.id,
+      });
 
-    if (!membership) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Organization not found' });
+      return { members: await listOrganizationMembers(membership.organizationId) };
+    } catch (caughtError) {
+      if (caughtError instanceof OrganizationAuthorizationError) {
+        throw new TRPCError({
+          code: caughtError.reason === 'not-found' ? 'NOT_FOUND' : 'FORBIDDEN',
+          message: caughtError.message,
+        });
+      }
+
+      throw caughtError;
     }
-
-    return { members: await listOrganizationMembers(membership.organizationId) };
   }),
 });
