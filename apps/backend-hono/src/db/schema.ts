@@ -296,6 +296,118 @@ export const controlVersions = sqliteTable(
   ],
 );
 
+export const checklistTemplates = sqliteTable(
+  'checklist_templates',
+  {
+    id: text('id').primaryKey(),
+    organizationId: text('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    archivedAt: integer('archived_at', { mode: 'timestamp_ms' }),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index('checklist_template_organization_id_idx').on(table.organizationId),
+    index('checklist_template_archived_at_idx').on(table.archivedAt),
+    uniqueIndex('checklist_template_active_name_unique')
+      .on(table.organizationId, table.name)
+      .where(sql`${table.archivedAt} is null`),
+  ],
+);
+
+export const checklistTemplateControls = sqliteTable(
+  'checklist_template_controls',
+  {
+    id: text('id').primaryKey(),
+    checklistTemplateId: text('checklist_template_id')
+      .notNull()
+      .references(() => checklistTemplates.id, { onDelete: 'cascade' }),
+    controlId: text('control_id')
+      .notNull()
+      .references(() => controls.id, { onDelete: 'cascade' }),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+  },
+  (table) => [
+    index('checklist_template_control_template_id_idx').on(table.checklistTemplateId),
+    index('checklist_template_control_control_id_idx').on(table.controlId),
+    uniqueIndex('checklist_template_control_unique').on(table.checklistTemplateId, table.controlId),
+  ],
+);
+
+export const projectChecklists = sqliteTable(
+  'project_checklists',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    sourceChecklistTemplateId: text('source_checklist_template_id').references(
+      () => checklistTemplates.id,
+      { onDelete: 'set null' },
+    ),
+    name: text('name').notNull(),
+    archivedAt: integer('archived_at', { mode: 'timestamp_ms' }),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index('project_checklist_project_id_idx').on(table.projectId),
+    index('project_checklist_source_template_id_idx').on(table.sourceChecklistTemplateId),
+    index('project_checklist_archived_at_idx').on(table.archivedAt),
+    uniqueIndex('project_checklist_active_name_unique')
+      .on(table.projectId, table.name)
+      .where(sql`${table.archivedAt} is null`),
+  ],
+);
+
+export const checklistItems = sqliteTable(
+  'checklist_items',
+  {
+    id: text('id').primaryKey(),
+    projectChecklistId: text('project_checklist_id')
+      .notNull()
+      .references(() => projectChecklists.id, { onDelete: 'cascade' }),
+    controlId: text('control_id')
+      .notNull()
+      .references(() => controls.id, { onDelete: 'cascade' }),
+    controlVersionId: text('control_version_id')
+      .notNull()
+      .references(() => controlVersions.id, { onDelete: 'cascade' }),
+    checked: integer('checked', { mode: 'boolean' }).default(false).notNull(),
+    status: text('status').default('active').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index('checklist_item_project_checklist_id_idx').on(table.projectChecklistId),
+    index('checklist_item_control_id_idx').on(table.controlId),
+    index('checklist_item_control_version_id_idx').on(table.controlVersionId),
+    index('checklist_item_status_idx').on(table.status),
+    uniqueIndex('checklist_item_active_control_unique')
+      .on(table.projectChecklistId, table.controlId)
+      .where(sql`${table.status} = 'active'`),
+  ],
+);
+
 export const controlProposedUpdates = sqliteTable(
   'control_proposed_updates',
   {
