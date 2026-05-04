@@ -1,0 +1,27 @@
+CONTEXT-MAP.md
+  740ce44cfb945ea5 15
+AGENTS.md
+  740ce44cfb945ea5 20
+apps/backend-hono/src/contexts/control-library/CONTEXT.md
+  740ce44cfb945ea5 16,59-67,77,86,93-97,100-105,117,119,121-127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "de806e20a57b891221d3089a75faeb63df9586e6",
+  "prompts": {
+    "740ce44cfb945ea5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019df3d9-f4c1-7653-91ce-4b77abaecbc6",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Patryk Sztuczka",
+      "messages": [],
+      "total_additions": 34,
+      "total_deletions": 28,
+      "accepted_lines": 34,
+      "overriden_lines": 0
+    }
+  }
+}
