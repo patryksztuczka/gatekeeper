@@ -1,11 +1,11 @@
 import { TRPCError } from '@trpc/server';
 import {
-  controlApprovalPolicyAuthorizationActions,
-  ControlApprovalPolicyInputError,
+  controlPublishGovernanceAuthorizationActions,
+  ControlPublishGovernanceInputError,
   getControlApprovalPolicy,
   normalizeControlApprovalPolicyUpdateBody,
   updateControlApprovalPolicy,
-} from './control-approval-policy';
+} from './control-publish-governance';
 import {
   approveControlPublishRequest,
   cancelDraftControl,
@@ -74,7 +74,7 @@ function throwKnownInputError(caughtError: unknown): never {
     caughtError instanceof ControlPublishInputError ||
     caughtError instanceof ControlProposedUpdateInputError ||
     caughtError instanceof ControlPublishRequestInputError ||
-    caughtError instanceof ControlApprovalPolicyInputError
+    caughtError instanceof ControlPublishGovernanceInputError
   ) {
     throw new TRPCError({ code: 'BAD_REQUEST', message: caughtError.message });
   }
@@ -97,7 +97,7 @@ async function authorizeControlAction(input: {
 export const controlsRouter = router({
   approvalPolicy: protectedProcedure.input(organizationSlugInput).query(async ({ ctx, input }) => {
     const membership = await authorizeControlAction({
-      action: controlApprovalPolicyAuthorizationActions.view,
+      action: controlPublishGovernanceAuthorizationActions.viewPolicy,
       organizationSlug: input.organizationSlug,
       userId: ctx.session.user.id,
     });
@@ -110,7 +110,7 @@ export const controlsRouter = router({
     .mutation(async ({ ctx, input }) => {
       try {
         const membership = await authorizeOrganizationAction({
-          action: controlApprovalPolicyAuthorizationActions.update,
+          action: controlPublishGovernanceAuthorizationActions.updatePolicy,
           organizationSlug: input.organizationSlug,
           userId: ctx.session.user.id,
         });

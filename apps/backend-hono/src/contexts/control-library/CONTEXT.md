@@ -48,6 +48,10 @@ _Avoid_: Release approval when referring to publishing Controls or Control updat
 A reviewable submission to publish a new Control or a policy-meaning update to an active Control.
 _Avoid_: Release approval request when referring to Control publishing.
 
+**Control Publish Governance**:
+The rules that decide when Control publish actions require Control Publish Requests, how many approvals are needed, and who may approve, reject, withdraw, or publish a request.
+_Avoid_: Generic approval flow when referring to Control publishing rules.
+
 ## Relationships
 
 - An **Organization** has exactly one **Control Library**.
@@ -83,6 +87,7 @@ _Avoid_: Release approval request when referring to Control publishing.
 - **Control Publish Requests** are approved by eligible Organization owners and admins.
 - A **Control Publish Request** cannot be approved by its own author.
 - When the **Control Approval Policy** is disabled, Organization owners and admins can publish without separate approval.
+- **Control Publish Governance** applies the **Control Approval Policy** to Control publish actions and **Control Publish Requests**.
 - An **Archived Control** is unavailable for new use.
 - An **Archived Control** must be restored before its release assurance meaning can be changed.
 - Existing usages of an **Archived Control** remain linked to their original **Control Version**.

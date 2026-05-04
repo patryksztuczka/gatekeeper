@@ -8,11 +8,19 @@ import {
   controlVersions,
   draftControls,
   members,
-  organizations,
   users,
 } from '../../db/schema';
 import type { AuthorizedOrganizationMember } from '../../types/organization-types';
 import type { OrganizationAuthorizationPolicy } from '../identity-organization/organization-authorization';
+import {
+  canPublishControlPublishRequest,
+  ensureControlPublishAllowed,
+  ensureControlPublishRequestApprovalAllowed,
+  ensureControlPublishRequestPublishAllowed,
+  ensureControlPublishRequestRejectionAllowed,
+  ensureControlPublishRequestWithdrawalAllowed,
+  getControlPublishRequestRequiredApprovals,
+} from './control-publish-governance';
 
 export type DraftControlListItem = {
   author: {
@@ -331,7 +339,6 @@ export async function listControlProposedUpdates(membership: AuthorizedOrganizat
 }
 
 export async function listControlPublishRequests(membership: AuthorizedOrganizationMember) {
-  const policy = await getApprovalPolicy(membership.organizationId);
   const rows = await db
     .select({
       acceptedEvidenceTypes: controlPublishRequests.acceptedEvidenceTypes,
@@ -395,8 +402,11 @@ export async function listControlPublishRequests(membership: AuthorizedOrganizat
       },
       controlId,
       draftControlId,
-      isPublishable:
-        status === 'submitted' && (!policy.enabled || approvalCount >= policy.requiredApprovals),
+      isPublishable: canPublishControlPublishRequest({
+        approvalCount,
+        requiredApprovalCount,
+        status,
+      }),
       proposedUpdateId,
       rejectionComment,
       requestType: requestType as 'draft_control' | 'proposed_update',
@@ -427,9 +437,7 @@ export async function publishControlPublishRequest(
     return null;
   }
 
-  if (request.status !== 'submitted') {
-    throw new ControlPublishInputError('Only submitted Control Publish Requests can be published.');
-  }
+  ensureControlPublishRequestPublishAllowed(request);
 
   if (request.requestType === 'draft_control' && request.draftControlId) {
     return publishDraftControl(membership, request.draftControlId, toPublishInput(request));
@@ -575,7 +583,7 @@ export async function publishDraftControl(
 
   await ensureControlPublishAllowed({
     draftControlId,
-    membership,
+    organizationId: membership.organizationId,
     proposedUpdateId: null,
   });
 
@@ -768,11 +776,9 @@ export async function submitDraftControlPublishRequest(
 ) {
   validatePublishInput(input);
 
-  const policy = await getApprovalPolicy(membership.organizationId);
-
-  if (!policy.enabled) {
-    throw new ControlPublishRequestInputError('Control Approval Policy is not enabled.');
-  }
+  const requiredApprovalCount = await getControlPublishRequestRequiredApprovals(
+    membership.organizationId,
+  );
 
   const draftControl = await db
     .select()
@@ -816,7 +822,7 @@ export async function submitDraftControlPublishRequest(
     proposedUpdateId: null,
     releaseImpact: input.releaseImpact,
     requestType: 'draft_control',
-    requiredApprovalCount: policy.requiredApprovals,
+    requiredApprovalCount,
     rejectionComment: null,
     status: 'submitted',
     submittedAt: new Date(),
@@ -840,11 +846,9 @@ export async function submitControlProposedUpdatePublishRequest(
   controlId: string,
   proposedUpdateId: string,
 ) {
-  const policy = await getApprovalPolicy(membership.organizationId);
-
-  if (!policy.enabled) {
-    throw new ControlPublishRequestInputError('Control Approval Policy is not enabled.');
-  }
+  const requiredApprovalCount = await getControlPublishRequestRequiredApprovals(
+    membership.organizationId,
+  );
 
   const proposedUpdate = await db
     .select()
@@ -889,7 +893,7 @@ export async function submitControlProposedUpdatePublishRequest(
     proposedUpdateId,
     releaseImpact: proposedUpdate.releaseImpact,
     requestType: 'proposed_update',
-    requiredApprovalCount: policy.requiredApprovals,
+    requiredApprovalCount,
     rejectionComment: null,
     status: 'submitted',
     submittedAt: new Date(),
@@ -918,17 +922,11 @@ export async function approveControlPublishRequest(
     return null;
   }
 
-  if (request.authorMemberId === membership.id) {
-    throw new ControlPublishRequestInputError(
-      'Authors cannot approve their own Control Publish Requests.',
-    );
-  }
-
-  if (request.status !== 'submitted') {
-    throw new ControlPublishRequestInputError(
-      'Only submitted Control Publish Requests can be approved.',
-    );
-  }
+  ensureControlPublishRequestApprovalAllowed({
+    approverMemberId: membership.id,
+    authorMemberId: request.authorMemberId,
+    status: request.status,
+  });
 
   const existingApproval = await db
     .select({ id: controlPublishRequestApprovals.id })
@@ -972,11 +970,7 @@ export async function rejectControlPublishRequest(
     throw new ControlPublishRequestInputError('Rejection comment is required.');
   }
 
-  if (request.status !== 'submitted') {
-    throw new ControlPublishRequestInputError(
-      'Only submitted Control Publish Requests can be rejected.',
-    );
-  }
+  ensureControlPublishRequestRejectionAllowed(request.status);
 
   await clearControlPublishRequestApprovals(publishRequestId);
   await db
@@ -997,17 +991,11 @@ export async function withdrawControlPublishRequest(
     return null;
   }
 
-  if (request.authorMemberId !== membership.id) {
-    throw new ControlPublishRequestInputError(
-      'Only the author can withdraw a Control Publish Request.',
-    );
-  }
-
-  if (request.status !== 'submitted') {
-    throw new ControlPublishRequestInputError(
-      'Only submitted Control Publish Requests can be withdrawn.',
-    );
-  }
+  ensureControlPublishRequestWithdrawalAllowed({
+    authorMemberId: request.authorMemberId,
+    memberId: membership.id,
+    status: request.status,
+  });
 
   await clearControlPublishRequestApprovals(publishRequestId);
   await db
@@ -1025,7 +1013,7 @@ export async function publishControlProposedUpdate(
 ) {
   await ensureControlPublishAllowed({
     draftControlId: null,
-    membership,
+    organizationId: membership.organizationId,
     proposedUpdateId,
   });
 
@@ -1394,57 +1382,6 @@ async function getControlVersions(controlId: string) {
     .orderBy(desc(controlVersions.versionNumber));
 
   return rows.map((row) => toControlVersionResponse(row));
-}
-
-async function getApprovalPolicy(organizationId: string) {
-  const organization = await db
-    .select({
-      enabled: organizations.controlApprovalPolicyEnabled,
-      requiredApprovals: organizations.controlApprovalRequiredCount,
-    })
-    .from(organizations)
-    .where(eq(organizations.id, organizationId))
-    .limit(1)
-    .then((rows) => rows[0] ?? null);
-
-  if (!organization) {
-    throw new ControlPublishInputError('Organization not found.');
-  }
-
-  return organization;
-}
-
-async function ensureControlPublishAllowed(input: {
-  draftControlId: string | null;
-  membership: AuthorizedOrganizationMember;
-  proposedUpdateId: string | null;
-}) {
-  const policy = await getApprovalPolicy(input.membership.organizationId);
-
-  if (!policy.enabled) {
-    return;
-  }
-
-  const request = await db
-    .select({ approvalCount: controlPublishRequests.approvalCount })
-    .from(controlPublishRequests)
-    .where(
-      and(
-        eq(controlPublishRequests.organizationId, input.membership.organizationId),
-        eq(controlPublishRequests.status, 'submitted'),
-        input.draftControlId
-          ? eq(controlPublishRequests.draftControlId, input.draftControlId)
-          : eq(controlPublishRequests.proposedUpdateId, input.proposedUpdateId ?? ''),
-      ),
-    )
-    .limit(1)
-    .then((rows) => rows[0] ?? null);
-
-  if (!request || request.approvalCount < policy.requiredApprovals) {
-    throw new ControlPublishInputError(
-      'Control Approval Policy requires an approved Control Publish Request before publishing.',
-    );
-  }
 }
 
 async function getReviewableControlPublishRequest(

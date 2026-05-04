@@ -1190,26 +1190,26 @@ describe('Draft Controls', () => {
     });
   });
 
-  it('uses current Control Approval Policy settings when publishing in-flight requests', async () => {
+  it('uses snapshotted Control Approval Policy settings for in-flight requests', async () => {
     const { headers: ownerHeaders, organization } = await createSignedInOwner(
-      'request-policy-current-owner',
+      'request-policy-snapshot-owner',
     );
     const firstAdmin = await createSignedInMember({
       ownerHeaders,
       organizationId: organization.id,
-      prefix: 'request-policy-current-first-admin',
+      prefix: 'request-policy-snapshot-first-admin',
       role: 'admin',
     });
     const secondAdmin = await createSignedInMember({
       ownerHeaders,
       organizationId: organization.id,
-      prefix: 'request-policy-current-second-admin',
+      prefix: 'request-policy-snapshot-second-admin',
       role: 'admin',
     });
     const member = await createSignedInMember({
       ownerHeaders,
       organizationId: organization.id,
-      prefix: 'request-policy-current-member',
+      prefix: 'request-policy-snapshot-member',
       role: 'member',
     });
 
@@ -1222,7 +1222,7 @@ describe('Draft Controls', () => {
 
     const firstDraftResponse = await createDraftControlRequest(organization.slug, member.headers, {
       controlCode: 'AUTH-036',
-      title: 'Policy count follows current settings',
+      title: 'Policy count follows request snapshot',
     });
     const firstDraft = firstDraftResponse.body.draftControl as { id: string };
     const firstSubmitResponse = await submitDraftControlPublishRequest(
@@ -1253,11 +1253,28 @@ describe('Draft Controls', () => {
     await expect(
       listControlPublishRequestsRequest(organization.slug, ownerHeaders),
     ).resolves.toMatchObject({
+      body: { publishRequests: [{ controlCode: 'AUTH-036', isPublishable: false }] },
+      status: 200,
+    });
+    await expect(
+      publishControlPublishRequest(organization.slug, firstRequest.id, ownerHeaders),
+    ).resolves.toMatchObject({
+      body: {
+        error:
+          'Control Approval Policy requires an approved Control Publish Request before publishing.',
+      },
+      status: 400,
+    });
+
+    await approveControlPublishRequest(organization.slug, firstRequest.id, secondAdmin.headers);
+    await expect(
+      listControlPublishRequestsRequest(organization.slug, ownerHeaders),
+    ).resolves.toMatchObject({
       body: { publishRequests: [{ controlCode: 'AUTH-036', isPublishable: true }] },
       status: 200,
     });
     await expect(
-      publishControlPublishRequest(organization.slug, firstRequest.id, secondAdmin.headers),
+      publishControlPublishRequest(organization.slug, firstRequest.id, ownerHeaders),
     ).resolves.toMatchObject({
       body: { control: { controlCode: 'AUTH-036', currentVersion: { versionNumber: 1 } } },
       status: 201,
@@ -1291,7 +1308,23 @@ describe('Draft Controls', () => {
     await expect(
       publishControlPublishRequest(organization.slug, secondRequest.id, ownerHeaders),
     ).resolves.toMatchObject({
-      body: { control: { controlCode: 'AUTH-037', currentVersion: { versionNumber: 1 } } },
+      body: {
+        error:
+          'Control Approval Policy requires an approved Control Publish Request before publishing.',
+      },
+      status: 400,
+    });
+
+    const thirdDraftResponse = await createDraftControlRequest(organization.slug, ownerHeaders, {
+      controlCode: 'AUTH-038',
+      title: 'Disabled policy direct publish',
+    });
+    const thirdDraft = thirdDraftResponse.body.draftControl as { id: string };
+
+    await expect(
+      publishDraftControlRequest(organization.slug, thirdDraft.id, ownerHeaders),
+    ).resolves.toMatchObject({
+      body: { control: { controlCode: 'AUTH-038', currentVersion: { versionNumber: 1 } } },
       status: 201,
     });
   });
