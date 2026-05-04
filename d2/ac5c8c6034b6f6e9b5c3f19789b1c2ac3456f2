@@ -1,0 +1,23 @@
+apps/web/src/features/controls/pages/controls.tsx
+  482d55e4ad17f39b 741-744,798,809,827,834
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "d2ac5c8c6034b6f6e9b5c3f19789b1c2ac3456f2",
+  "prompts": {
+    "482d55e4ad17f39b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019df434-a748-7452-9399-dd6beea7202e",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Patryk Sztuczka",
+      "messages": [],
+      "total_additions": 8,
+      "total_deletions": 4,
+      "accepted_lines": 8,
+      "overriden_lines": 0
+    }
+  }
+}
