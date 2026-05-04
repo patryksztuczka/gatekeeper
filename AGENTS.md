@@ -17,7 +17,7 @@ This root node covers repo-wide language, boundaries, and navigation. Load app-s
 - Use **Project** for the organization-scoped governance work item.
 - Use **Project Owner** for the member accountable for a Project. Avoid ambiguous "owner" when it could mean Organization owner.
 - Archived Projects and Archived Controls are hidden from active work but retained. Do not describe archived retained records as deleted.
-- Use **Control Library**, **Control**, **Control Code**, **Control Version**, **Control Metadata**, **Release Impact**, and **Control Publish Request** consistently.
+- Use **Control Library**, **Control**, **Control Code**, **Control Version**, **Control Metadata**, and **Control Publish Request** consistently.
 - Better Auth owns `/api/auth/*`; Gatekeeper product APIs should not be added under Better Auth routes.
 
 ## Global Engineering Rules
