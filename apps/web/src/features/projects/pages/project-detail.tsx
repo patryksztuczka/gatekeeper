@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
 import {
   AlertCircle,
@@ -13,7 +12,12 @@ import {
   buildProjectSettingsPath,
   buildProjectsPath,
 } from '@/features/projects/routing/project-routing';
-import { queryClient, trpc } from '@/lib/trpc';
+import {
+  useProjectAccess,
+  useProjectArchiveActions,
+  useProjectDetail,
+} from '@/features/projects/api/project-workspace';
+import type { ProjectDetail } from '@/features/projects/api/project-api';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -31,39 +35,24 @@ export function ProjectDetailPage() {
   const projectsPath = organizationSlug ? buildProjectsPath(organizationSlug) : '/';
   const hasProjectIdentity = Boolean(organizationSlug && projectSlug);
 
-  const detailQuery = useQuery(
-    trpc.projects.detail.queryOptions(
-      { organizationSlug, projectSlug },
-      { enabled: hasProjectIdentity },
-    ),
-  );
-  const resolutionQuery = useQuery(
-    trpc.organizations.membershipResolution.queryOptions(undefined, {
-      enabled: Boolean(organizationSlug),
-    }),
-  );
-  const restoreProjectMutation = useMutation(
-    trpc.projects.restore.mutationOptions({
-      onSuccess: () => {
-        void queryClient.invalidateQueries();
-      },
-      onError: (caughtError) => {
-        setActionError(caughtError.message || 'Unable to restore Project.');
-      },
-    }),
-  );
-  const organization = resolutionQuery.data?.organizations.find(
-    (org) => org.slug === organizationSlug,
-  );
-  const currentRole = organization?.role ?? null;
-  const result = restoreProjectMutation.data
-    ? { status: 'available' as const, project: restoreProjectMutation.data.project }
+  const detailQuery = useProjectDetail({ organizationSlug, projectSlug });
+  const projectAccess = useProjectAccess(organizationSlug);
+  const [restoredProject, setRestoredProject] = useState<ProjectDetail | null>(null);
+  const projectArchiveActions = useProjectArchiveActions({
+    onError: (message) => {
+      setActionError(message || 'Unable to restore Project.');
+    },
+    onRestored: (response) => setRestoredProject(response.project),
+    organizationSlug,
+  });
+  const result = restoredProject
+    ? { status: 'available' as const, project: restoredProject }
     : detailQuery.data;
 
   if (
     hasProjectIdentity &&
-    (detailQuery.isPending || resolutionQuery.isPending) &&
-    !restoreProjectMutation.data
+    (detailQuery.isPending || projectAccess.isPending) &&
+    !restoredProject
   ) {
     return (
       <div className="mx-auto w-full max-w-5xl space-y-6">
@@ -74,10 +63,10 @@ export function ProjectDetailPage() {
     );
   }
 
-  if (!result || result.status === 'unavailable' || detailQuery.error || resolutionQuery.error) {
+  if (!result || result.status === 'unavailable' || detailQuery.error || projectAccess.error) {
     return (
       <div className="mx-auto w-full max-w-3xl space-y-4">
-        <Alert variant={detailQuery.error || resolutionQuery.error ? 'destructive' : 'default'}>
+        <Alert variant={detailQuery.error || projectAccess.error ? 'destructive' : 'default'}>
           <AlertCircle className="size-4" />
           <AlertTitle>Project unavailable</AlertTitle>
           <AlertDescription>
@@ -95,13 +84,13 @@ export function ProjectDetailPage() {
   const settingsPath = organizationSlug
     ? buildProjectSettingsPath(organizationSlug, project.slug)
     : projectsPath;
-  const canManage = currentRole === 'owner' || currentRole === 'admin';
+  const canManage = projectAccess.canManageProjects;
 
   const handleRestore = () => {
     if (!organizationSlug || !projectSlug || !canManage) return;
 
     setActionError(null);
-    restoreProjectMutation.mutate({ organizationSlug, projectSlug });
+    projectArchiveActions.setProjectArchived(projectSlug, false);
   };
 
   return (
@@ -144,7 +133,7 @@ export function ProjectDetailPage() {
             <Button
               type="button"
               variant="outline"
-              disabled={restoreProjectMutation.isPending}
+              disabled={projectArchiveActions.isPending}
               onClick={handleRestore}
             >
               <RotateCcw />

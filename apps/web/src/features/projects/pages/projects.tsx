@@ -1,18 +1,21 @@
 import { useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useMutation, useQuery } from '@tanstack/react-query';
 import { AlertCircle, Archive, CheckCircle2, Plus, RotateCcw } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { humanizeAuthError } from '@/features/auth/api/auth-errors';
-import { buildOrganizationPath, slugifyProjectName } from '@/features/auth/routing/auth-routing';
-import type { OrganizationMemberListItem } from '@/features/organizations/api/organization-api';
+import { buildProjectPath, slugifyProjectName } from '@/features/projects/routing/project-routing';
 import type { ProjectListItem } from '@/features/projects/api/project-api';
+import {
+  useCreateProject,
+  useProjectArchiveActions,
+  useProjectList,
+  useProjectOwnerOptions,
+} from '@/features/projects/api/project-workspace';
 import {
   createProjectFormSchema,
   type CreateProjectFormValues,
 } from '@/features/projects/schemas/project-form-schemas';
-import { queryClient, trpc } from '@/lib/trpc';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -24,10 +27,6 @@ function formatDate(value: string) {
     month: 'short',
     year: 'numeric',
   });
-}
-
-function canCreateProjects(role: string | null) {
-  return role === 'owner' || role === 'admin';
 }
 
 function isArchivedView(value: string | null) {
@@ -49,73 +48,38 @@ export function ProjectsPage() {
   const projectStatus = archivedView ? 'archived' : 'active';
   const hasOrganization = Boolean(organizationSlug);
 
-  const projectQuery = useQuery(
-    trpc.projects.list.queryOptions(
-      { organizationSlug: organizationSlug ?? '', status: projectStatus },
-      { enabled: hasOrganization },
-    ),
-  );
-  const memberQuery = useQuery(
-    trpc.organizations.members.queryOptions(
-      { organizationSlug: organizationSlug ?? '' },
-      { enabled: hasOrganization },
-    ),
-  );
-  const resolutionQuery = useQuery(
-    trpc.organizations.membershipResolution.queryOptions(undefined, { enabled: hasOrganization }),
-  );
-  const createProjectMutation = useMutation(
-    trpc.projects.create.mutationOptions({
-      onSuccess: (response) => {
-        void queryClient.invalidateQueries();
-        if (!organizationSlug) return;
+  const projectQuery = useProjectList({ organizationSlug, status: projectStatus });
+  const projectOptions = useProjectOwnerOptions(organizationSlug);
+  const createProjectMutation = useCreateProject({
+    onError: (message) => {
+      setError(humanizeAuthError(null, message, 'Unable to create Project.'));
+    },
+    onSuccess: (response) => {
+      if (!organizationSlug) return;
 
-        resetForm();
-        setIsModalOpen(false);
-        setStatus('Project created.');
-        navigate(buildOrganizationPath(organizationSlug, `/p/${response.project.slug}`));
-      },
-      onError: (caughtError) => {
-        setError(humanizeAuthError(null, caughtError.message, 'Unable to create Project.'));
-      },
-    }),
-  );
-  const archiveProjectMutation = useMutation(
-    trpc.projects.archive.mutationOptions({
-      onSuccess: () => {
-        void queryClient.invalidateQueries();
-        setStatus('Project archived.');
-      },
-      onError: (caughtError) => {
-        setError(humanizeAuthError(null, caughtError.message, 'Unable to archive Project.'));
-      },
-    }),
-  );
-  const restoreProjectMutation = useMutation(
-    trpc.projects.restore.mutationOptions({
-      onSuccess: () => {
-        void queryClient.invalidateQueries();
-        setStatus('Project restored.');
-      },
-      onError: (caughtError) => {
-        setError(humanizeAuthError(null, caughtError.message, 'Unable to restore Project.'));
-      },
-    }),
-  );
+      resetForm();
+      setIsModalOpen(false);
+      setStatus('Project created.');
+      navigate(buildProjectPath(organizationSlug, response.project.slug));
+    },
+    organizationSlug,
+  });
+  const projectArchiveActions = useProjectArchiveActions({
+    onArchived: () => setStatus('Project archived.'),
+    onError: (message) => {
+      setError(humanizeAuthError(null, message, 'Unable to update Project lifecycle.'));
+    },
+    onRestored: () => setStatus('Project restored.'),
+    organizationSlug,
+  });
 
   const projects = projectQuery.data?.projects ?? [];
-  const members: OrganizationMemberListItem[] = memberQuery.data?.members ?? [];
-  const organization = resolutionQuery.data?.organizations.find(
-    (org) => org.slug === organizationSlug,
-  );
-  const currentRole = organization?.role ?? null;
-  const loadError = projectQuery.error ?? memberQuery.error ?? resolutionQuery.error;
+  const members = projectOptions.members;
+  const loadError = projectQuery.error ?? projectOptions.error;
   const displayError =
     error ??
     (loadError ? humanizeAuthError(null, loadError.message, 'Unable to load Projects.') : null);
-  const isLoading =
-    hasOrganization &&
-    (projectQuery.isPending || memberQuery.isPending || resolutionQuery.isPending);
+  const isLoading = hasOrganization && (projectQuery.isPending || projectOptions.isPending);
 
   const resetForm = () => {
     createProjectForm.reset();
@@ -126,13 +90,7 @@ export function ProjectsPage() {
 
     setError(null);
     setStatus(null);
-    createProjectMutation.mutate({
-      description: values.description,
-      name: values.name,
-      organizationSlug,
-      projectOwnerMemberId: values.projectOwnerMemberId || null,
-      slug: values.slug,
-    });
+    createProjectMutation.createProject(values);
   };
 
   const handleArchiveStateChange = (project: ProjectListItem) => {
@@ -142,13 +100,13 @@ export function ProjectsPage() {
     setStatus(null);
 
     if (archivedView) {
-      restoreProjectMutation.mutate({ organizationSlug, projectSlug: project.slug });
+      projectArchiveActions.setProjectArchived(project.slug, false);
     } else {
-      archiveProjectMutation.mutate({ organizationSlug, projectSlug: project.slug });
+      projectArchiveActions.setProjectArchived(project.slug, true);
     }
   };
 
-  const canCreate = canCreateProjects(currentRole);
+  const canCreate = projectOptions.canManageProjects;
   const emptyTitle = archivedView ? 'No archived Projects' : 'No active Projects yet';
   const emptyDescription = archivedView
     ? 'Archived Projects will appear here after they are hidden from active work.'
@@ -223,11 +181,7 @@ export function ProjectsPage() {
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="space-y-1">
                   <Link
-                    to={
-                      organizationSlug
-                        ? buildOrganizationPath(organizationSlug, `/p/${project.slug}`)
-                        : '#'
-                    }
+                    to={organizationSlug ? buildProjectPath(organizationSlug, project.slug) : '#'}
                     className="text-base font-semibold hover:underline"
                   >
                     {project.name}
@@ -252,7 +206,7 @@ export function ProjectsPage() {
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={archiveProjectMutation.isPending || restoreProjectMutation.isPending}
+                    disabled={projectArchiveActions.isPending}
                     onClick={() => handleArchiveStateChange(project)}
                   >
                     {archivedView ? <RotateCcw /> : <Archive />}

@@ -3,6 +3,7 @@ import {
   buildProjectPath,
   buildProjectSettingsPath,
   buildProjectsPath,
+  slugifyProjectName,
 } from '@/features/projects/routing/project-routing';
 
 describe('project routing helpers', () => {
@@ -12,5 +13,11 @@ describe('project routing helpers', () => {
       '/acme/p/risk-register/settings',
     );
     expect(buildProjectsPath('acme')).toBe('/acme/projects');
+  });
+
+  it('slugifies Project names for editable Project creation slugs', () => {
+    expect(slugifyProjectName('SOC 2 Readiness')).toBe('soc-2-readiness');
+    expect(slugifyProjectName('Controls & Evidence')).toBe('controls-evidence');
+    expect(slugifyProjectName('')).toBe('');
   });
 });

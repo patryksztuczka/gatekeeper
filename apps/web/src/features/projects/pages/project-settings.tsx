@@ -1,28 +1,27 @@
 import { useEffect, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useMutation, useQuery } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { Link, useParams } from 'react-router';
 import { AlertCircle, Archive, CheckCircle2, LockKeyhole, RotateCcw } from 'lucide-react';
 import type { ProjectDetail } from '@/features/projects/api/project-api';
+import {
+  useProjectArchiveActions,
+  useProjectDetail,
+  useProjectOwnerOptions,
+  useProjectSettingsMutation,
+} from '@/features/projects/api/project-workspace';
 import {
   projectSettingsFormSchema,
   type ProjectSettingsFormValues,
 } from '@/features/projects/schemas/project-form-schemas';
 import { buildProjectPath, buildProjectsPath } from '@/features/projects/routing/project-routing';
 import { humanizeAuthError } from '@/features/auth/api/auth-errors';
-import type { OrganizationMemberListItem } from '@/features/organizations/api/organization-api';
-import { queryClient, trpc } from '@/lib/trpc';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
-
-function canManageProjects(role: string | null) {
-  return role === 'owner' || role === 'admin';
-}
 
 export function ProjectSettingsPage() {
   const { organizationSlug = '', projectSlug = '' } = useParams();
@@ -36,82 +35,50 @@ export function ProjectSettingsPage() {
   const projectsPath = organizationSlug ? buildProjectsPath(organizationSlug) : '/';
   const hasProjectIdentity = Boolean(organizationSlug && projectSlug);
 
-  const detailQuery = useQuery(
-    trpc.projects.detail.queryOptions(
-      { organizationSlug, projectSlug },
-      { enabled: hasProjectIdentity },
-    ),
-  );
-  const memberQuery = useQuery(
-    trpc.organizations.members.queryOptions(
-      { organizationSlug },
-      { enabled: Boolean(organizationSlug) },
-    ),
-  );
-  const resolutionQuery = useQuery(
-    trpc.organizations.membershipResolution.queryOptions(undefined, {
-      enabled: Boolean(organizationSlug),
-    }),
-  );
-  const updateProjectMutation = useMutation(
-    trpc.projects.update.mutationOptions({
-      onSuccess: (response) => {
-        void queryClient.invalidateQueries();
-        const updatedProject = response.project;
+  const detailQuery = useProjectDetail({ organizationSlug, projectSlug });
+  const projectOptions = useProjectOwnerOptions(organizationSlug);
+  const updateProjectMutation = useProjectSettingsMutation({
+    onError: (message) => {
+      setSaveError(humanizeAuthError(null, message, 'Unable to save Project settings.'));
+    },
+    onSuccess: (response) => {
+      const updatedProject = response.project;
 
-        setProjectOverride(updatedProject);
-        projectSettingsForm.reset({
-          name: updatedProject.name,
-          description: updatedProject.description,
-          projectOwnerMemberId: updatedProject.projectOwner?.id ?? '',
-        });
-        setStatus('Project settings saved.');
-      },
-      onError: (caughtError) => {
-        setSaveError(
-          humanizeAuthError(null, caughtError.message, 'Unable to save Project settings.'),
-        );
-      },
-    }),
-  );
-  const archiveProjectMutation = useMutation(
-    trpc.projects.archive.mutationOptions({
-      onSuccess: (response) => {
-        void queryClient.invalidateQueries();
-        setProjectOverride(response.project);
-        setStatus('Project archived.');
-      },
-      onError: (caughtError) => {
-        setSaveError(humanizeAuthError(null, caughtError.message, 'Unable to archive Project.'));
-      },
-    }),
-  );
-  const restoreProjectMutation = useMutation(
-    trpc.projects.restore.mutationOptions({
-      onSuccess: (response) => {
-        void queryClient.invalidateQueries();
-        setProjectOverride(response.project);
-        setStatus('Project restored.');
-      },
-      onError: (caughtError) => {
-        setSaveError(humanizeAuthError(null, caughtError.message, 'Unable to restore Project.'));
-      },
-    }),
-  );
+      setProjectOverride(updatedProject);
+      projectSettingsForm.reset({
+        name: updatedProject.name,
+        description: updatedProject.description,
+        projectOwnerMemberId: updatedProject.projectOwner?.id ?? '',
+      });
+      setStatus('Project settings saved.');
+    },
+    organizationSlug,
+    projectSlug,
+  });
+  const projectArchiveActions = useProjectArchiveActions({
+    onArchived: (response) => {
+      setProjectOverride(response.project);
+      setStatus('Project archived.');
+    },
+    onError: (message) => {
+      setSaveError(humanizeAuthError(null, message, 'Unable to update Project lifecycle.'));
+    },
+    onRestored: (response) => {
+      setProjectOverride(response.project);
+      setStatus('Project restored.');
+    },
+    organizationSlug,
+  });
 
   const queryProject = detailQuery.data?.status === 'available' ? detailQuery.data.project : null;
   const project = projectOverride ?? queryProject;
-  const members: OrganizationMemberListItem[] = memberQuery.data?.members ?? [];
-  const organization = resolutionQuery.data?.organizations.find(
-    (org) => org.slug === organizationSlug,
-  );
-  const currentRole = organization?.role ?? null;
-  const loadError = detailQuery.error ?? memberQuery.error ?? resolutionQuery.error;
+  const members = projectOptions.members;
+  const loadError = detailQuery.error ?? projectOptions.error;
   const loadErrorMessage = loadError
     ? humanizeAuthError(null, loadError.message, 'Unable to load Project settings.')
     : null;
   const isSaving = updateProjectMutation.isPending;
-  const isArchiving = archiveProjectMutation.isPending || restoreProjectMutation.isPending;
+  const isArchiving = projectArchiveActions.isPending;
 
   useEffect(() => {
     if (!queryProject) return;
@@ -125,37 +92,22 @@ export function ProjectSettingsPage() {
   }, [projectSettingsForm, queryProject]);
 
   const handleSave = (values: ProjectSettingsFormValues) => {
-    if (!organizationSlug || !projectSlug || !canManageProjects(currentRole)) return;
+    if (!organizationSlug || !projectSlug || !projectOptions.canManageProjects) return;
 
     setSaveError(null);
     setStatus(null);
-    updateProjectMutation.mutate({
-      description: values.description,
-      name: values.name,
-      organizationSlug,
-      projectOwnerMemberId: values.projectOwnerMemberId || null,
-      projectSlug,
-    });
+    updateProjectMutation.updateProjectSettings(values);
   };
 
   const handleArchiveStateChange = () => {
-    if (!organizationSlug || !projectSlug || !canManageProjects(currentRole) || !project) return;
+    if (!organizationSlug || !projectSlug || !projectOptions.canManageProjects || !project) return;
 
     setSaveError(null);
     setStatus(null);
-
-    if (project.archivedAt) {
-      restoreProjectMutation.mutate({ organizationSlug, projectSlug });
-    } else {
-      archiveProjectMutation.mutate({ organizationSlug, projectSlug });
-    }
+    projectArchiveActions.setProjectArchived(projectSlug, !project.archivedAt);
   };
 
-  if (
-    hasProjectIdentity &&
-    (detailQuery.isPending || memberQuery.isPending || resolutionQuery.isPending) &&
-    !project
-  ) {
+  if (hasProjectIdentity && (detailQuery.isPending || projectOptions.isPending) && !project) {
     return (
       <div className="mx-auto w-full max-w-3xl space-y-6">
         <Skeleton className="h-8 w-56" />
@@ -185,7 +137,7 @@ export function ProjectSettingsPage() {
   const projectPath = organizationSlug
     ? buildProjectPath(organizationSlug, project.slug)
     : projectsPath;
-  const canEdit = canManageProjects(currentRole);
+  const canEdit = projectOptions.canManageProjects;
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6">
