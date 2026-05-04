@@ -1,4 +1,11 @@
-import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import {
+  foreignKey,
+  index,
+  integer,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 
 export const users = sqliteTable('users', {
@@ -292,6 +299,7 @@ export const controlVersions = sqliteTable(
   },
   (table) => [
     index('control_version_control_id_idx').on(table.controlId),
+    uniqueIndex('control_version_control_id_id_unique').on(table.controlId, table.id),
     uniqueIndex('control_version_number_unique').on(table.controlId, table.versionNumber),
   ],
 );
@@ -402,6 +410,11 @@ export const checklistItems = sqliteTable(
     index('checklist_item_control_id_idx').on(table.controlId),
     index('checklist_item_control_version_id_idx').on(table.controlVersionId),
     index('checklist_item_status_idx').on(table.status),
+    foreignKey({
+      columns: [table.controlId, table.controlVersionId],
+      foreignColumns: [controlVersions.controlId, controlVersions.id],
+      name: 'checklist_item_control_version_control_fk',
+    }).onDelete('cascade'),
     uniqueIndex('checklist_item_active_control_unique')
       .on(table.projectChecklistId, table.controlId)
       .where(sql`${table.status} = 'active'`),

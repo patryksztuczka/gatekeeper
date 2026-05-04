@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { db } from '../src/db/client';
-import { members, users } from '../src/db/schema';
+import { checklistItems, members, users } from '../src/db/schema';
 import { auth } from '../src/lib/auth';
 import { callTRPC } from './trpc-test-utils';
 
@@ -543,6 +543,45 @@ describe('Project Checklists', () => {
         itemStatus: 'active',
       }),
     ]);
+  });
+
+  it('rejects Checklist Items whose Control Version belongs to another Control', async () => {
+    const { headers, organization } = await createSignedInOwner('checklist-version-link-owner');
+    const ownerMembership = await getFirstMembership(organization.id);
+    const project = await createProject({
+      headers,
+      organizationSlug: organization.slug,
+      projectOwnerMemberId: ownerMembership.id,
+    });
+    const firstControl = await createActiveControl({
+      headers,
+      organizationSlug: organization.slug,
+      title: 'Verify production access',
+    });
+    const secondControl = await createActiveControl({
+      headers,
+      organizationSlug: organization.slug,
+      title: 'Verify change approval',
+    });
+    const checklistResponse = await createProjectChecklist({
+      controlIds: [firstControl.id],
+      headers,
+      name: 'Version integrity',
+      organizationSlug: organization.slug,
+      projectSlug: project.slug,
+    });
+    const projectChecklist = checklistResponse.body.projectChecklist;
+
+    await expect(
+      db.insert(checklistItems).values({
+        checked: false,
+        controlId: firstControl.id,
+        controlVersionId: secondControl.currentVersion.id,
+        id: crypto.randomUUID(),
+        projectChecklistId: projectChecklist.id,
+        status: 'removed',
+      }),
+    ).rejects.toThrow();
   });
 
   it('lets only the Project Owner check and uncheck Checklist Items', async () => {
