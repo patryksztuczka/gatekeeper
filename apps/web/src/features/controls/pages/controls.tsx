@@ -738,6 +738,10 @@ export function ControlsPage() {
                     publishRequests,
                   })
                 : null;
+              const proposedUpdateActionPending =
+                proposedUpdate &&
+                (publishingProposalId === proposedUpdate.id ||
+                  reviewingRequestId === proposedUpdate.id);
 
               return (
                 <article key={control.id} className="rounded-xl border bg-card p-5">
@@ -791,7 +795,7 @@ export function ControlsPage() {
                               <Button
                                 type="button"
                                 variant="outline"
-                                disabled={reviewingRequestId === proposedUpdate.id}
+                                disabled={Boolean(proposedUpdateActionPending)}
                                 onClick={() =>
                                   void handleRejectControlProposedUpdate(proposedUpdate)
                                 }
@@ -802,7 +806,7 @@ export function ControlsPage() {
                             <Button
                               type="button"
                               disabled={
-                                publishingProposalId === proposedUpdate.id ||
+                                Boolean(proposedUpdateActionPending) ||
                                 Boolean(submittedProposedUpdatePublishRequest)
                               }
                               onClick={() => void handleSubmitControlProposedUpdate(proposedUpdate)}
@@ -820,14 +824,14 @@ export function ControlsPage() {
                             <Button
                               type="button"
                               variant="outline"
-                              disabled={reviewingRequestId === proposedUpdate.id}
+                              disabled={Boolean(proposedUpdateActionPending)}
                               onClick={() => void handleRejectControlProposedUpdate(proposedUpdate)}
                             >
                               Reject
                             </Button>
                             <Button
                               type="button"
-                              disabled={publishingProposalId === proposedUpdate.id}
+                              disabled={Boolean(proposedUpdateActionPending)}
                               onClick={() =>
                                 void handlePublishControlProposedUpdate(proposedUpdate)
                               }
