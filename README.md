@@ -20,7 +20,7 @@
 Gatekeeper helps organizations run release governance from one place. It brings Projects, reusable Controls, checklist foundations, exceptions, and audit evidence into a structured workflow so release decisions are based on evidence instead of memory, scattered spreadsheets, or private messages.
 
 > [!NOTE]
-> Gatekeeper is in active product development. The source currently implements authentication, organization membership, Projects, and Control Library workflows. The `docs/` directory describes the broader product direction and feature roadmap.
+> Gatekeeper is in active product development. The source currently implements authentication, organization membership, Projects, and Control Library workflows. Product language now lives in domain context files linked from `CONTEXT-MAP.md`.
 
 ## Overview
 
@@ -62,7 +62,7 @@ flowchart LR
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `apps/web`          | Vite React 19 SPA with React Router, TanStack Query, tRPC client, Better Auth client, Tailwind CSS, and shadcn-style UI primitives. |
 | `apps/backend-hono` | Hono Cloudflare Worker with Better Auth, tRPC, Drizzle ORM, Cloudflare D1, and Zod validation.                                      |
-| `docs`              | Business docs, feature specifications, and architecture decision records.                                                           |
+| `docs`              | Domain context documentation and architecture decision records.                                                                      |
 | `CONTEXT-MAP.md`    | Root map for domain contexts, relationships, and canonical product language.                                                        |
 | `compose.yaml`      | Local Mailpit service for auth and invitation emails.                                                                               |
 
@@ -195,14 +195,13 @@ CI runs separate web and backend workflows on pull requests and pushes to `maste
 
 ## Documentation
 
-| Document                                                                           | What it covers                                                                                                                                                 |
-| ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`CONTEXT-MAP.md`](./CONTEXT-MAP.md)                                               | Root map for domain contexts, relationships, and canonical product language.                                                                                    |
-| [`docs/README.md`](./docs/README.md)                                               | Index of business documents, feature specs, and ADRs.                                                                                                          |
-| [`docs/01-problem-and-business-value.md`](./docs/01-problem-and-business-value.md) | Problem statement and business value.                                                                                                                          |
-| [`docs/02-product-vision-and-scope.md`](./docs/02-product-vision-and-scope.md)     | Product vision, scope, and principles.                                                                                                                         |
-| [`docs/adr`](./docs/adr)                                                           | Global architecture decisions; context-specific ADRs are linked from `CONTEXT-MAP.md`.                                                                          |
-| [`docs/features`](./docs/features)                                                 | Feature-level specs for Projects, checklists, Control Library, evidence, exceptions, approvals, audit, MCP workflows, RBAC, notifications, and authentication. |
+| Document                                                       | What it covers                                                                          |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| [`CONTEXT-MAP.md`](./CONTEXT-MAP.md)                           | Root map for domain contexts, relationships, and canonical product language.             |
+| [`docs/contexts`](./docs/contexts)                             | Context-owned language for Identity & Organization, Projects, and Control Library.       |
+| [`docs/adr`](./docs/adr)                                       | Global architecture decisions.                                                          |
+| [`Identity & Organization ADRs`](./docs/contexts/identity-and-organization/docs/adr) | Authentication and organization-scoped app route decisions.                              |
+| [`Control Library ADRs`](./docs/contexts/control-library/docs/adr) | Control publish approval decisions.                                                     |
 
 ## Troubleshooting
 
