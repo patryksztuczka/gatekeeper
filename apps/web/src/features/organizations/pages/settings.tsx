@@ -5,7 +5,10 @@ import { AlertCircle, CheckCircle2, Copy } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { createOrganizationInvitation } from '@/features/auth/api/auth-api';
 import { humanizeAuthError } from '@/features/auth/api/auth-errors';
-import type { ControlApprovalPolicy } from '@/features/controls/api/control-api';
+import {
+  canManageControlPublishGovernance,
+  type ControlApprovalPolicy,
+} from '@/features/controls/api/control-publish-governance';
 import {
   controlApprovalPolicyFormSchema,
   type ControlApprovalPolicyFormValues,
@@ -51,7 +54,7 @@ export function SettingsPage() {
 
   const activeOrg =
     resolution?.organizations.find((org) => org.id === resolution.activeOrganizationId) ?? null;
-  const canManagePolicy = activeOrg?.role === 'owner' || activeOrg?.role === 'admin';
+  const canManagePolicy = canManageControlPublishGovernance(activeOrg?.role ?? null);
   const policyQuery = useQuery(
     trpc.controls.approvalPolicy.queryOptions(
       { organizationSlug: activeOrg?.slug ?? '' },

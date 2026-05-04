@@ -7,9 +7,16 @@ import { humanizeAuthError } from '@/features/auth/api/auth-errors';
 import type {
   ControlListItem,
   ControlProposedUpdateListItem,
-  ControlPublishRequestListItem,
   DraftControlListItem,
 } from '@/features/controls/api/control-api';
+import {
+  canCompleteDraftControl,
+  canManageControlPublishGovernance,
+  canPublishControlPublishRequest,
+  findSubmittedDraftControlPublishRequest,
+  findSubmittedProposedUpdatePublishRequest,
+  type ControlPublishRequestListItem,
+} from '@/features/controls/api/control-publish-governance';
 import { queryClient, trpc } from '@/lib/trpc';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -22,10 +29,6 @@ function formatDate(value: string) {
     month: 'short',
     year: 'numeric',
   });
-}
-
-function canPublishControls(role: string | null): boolean {
-  return role === 'owner' || role === 'admin';
 }
 
 function toStatusFilter(value: string | null) {
@@ -505,8 +508,11 @@ export function ControlsPage() {
       (!archivedView && publishRequestQuery.isPending) ||
       approvalPolicyQuery.isPending ||
       resolutionQuery.isPending);
-  const canPublish = canPublishControls(currentRole);
-  const canCompleteDrafts = canPublish || approvalPolicyEnabled;
+  const canPublish = canManageControlPublishGovernance(currentRole);
+  const canCompleteDrafts = canCompleteDraftControl({
+    canPublishControls: canPublish,
+    controlApprovalPolicyEnabled: approvalPolicyEnabled,
+  });
   const emptyTitle = archivedView ? 'No archived Controls' : 'No active Controls yet';
   const emptyDescription = archivedView
     ? 'Archived Controls will appear here after they are hidden from active use.'
@@ -691,6 +697,12 @@ export function ControlsPage() {
               const proposedUpdate = proposedUpdates.find(
                 (update) => update.controlId === control.id,
               );
+              const submittedProposedUpdatePublishRequest = proposedUpdate
+                ? findSubmittedProposedUpdatePublishRequest({
+                    proposedUpdateId: proposedUpdate.id,
+                    publishRequests,
+                  })
+                : null;
 
               return (
                 <article key={control.id} className="rounded-xl border bg-card p-5">
@@ -746,20 +758,12 @@ export function ControlsPage() {
                             type="button"
                             disabled={
                               publishingProposalId === proposedUpdate.id ||
-                              publishRequests.some(
-                                (request) =>
-                                  request.proposedUpdateId === proposedUpdate.id &&
-                                  request.status === 'submitted',
-                              )
+                              Boolean(submittedProposedUpdatePublishRequest)
                             }
                             onClick={() => void handleSubmitControlProposedUpdate(proposedUpdate)}
                           >
                             <CheckCircle2 />
-                            {publishRequests.some(
-                              (request) =>
-                                request.proposedUpdateId === proposedUpdate.id &&
-                                request.status === 'submitted',
-                            )
+                            {submittedProposedUpdatePublishRequest
                               ? 'Request Submitted'
                               : publishingProposalId === proposedUpdate.id
                                 ? 'Submitting...'
@@ -951,128 +955,127 @@ export function ControlsPage() {
         </section>
       ) : !archivedView ? (
         <section className="grid gap-3">
-          {draftControls.map((draftControl) => (
-            <article key={draftControl.id} className="rounded-xl border bg-card p-5">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div className="space-y-1">
-                  <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                    {draftControl.controlCode}
-                  </p>
-                  <h2 className="text-base font-semibold">{draftControl.title}</h2>
-                  <p className="text-sm text-muted-foreground">
-                    Author: {draftControl.author.name} ({draftControl.author.email})
-                  </p>
+          {draftControls.map((draftControl) => {
+            const submittedDraftControlPublishRequest = findSubmittedDraftControlPublishRequest({
+              draftControlId: draftControl.id,
+              publishRequests,
+            });
+
+            return (
+              <article key={draftControl.id} className="rounded-xl border bg-card p-5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                      {draftControl.controlCode}
+                    </p>
+                    <h2 className="text-base font-semibold">{draftControl.title}</h2>
+                    <p className="text-sm text-muted-foreground">
+                      Author: {draftControl.author.name} ({draftControl.author.email})
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <p className="text-xs text-muted-foreground">
+                      Saved {formatDate(draftControl.createdAt)}
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void handleCancelDraftControl(draftControl)}
+                    >
+                      <Trash2 />
+                      Cancel
+                    </Button>
+                  </div>
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <p className="text-xs text-muted-foreground">
-                    Saved {formatDate(draftControl.createdAt)}
-                  </p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void handleCancelDraftControl(draftControl)}
+                {canCompleteDrafts ? (
+                  <form
+                    className="mt-5 grid gap-4"
+                    onSubmit={(event) => handlePublishDraftControl(event, draftControl)}
                   >
-                    <Trash2 />
-                    Cancel
-                  </Button>
-                </div>
-              </div>
-              {canCompleteDrafts ? (
-                <form
-                  className="mt-5 grid gap-4"
-                  onSubmit={(event) => handlePublishDraftControl(event, draftControl)}
-                >
-                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor={`${draftControl.id}-business-meaning`}>
+                          Business meaning
+                        </Label>
+                        <textarea
+                          id={`${draftControl.id}-business-meaning`}
+                          name="businessMeaning"
+                          className="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                          required
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor={`${draftControl.id}-verification-method`}>
+                          Verification method
+                        </Label>
+                        <textarea
+                          id={`${draftControl.id}-verification-method`}
+                          name="verificationMethod"
+                          className="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                          required
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor={`${draftControl.id}-accepted-evidence-types`}>
+                          Accepted Evidence Types
+                        </Label>
+                        <Input
+                          id={`${draftControl.id}-accepted-evidence-types`}
+                          name="acceptedEvidenceTypes"
+                          placeholder="document, approval record"
+                          required
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor={`${draftControl.id}-release-impact`}>Release Impact</Label>
+                        <select
+                          id={`${draftControl.id}-release-impact`}
+                          name="releaseImpact"
+                          className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                          required
+                          defaultValue="blocking"
+                        >
+                          <option value="blocking">blocking</option>
+                          <option value="needs review">needs review</option>
+                          <option value="advisory">advisory</option>
+                        </select>
+                      </div>
+                    </div>
                     <div className="space-y-2">
-                      <Label htmlFor={`${draftControl.id}-business-meaning`}>
-                        Business meaning
+                      <Label htmlFor={`${draftControl.id}-applicability-conditions`}>
+                        Applicability conditions
                       </Label>
                       <textarea
-                        id={`${draftControl.id}-business-meaning`}
-                        name="businessMeaning"
-                        className="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                        id={`${draftControl.id}-applicability-conditions`}
+                        name="applicabilityConditions"
+                        className="min-h-20 w-full rounded-md border bg-background px-3 py-2 text-sm"
                         required
                       />
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor={`${draftControl.id}-verification-method`}>
-                        Verification method
-                      </Label>
-                      <textarea
-                        id={`${draftControl.id}-verification-method`}
-                        name="verificationMethod"
-                        className="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm"
-                        required
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor={`${draftControl.id}-accepted-evidence-types`}>
-                        Accepted Evidence Types
-                      </Label>
-                      <Input
-                        id={`${draftControl.id}-accepted-evidence-types`}
-                        name="acceptedEvidenceTypes"
-                        placeholder="document, approval record"
-                        required
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor={`${draftControl.id}-release-impact`}>Release Impact</Label>
-                      <select
-                        id={`${draftControl.id}-release-impact`}
-                        name="releaseImpact"
-                        className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-                        required
-                        defaultValue="blocking"
-                      >
-                        <option value="blocking">blocking</option>
-                        <option value="needs review">needs review</option>
-                        <option value="advisory">advisory</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor={`${draftControl.id}-applicability-conditions`}>
-                      Applicability conditions
-                    </Label>
-                    <textarea
-                      id={`${draftControl.id}-applicability-conditions`}
-                      name="applicabilityConditions"
-                      className="min-h-20 w-full rounded-md border bg-background px-3 py-2 text-sm"
-                      required
-                    />
-                  </div>
-                  <Button
-                    type="submit"
-                    disabled={
-                      publishingDraftId === draftControl.id ||
-                      publishRequests.some(
-                        (request) =>
-                          request.draftControlId === draftControl.id &&
-                          request.status === 'submitted',
-                      )
-                    }
-                  >
-                    <CheckCircle2 />
-                    {publishRequests.some(
-                      (request) =>
-                        request.draftControlId === draftControl.id &&
-                        request.status === 'submitted',
-                    )
-                      ? 'Request Submitted'
-                      : publishingDraftId === draftControl.id
-                        ? approvalPolicyEnabled
-                          ? 'Submitting...'
-                          : 'Publishing...'
-                        : approvalPolicyEnabled
-                          ? 'Submit for Review'
-                          : 'Publish Control'}
-                  </Button>
-                </form>
-              ) : null}
-            </article>
-          ))}
+                    <Button
+                      type="submit"
+                      disabled={
+                        publishingDraftId === draftControl.id ||
+                        Boolean(submittedDraftControlPublishRequest)
+                      }
+                    >
+                      <CheckCircle2 />
+                      {submittedDraftControlPublishRequest
+                        ? 'Request Submitted'
+                        : publishingDraftId === draftControl.id
+                          ? approvalPolicyEnabled
+                            ? 'Submitting...'
+                            : 'Publishing...'
+                          : approvalPolicyEnabled
+                            ? 'Submit for Review'
+                            : 'Publish Control'}
+                    </Button>
+                  </form>
+                ) : null}
+              </article>
+            );
+          })}
         </section>
       ) : null}
 
@@ -1099,6 +1102,10 @@ export function ControlsPage() {
                     </p>
                     <p className="text-sm text-muted-foreground">
                       Approvals: {request.approvalCount} of {request.requiredApprovalCount}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Required approvals are snapshotted when the Control Publish Request is
+                      submitted.
                     </p>
                     <p className="text-sm text-muted-foreground">Status: {request.status}</p>
                     {request.rejectionComment ? (
@@ -1152,7 +1159,10 @@ export function ControlsPage() {
                       <Button
                         type="button"
                         size="sm"
-                        disabled={reviewingRequestId === request.id || !request.isPublishable}
+                        disabled={
+                          reviewingRequestId === request.id ||
+                          !canPublishControlPublishRequest(request)
+                        }
                         onClick={() => void handlePublishControlPublishRequest(request)}
                       >
                         Publish
