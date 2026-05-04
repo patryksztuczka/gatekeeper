@@ -35,6 +35,7 @@ export function useProjectAccess(organizationSlug: string | undefined) {
 
   return {
     canManageProjects: canManageProjects(currentRole),
+    currentMemberId: organization?.memberId ?? null,
     currentRole,
     error: resolutionQuery.error,
     isPending: hasOrganization && resolutionQuery.isPending,

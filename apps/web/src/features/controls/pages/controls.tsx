@@ -200,6 +200,18 @@ export function ControlsPage() {
       onSettled: () => setPublishingProposalId(null),
     }),
   );
+  const rejectProposedUpdateMutation = useMutation(
+    trpc.controls.rejectProposedUpdate.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries();
+        setStatus('Proposed update rejected.');
+      },
+      onError: (caughtError) => {
+        setError(humanizeAuthError(null, caughtError.message, 'Unable to reject proposed update.'));
+      },
+      onSettled: () => setReviewingRequestId(null),
+    }),
+  );
   const submitProposedUpdateMutation = useMutation(
     trpc.controls.submitProposedUpdatePublishRequest.mutationOptions({
       onSuccess: () => {
@@ -433,6 +445,19 @@ export function ControlsPage() {
     setError(null);
     setStatus(null);
     publishProposedUpdateMutation.mutate({
+      controlId: proposedUpdate.controlId,
+      organizationSlug,
+      proposedUpdateId: proposedUpdate.id,
+    });
+  };
+
+  const handleRejectControlProposedUpdate = (proposedUpdate: ControlProposedUpdateListItem) => {
+    if (!organizationSlug) return;
+
+    setReviewingRequestId(proposedUpdate.id);
+    setError(null);
+    setStatus(null);
+    rejectProposedUpdateMutation.mutate({
       controlId: proposedUpdate.controlId,
       organizationSlug,
       proposedUpdateId: proposedUpdate.id,
@@ -713,6 +738,10 @@ export function ControlsPage() {
                     publishRequests,
                   })
                 : null;
+              const proposedUpdateActionPending =
+                proposedUpdate &&
+                (publishingProposalId === proposedUpdate.id ||
+                  reviewingRequestId === proposedUpdate.id);
 
               return (
                 <article key={control.id} className="rounded-xl border bg-card p-5">
@@ -761,32 +790,58 @@ export function ControlsPage() {
                           </p>
                         </div>
                         {approvalPolicyEnabled ? (
-                          <Button
-                            type="button"
-                            disabled={
-                              publishingProposalId === proposedUpdate.id ||
-                              Boolean(submittedProposedUpdatePublishRequest)
-                            }
-                            onClick={() => void handleSubmitControlProposedUpdate(proposedUpdate)}
-                          >
-                            <CheckCircle2 />
-                            {submittedProposedUpdatePublishRequest
-                              ? 'Request Submitted'
-                              : publishingProposalId === proposedUpdate.id
-                                ? 'Submitting...'
-                                : 'Submit for Review'}
-                          </Button>
+                          <div className="flex flex-wrap gap-2">
+                            {canPublish && !submittedProposedUpdatePublishRequest ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                disabled={Boolean(proposedUpdateActionPending)}
+                                onClick={() =>
+                                  void handleRejectControlProposedUpdate(proposedUpdate)
+                                }
+                              >
+                                Reject
+                              </Button>
+                            ) : null}
+                            <Button
+                              type="button"
+                              disabled={
+                                Boolean(proposedUpdateActionPending) ||
+                                Boolean(submittedProposedUpdatePublishRequest)
+                              }
+                              onClick={() => void handleSubmitControlProposedUpdate(proposedUpdate)}
+                            >
+                              <CheckCircle2 />
+                              {submittedProposedUpdatePublishRequest
+                                ? 'Request Submitted'
+                                : publishingProposalId === proposedUpdate.id
+                                  ? 'Submitting...'
+                                  : 'Submit for Review'}
+                            </Button>
+                          </div>
                         ) : canPublish ? (
-                          <Button
-                            type="button"
-                            disabled={publishingProposalId === proposedUpdate.id}
-                            onClick={() => void handlePublishControlProposedUpdate(proposedUpdate)}
-                          >
-                            <CheckCircle2 />
-                            {publishingProposalId === proposedUpdate.id
-                              ? 'Publishing...'
-                              : 'Publish Proposed Update'}
-                          </Button>
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              disabled={Boolean(proposedUpdateActionPending)}
+                              onClick={() => void handleRejectControlProposedUpdate(proposedUpdate)}
+                            >
+                              Reject
+                            </Button>
+                            <Button
+                              type="button"
+                              disabled={Boolean(proposedUpdateActionPending)}
+                              onClick={() =>
+                                void handlePublishControlProposedUpdate(proposedUpdate)
+                              }
+                            >
+                              <CheckCircle2 />
+                              {publishingProposalId === proposedUpdate.id
+                                ? 'Publishing...'
+                                : 'Publish Proposed Update'}
+                            </Button>
+                          </div>
                         ) : null}
                       </div>
                     </div>

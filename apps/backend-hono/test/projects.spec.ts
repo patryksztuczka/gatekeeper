@@ -114,6 +114,10 @@ async function listProjectsRequest(
   return callTRPC(headers, (caller) => caller.projects.list({ organizationSlug, status }));
 }
 
+async function listOrganizationMembersRequest(organizationSlug: string, headers: Headers) {
+  return callTRPC(headers, (caller) => caller.organizations.members({ organizationSlug }));
+}
+
 beforeEach(() => {
   const originalFetch = globalThis.fetch;
 
@@ -216,6 +220,51 @@ describe('organization projects', () => {
     expect(listResponse.status).toBe(200);
     expect(listResponse.body).toMatchObject({
       projects: [{ slug: 'vendor-review' }],
+    });
+  });
+
+  it('allows accepted Organization members to be assigned as Project Owner', async () => {
+    const { headers: ownerHeaders, organization } =
+      await createSignedInOwner('project-invite-owner');
+    const member = createCredentials('project-invite-member');
+
+    await signUpUser(member);
+
+    const invitation = await auth.api.createInvitation({
+      body: {
+        email: member.email,
+        organizationId: organization.id,
+        role: 'member',
+      },
+      headers: ownerHeaders,
+    });
+    const memberHeaders = await signInUser(member);
+
+    await auth.api.acceptInvitation({
+      body: { invitationId: invitation.id },
+      headers: memberHeaders,
+    });
+
+    const membersResponse = await listOrganizationMembersRequest(organization.slug, ownerHeaders);
+    const projectOwner = membersResponse.body.members.find(
+      (organizationMember: { email: string }) => organizationMember.email === member.email,
+    ) as { id: string } | undefined;
+
+    expect(projectOwner?.id).toBeTruthy();
+
+    const createResponse = await createProjectRequest(organization.slug, ownerHeaders, {
+      description: 'Project owned by an invited Organization member.',
+      name: 'Invited Owner',
+      projectOwnerMemberId: projectOwner?.id,
+      slug: 'invited-owner',
+    });
+
+    expect(createResponse.status).toBe(201);
+    expect(createResponse.body.project).toMatchObject({
+      projectOwner: {
+        email: member.email,
+        id: projectOwner?.id,
+      },
     });
   });
 

@@ -31,6 +31,7 @@ import {
   publishControlProposedUpdate,
   publishControlPublishRequest,
   publishDraftControl,
+  rejectControlProposedUpdate,
   rejectControlPublishRequest,
   setControlArchivedForMembership,
   submitControlProposedUpdatePublishRequest,
@@ -371,6 +372,31 @@ export const controlsRouter = router({
         }
 
         return { publishRequest };
+      } catch (caughtError) {
+        throwKnownInputError(caughtError);
+      }
+    }),
+
+  rejectProposedUpdate: protectedProcedure
+    .input(proposedUpdateIdentityInput)
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const membership = await authorizeOrganizationAction({
+          action: controlLibraryAuthorizationActions.rejectProposedUpdate,
+          organizationSlug: input.organizationSlug,
+          userId: ctx.session.user.id,
+        });
+        const rejected = await rejectControlProposedUpdate(
+          membership,
+          input.controlId,
+          input.proposedUpdateId,
+        );
+
+        if (!rejected) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Proposed update unavailable' });
+        }
+
+        return { rejected: true };
       } catch (caughtError) {
         throwKnownInputError(caughtError);
       }

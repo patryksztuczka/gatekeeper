@@ -172,6 +172,10 @@ async function updateProject(
   );
 }
 
+async function listOrganizationMembers(headers: Headers, organizationSlug: string) {
+  return callTRPC(headers, (caller) => caller.organizations.members({ organizationSlug }));
+}
+
 describe('Project detail API', () => {
   it('requires authentication', async () => {
     const response = await callTRPC(undefined, (caller) =>
@@ -297,6 +301,56 @@ describe('Project detail API', () => {
 
     expect(renamedProject.status).toBe(200);
     expect(renamedProject.body.project?.slug).toBe('vendor-risk');
+  });
+
+  it('lets Organization owners set an accepted member as Project Owner', async () => {
+    const owner = await createSignedInOwner('project-settings-invited-owner');
+    const memberCredentials = createCredentials('project-settings-invited-member');
+
+    await signUpUser(memberCredentials);
+
+    const invitation = await auth.api.createInvitation({
+      body: {
+        email: memberCredentials.email,
+        organizationId: owner.organization.id,
+        role: 'member',
+      },
+      headers: owner.headers,
+    });
+    const memberHeaders = await signInUser(memberCredentials);
+
+    await auth.api.acceptInvitation({
+      body: { invitationId: invitation.id },
+      headers: memberHeaders,
+    });
+
+    await createProject({
+      organizationId: owner.organization.id,
+      projectOwnerMemberId: null,
+      slug: 'vendor-risk',
+    });
+
+    const membersResponse = await listOrganizationMembers(owner.headers, owner.organization.slug);
+    const projectOwner = membersResponse.body.members.find(
+      (organizationMember: { email: string }) =>
+        organizationMember.email === memberCredentials.email,
+    ) as { id: string } | undefined;
+
+    expect(projectOwner?.id).toBeTruthy();
+
+    const response = await updateProject(owner.headers, owner.organization.slug, 'vendor-risk', {
+      description: 'Updated governance work for critical vendor risk.',
+      name: 'Critical Vendor Risk',
+      projectOwnerMemberId: projectOwner?.id,
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.project).toMatchObject({
+      projectOwner: {
+        email: memberCredentials.email,
+        id: projectOwner?.id,
+      },
+    });
   });
 
   it('prevents members from mutating Project settings', async () => {
