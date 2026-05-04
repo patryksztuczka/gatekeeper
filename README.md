@@ -1,158 +1,218 @@
-# Turborepo starter
+<!-- prettier-ignore -->
+<div align="center">
 
-This Turborepo starter is maintained by the Turborepo core team.
+<img src="./apps/web/public/favicon.svg" alt="Gatekeeper icon" height="72" />
 
-## Using this example
+# Gatekeeper
 
-Run the following command:
+**Release decisions, evidenced.**
 
-```sh
-npx create-turbo@latest
+[![Node.js](https://img.shields.io/badge/Node.js-25.8.0-3c873a?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
+[![pnpm](https://img.shields.io/badge/pnpm-10.33.0-f69220?style=flat-square&logo=pnpm&logoColor=white)](https://pnpm.io)
+[![TypeScript](https://img.shields.io/badge/TypeScript-blue?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![React](https://img.shields.io/badge/React-19-149eca?style=flat-square&logo=react&logoColor=white)](https://react.dev)
+[![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-f38020?style=flat-square&logo=cloudflare&logoColor=white)](https://workers.cloudflare.com)
+
+[Overview](#overview) | [Features](#features) | [Architecture](#architecture) | [Getting Started](#getting-started) | [Configuration](#configuration) | [Scripts](#scripts) | [Documentation](#documentation)
+
+</div>
+
+Gatekeeper helps organizations run release governance from one place. It brings Projects, reusable Controls, checklist foundations, exceptions, and audit evidence into a structured workflow so release decisions are based on evidence instead of memory, scattered spreadsheets, or private messages.
+
+> [!NOTE]
+> Gatekeeper is in active product development. The source currently implements authentication, organization membership, Projects, and Control Library workflows. The `docs/` directory describes the broader product direction and feature roadmap.
+
+## Overview
+
+Software teams often need to prove that a release is ready, but the work behind that decision is usually fragmented. Gatekeeper provides a shared operating model for release assurance:
+
+- Define reusable governance requirements as Controls.
+- Organize release work around organization-scoped Projects.
+- Assign a Project Owner for accountability.
+- Preserve archived Projects and Controls instead of deleting audit-relevant records.
+- Govern Control publishing through approval policy and Control Publish Requests.
+- Keep product APIs typed with tRPC while Better Auth owns authentication routes.
+
+## Features
+
+| Area               | What is available                                                                                                                                                 |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Authentication     | Email/password sign-up and sign-in, required email verification, password reset, 7-day sessions, organization invitations, and Better Auth organization support.  |
+| Organizations      | Organization creation, membership resolution, active organization switching, member listing, and organization-scoped app routes.                                  |
+| Projects           | Create, list, view, edit, archive, and restore Projects with optional Project Owner assignment.                                                                   |
+| Control Library    | Draft Controls, active and archived Controls, Control Codes, Control Versions, Release Impact, Accepted Evidence Types, and external standards mappings.          |
+| Control publishing | Organization-level Control Approval Policy, Control Publish Requests, approvals, rejection, withdrawal, and publishing flows.                                     |
+| UI foundation      | Vite React dashboard shell, auth pages, organization routes, project pages, control pages, and navigation placeholders for checklists, exceptions, and audit log. |
+
+## Architecture
+
+Gatekeeper is a pnpm and Turborepo workspace with a React SPA and a Cloudflare Worker backend.
+
+```mermaid
+flowchart LR
+  Web[apps/web<br/>Vite React SPA] --> Auth["/api/auth/*<br/>Better Auth"]
+  Web --> TRPC["/api/trpc/*<br/>tRPC"]
+  Auth --> Backend[apps/backend-hono<br/>Hono Worker]
+  TRPC --> Backend
+  Backend --> D1[(Cloudflare D1<br/>Drizzle schema + migrations)]
+  Backend --> Mailpit[Mailpit<br/>local auth email capture]
 ```
 
-## What's inside?
+| Path                | Purpose                                                                                                                             |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/web`          | Vite React 19 SPA with React Router, TanStack Query, tRPC client, Better Auth client, Tailwind CSS, and shadcn-style UI primitives. |
+| `apps/backend-hono` | Hono Cloudflare Worker with Better Auth, tRPC, Drizzle ORM, Cloudflare D1, and Zod validation.                                      |
+| `docs`              | Business docs, feature specifications, and architecture decision records.                                                           |
+| `CONTEXT.md`        | Canonical domain language and invariants used across product, API, UI, and tests.                                                   |
+| `compose.yaml`      | Local Mailpit service for auth and invitation emails.                                                                               |
 
-This Turborepo includes the following packages/apps:
+## Getting Started
 
-### Apps and Packages
+### Prerequisites
 
-- `docs`: a [Next.js](https://nextjs.org/) app
-- `web`: another [Next.js](https://nextjs.org/) app
-- `@repo/ui`: a stub React component library shared by both `web` and `docs` applications
-- `@repo/eslint-config`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
+- [Git](https://git-scm.com/downloads)
+- [Node.js 25.8.0](https://nodejs.org)
+- [pnpm 10.33.0](https://pnpm.io/installation)
+- [Docker](https://www.docker.com/get-started/) for local Mailpit email capture
+- A Cloudflare account for remote D1 and deployment work; Wrangler is available through the backend package scripts
 
-Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
+### Run Locally
 
-### Utilities
+1. Install dependencies.
 
-This Turborepo has some additional tools already setup for you:
-
-- [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [ESLint](https://eslint.org/) for code linting
-- [Prettier](https://prettier.io) for code formatting
-
-### Build
-
-To build all apps and packages, run the following command:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo build
+```bash
+pnpm install
 ```
 
-Without global `turbo`, use your package manager:
+2. Create local environment files.
 
-```sh
-cd my-turborepo
-npx turbo build
-pnpm dlx turbo build
-pnpm exec turbo build
+```bash
+cp apps/backend-hono/.env.example apps/backend-hono/.env
+cp apps/web/.env.example apps/web/.env
 ```
 
-You can build a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
+3. Start Mailpit for local auth emails.
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
-
-```sh
-turbo build --filter=docs
+```bash
+docker compose up -d mailpit
 ```
 
-Without global `turbo`:
+4. Apply local D1 migrations.
 
-```sh
-npx turbo build --filter=docs
-pnpm exec turbo build --filter=docs
-pnpm exec turbo build --filter=docs
+```bash
+pnpm --filter backend-hono db:migrate
 ```
 
-### Develop
+5. Start the web app and backend worker.
 
-To develop all apps and packages, run the following command:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo dev
+```bash
+pnpm dev
 ```
 
-Without global `turbo`, use your package manager:
-
-```sh
-cd my-turborepo
-npx turbo dev
-pnpm exec turbo dev
-pnpm exec turbo dev
-```
-
-You can develop a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
-
-```sh
-turbo dev --filter=web
-```
-
-Without global `turbo`:
-
-```sh
-npx turbo dev --filter=web
-pnpm exec turbo dev --filter=web
-pnpm exec turbo dev --filter=web
-```
-
-### Remote Caching
+| Service        | URL                     |
+| -------------- | ----------------------- |
+| Web app        | `http://localhost:5173` |
+| Backend worker | `http://localhost:8787` |
+| Mailpit UI     | `http://localhost:8025` |
 
 > [!TIP]
-> Vercel Remote Cache is free for all plans. Get started today at [vercel.com](https://vercel.com/signup?utm_source=remote-cache-sdk&utm_campaign=free_remote_cache).
+> Verification, reset-password, and invitation emails are sent to Mailpit during local development. Open `http://localhost:8025` to continue those flows.
 
-Turborepo can use a technique known as [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching) to share cache artifacts across machines, enabling you to share build caches with your team and CI/CD pipelines.
+## Configuration
 
-By default, Turborepo will cache locally. To enable Remote Caching you will need an account with Vercel. If you don't have an account you can [create one](https://vercel.com/signup?utm_source=turborepo-examples), then enter the following commands:
+| File                               | Used by                                 | Notes                                                                                                                                                                 |
+| ---------------------------------- | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/web/.env`                    | Vite                                    | `VITE_BACKEND_URL` points the SPA to the Hono worker. The local default is `http://localhost:8787`.                                                                   |
+| `apps/backend-hono/.env`           | Wrangler, Drizzle, and Cloudflare tools | Stores local Worker secrets/runtime values plus Cloudflare account, D1 database, and D1 token values for database tooling.                                            |
+| `apps/backend-hono/wrangler.jsonc` | Cloudflare Worker                       | Defines the worker entry point, compatibility settings, and the D1 `DATABASE` binding. Update `database_id` for your Cloudflare D1 database before remote deployment. |
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
+> [!NOTE]
+> Wrangler loads local Worker variables from `apps/backend-hono/.env` when no `.dev.vars` file is present. If you already have a local `.dev.vars`, remove it or keep it aligned because Wrangler will prefer it over `.env`.
 
-```sh
-cd my-turborepo
-turbo login
-```
+Important backend variables:
 
-Without global `turbo`, use your package manager:
+- `BETTER_AUTH_SECRET`
+- `BETTER_AUTH_URL`
+- `TRUSTED_ORIGINS`
+- `CORS_ORIGIN`
+- `MAIL_FROM_EMAIL`
+- `MAIL_FROM_NAME`
+- `MAILPIT_URL`
+- `CLOUDFLARE_ACCOUNT_ID`
+- `CLOUDFLARE_DATABASE_ID`
+- `CLOUDFLARE_D1_TOKEN`
 
-```sh
-cd my-turborepo
-npx turbo login
-pnpm exec turbo login
-pnpm exec turbo login
-```
+## Scripts
 
-This will authenticate the Turborepo CLI with your [Vercel account](https://vercel.com/docs/concepts/personal-accounts/overview).
+### Root Workspace
 
-Next, you can link your Turborepo to your Remote Cache by running the following command from the root of your Turborepo:
+| Command             | Description                                            |
+| ------------------- | ------------------------------------------------------ |
+| `pnpm dev`          | Run all workspace development tasks through Turborepo. |
+| `pnpm build`        | Build all apps.                                        |
+| `pnpm lint`         | Run oxlint across the repository with warnings denied. |
+| `pnpm lint:fix`     | Apply oxlint fixes.                                    |
+| `pnpm format`       | Format the repository with oxfmt.                      |
+| `pnpm format:check` | Check formatting without writing changes.              |
+| `pnpm check-types`  | Typecheck all workspaces.                              |
+| `pnpm test`         | Run all tests.                                         |
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
+### Web App
 
-```sh
-turbo link
-```
+| Command                         | Description                           |
+| ------------------------------- | ------------------------------------- |
+| `pnpm --filter web dev`         | Start Vite.                           |
+| `pnpm --filter web build`       | Typecheck and build the SPA.          |
+| `pnpm --filter web preview`     | Preview the production build locally. |
+| `pnpm --filter web test`        | Run web tests with Vitest.            |
+| `pnpm --filter web check-types` | Typecheck the web app.                |
 
-Without global `turbo`:
+### Backend Worker
 
-```sh
-npx turbo link
-pnpm exec turbo link
-pnpm exec turbo link
-```
+| Command                                        | Description                                         |
+| ---------------------------------------------- | --------------------------------------------------- |
+| `pnpm --filter backend-hono dev`               | Start `wrangler dev`.                               |
+| `pnpm --filter backend-hono build`             | Run a Cloudflare Worker deploy dry run into `dist`. |
+| `pnpm --filter backend-hono deploy`            | Deploy the worker with Wrangler.                    |
+| `pnpm --filter backend-hono db:generate`       | Generate Drizzle migrations from the schema.        |
+| `pnpm --filter backend-hono db:migrate`        | Apply D1 migrations locally.                        |
+| `pnpm --filter backend-hono db:migrate:remote` | Apply D1 migrations remotely.                       |
+| `pnpm --filter backend-hono db:studio`         | Open Drizzle Studio.                                |
+| `pnpm --filter backend-hono cf-typegen`        | Generate Cloudflare Worker binding types.           |
+| `pnpm --filter backend-hono test`              | Run backend tests with the Cloudflare Vitest pool.  |
 
-## Useful Links
+## Testing And Quality
 
-Learn more about the power of Turborepo:
+CI runs separate web and backend workflows on pull requests and pushes to `master`.
 
-- [Tasks](https://turborepo.dev/docs/crafting-your-repository/running-tasks)
-- [Caching](https://turborepo.dev/docs/crafting-your-repository/caching)
-- [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching)
-- [Filtering](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters)
-- [Configuration Options](https://turborepo.dev/docs/reference/configuration)
-- [CLI Usage](https://turborepo.dev/docs/reference/command-line-reference)
+| Check                 | Command                            |
+| --------------------- | ---------------------------------- |
+| Full lint             | `pnpm lint`                        |
+| Full typecheck        | `pnpm check-types`                 |
+| Full test suite       | `pnpm test`                        |
+| Web build             | `pnpm --filter web build`          |
+| Backend build dry run | `pnpm --filter backend-hono build` |
+
+## Documentation
+
+| Document                                                                           | What it covers                                                                                                                                                 |
+| ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`CONTEXT.md`](./CONTEXT.md)                                                       | Domain terms, relationships, and invariants.                                                                                                                   |
+| [`docs/README.md`](./docs/README.md)                                               | Index of business documents, feature specs, and ADRs.                                                                                                          |
+| [`docs/01-problem-and-business-value.md`](./docs/01-problem-and-business-value.md) | Problem statement and business value.                                                                                                                          |
+| [`docs/02-product-vision-and-scope.md`](./docs/02-product-vision-and-scope.md)     | Product vision, scope, and principles.                                                                                                                         |
+| [`docs/adr`](./docs/adr)                                                           | Architecture decisions for database access, authentication, app routes, and Control publish approval.                                                          |
+| [`docs/features`](./docs/features)                                                 | Feature-level specs for Projects, checklists, Control Library, evidence, exceptions, approvals, audit, MCP workflows, RBAC, notifications, and authentication. |
+
+## Troubleshooting
+
+> [!IMPORTANT]
+> Keep `apps/web/.env`, `apps/backend-hono/.env`, and `apps/backend-hono/wrangler.jsonc` aligned. Auth cookies and tRPC calls require the web origin, backend URL, trusted origins, and CORS origin to agree.
+
+| Symptom                                            | What to check                                                                            |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Auth emails do not arrive                          | Start Mailpit with `docker compose up -d mailpit` and open `http://localhost:8025`.      |
+| Browser requests fail with CORS or missing session | Confirm `VITE_BACKEND_URL`, `TRUSTED_ORIGINS`, and `CORS_ORIGIN` match your local ports. |
+| Database tables are missing locally                | Run `pnpm --filter backend-hono db:migrate`.                                             |
+| Cloudflare binding types are stale                 | Run `pnpm --filter backend-hono cf-typegen` after changing `wrangler.jsonc`.             |
+| Remote D1 commands fail                            | Fill `apps/backend-hono/.env` with Cloudflare account, database, and API token values.   |

@@ -15,9 +15,9 @@ pnpm cf-typegen
 
 ## D1 and Drizzle
 
-Copy `.env.example` to `.env` and fill in your Cloudflare values for Drizzle tooling.
+Copy `.env.example` to `.env` and fill in local Worker runtime values plus Cloudflare values for Drizzle tooling.
 
-Copy `.dev.vars.example` to `.dev.vars` for Wrangler runtime auth configuration.
+Wrangler loads local Worker variables from `.env` when no `.dev.vars` file is present.
 
 ```txt
 pnpm db:generate

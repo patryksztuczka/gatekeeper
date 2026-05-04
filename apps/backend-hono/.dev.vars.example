@@ -1,7 +1,0 @@
-BETTER_AUTH_SECRET=generate-at-least-32-random-characters
-BETTER_AUTH_URL=http://localhost:8787
-TRUSTED_ORIGINS=http://localhost:5173
-CORS_ORIGIN=http://localhost:5173
-MAIL_FROM_EMAIL=no-reply@gatekeeper.local
-MAIL_FROM_NAME=Gatekeeper
-MAILPIT_URL=http://127.0.0.1:8025
