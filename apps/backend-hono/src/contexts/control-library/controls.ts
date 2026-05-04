@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, isNotNull, isNull, ne } from 'drizzle-orm';
-import { db } from '../db/client';
+import { db } from '../../db/client';
 import {
   controlProposedUpdates,
   controlPublishRequestApprovals,
@@ -10,8 +10,8 @@ import {
   members,
   organizations,
   users,
-} from '../db/schema';
-import type { OrganizationMembership } from '../types/organization-types';
+} from '../../db/schema';
+import type { OrganizationMembership } from '../../types/organization-types';
 
 export type DraftControlListItem = {
   author: {

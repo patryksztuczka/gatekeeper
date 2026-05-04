@@ -11,22 +11,23 @@ This node covers backend routes, auth integration, persistence, product services
 - `src/index.ts` wires Hono middleware, the tRPC mount, the Better Auth handler, and health response. Keep it thin.
 - `src/lib/auth.ts` configures Better Auth. Better Auth owns `/api/auth/*`.
 - `src/db/schema.ts` defines persisted D1 tables through Drizzle.
-- `src/lib/*` modules own domain/business rules.
-- `src/schemas/*` modules own reusable Zod transport schemas by domain.
-- `src/trpc/*` owns tRPC transport. Product tRPC is mounted at `/api/trpc/*`.
+- `src/contexts/*` modules own context-specific routers, schemas, domain/business rules, `CONTEXT.md`, and context-specific `docs/adr/` records.
+- `src/trpc/core.ts` and `src/trpc/context.ts` own shared tRPC plumbing. Product tRPC is mounted at `/api/trpc/*`.
 - `src/trpc/router.ts` composes product tRPC routers and exports the `AppRouter` type consumed by the web app.
 
 ## Current Product APIs
 
-- Organization membership resolution and member lists use `src/trpc/organizations-router.ts`.
-- Invitation entry state uses `src/trpc/organizations-router.ts`.
-- Project tRPC procedures live in `src/trpc/projects-router.ts`.
-- Project business logic lives in `src/lib/projects.ts`: membership lookup, Project Owner validation, Project create/update/archive/restore rules.
-- Control tRPC procedures live in `src/trpc/controls-router.ts`.
+- Identity & Organization backend code lives in `src/contexts/identity-organization/*`.
+- Organization membership resolution and member lists use `src/contexts/identity-organization/organizations-router.ts`.
+- Invitation entry state uses `src/contexts/identity-organization/organizations-router.ts`.
+- Project backend code lives in `src/contexts/projects/*`.
+- Project business logic lives in `src/contexts/projects/projects.ts`: Project Owner validation, Project create/update/archive/restore rules.
+- Control Library backend code lives in `src/contexts/control-library/*`.
+- Control tRPC procedures live in `src/contexts/control-library/controls-router.ts`.
 
 ## Invariants And Pitfalls
 
-- Route handlers and tRPC procedures must not own business rules; they should delegate to `src/lib/*`.
+- Route handlers and tRPC procedures must not own business rules; they should delegate to service modules inside their context folder.
 - Keep Better Auth endpoints out of tRPC. Use `auth.api.getSession({ headers })` in product API context when auth is needed.
 - Organization membership is the authorization boundary for Project and Control access.
 - Project Owner must be an Organization member.

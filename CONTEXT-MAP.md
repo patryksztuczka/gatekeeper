@@ -4,9 +4,9 @@ Gatekeeper uses multiple domain contexts. This map is the root entrypoint for pr
 
 ## Contexts
 
-- [Identity & Organization](./docs/contexts/identity-and-organization/CONTEXT.md) — defines Users, Organizations, membership, roles, invitations, and the active organization boundary. ADRs: [docs/contexts/identity-and-organization/docs/adr](./docs/contexts/identity-and-organization/docs/adr/).
-- [Projects](./docs/contexts/projects/CONTEXT.md) — defines organization-scoped governance work items and Project accountability.
-- [Control Library](./docs/contexts/control-library/CONTEXT.md) — defines reusable release assurance requirements, versioning, publishing, and approval policy. ADRs: [docs/contexts/control-library/docs/adr](./docs/contexts/control-library/docs/adr/).
+- [Identity & Organization](./apps/backend-hono/src/contexts/identity-organization/CONTEXT.md) — defines Users, Organizations, membership, roles, invitations, and the active organization boundary. ADRs: [apps/backend-hono/src/contexts/identity-organization/docs/adr](./apps/backend-hono/src/contexts/identity-organization/docs/adr/).
+- [Projects](./apps/backend-hono/src/contexts/projects/CONTEXT.md) — defines organization-scoped governance work items and Project accountability.
+- [Control Library](./apps/backend-hono/src/contexts/control-library/CONTEXT.md) — defines reusable release assurance requirements, versioning, publishing, and approval policy. ADRs: [apps/backend-hono/src/contexts/control-library/docs/adr](./apps/backend-hono/src/contexts/control-library/docs/adr/).
 
 ## Relationships
 

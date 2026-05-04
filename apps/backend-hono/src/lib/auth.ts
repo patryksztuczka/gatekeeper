@@ -18,7 +18,7 @@ import {
   getInitialActiveOrganizationId,
   isEmailPasswordSignUp,
   shouldCreateDefaultOrganization,
-} from './auth-organization';
+} from '../contexts/identity-organization/auth-organization';
 import { sendEmail } from './email';
 
 const sevenDaysInSeconds = 60 * 60 * 24 * 7;

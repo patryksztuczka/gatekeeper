@@ -1,7 +1,7 @@
 import { and, asc, eq, gt, sql } from 'drizzle-orm';
 import { APIError } from 'better-auth/api';
 import { getOrgAdapter, type OrganizationOptions } from 'better-auth/plugins';
-import { db } from '../db/client';
+import { db } from '../../db/client';
 import {
   invitations,
   members,
@@ -9,7 +9,7 @@ import {
   sessions,
   users,
   type User as AuthUser,
-} from '../db/schema';
+} from '../../db/schema';
 
 type OrganizationAuthContext = Parameters<typeof getOrgAdapter>[0];
 

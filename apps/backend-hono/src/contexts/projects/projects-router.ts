@@ -1,8 +1,8 @@
 import { TRPCError } from '@trpc/server';
+import { getOrganizationMembership } from '../identity-organization/organization-membership';
 import {
   canManageProjects,
   createProject,
-  getOrganizationMembership,
   getProjectDetailForMember,
   listProjects,
   normalizeProjectCreateBody,
@@ -10,14 +10,14 @@ import {
   ProjectInputError,
   setProjectArchivedForMembership,
   updateProjectForMembership,
-} from '../lib/projects';
+} from './projects';
 import {
   projectCreateInput,
   projectIdentityInput,
   projectListInput,
   projectUpdateInput,
-} from '../schemas/projects-schemas';
-import { protectedProcedure, router } from './core';
+} from './projects-schemas';
+import { protectedProcedure, router } from '../../trpc/core';
 
 async function getMembershipOrThrow(input: { organizationSlug: string; userId: string }) {
   const membership = await getOrganizationMembership(input.organizationSlug, input.userId);

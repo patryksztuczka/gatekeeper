@@ -198,10 +198,10 @@ CI runs separate web and backend workflows on pull requests and pushes to `maste
 | Document                                                       | What it covers                                                                          |
 | -------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | [`CONTEXT-MAP.md`](./CONTEXT-MAP.md)                           | Root map for domain contexts, relationships, and canonical product language.             |
-| [`docs/contexts`](./docs/contexts)                             | Context-owned language for Identity & Organization, Projects, and Control Library.       |
+| [`apps/backend-hono/src/contexts`](./apps/backend-hono/src/contexts) | Context-owned backend code, language, and context-specific ADRs.                          |
 | [`docs/adr`](./docs/adr)                                       | Global architecture decisions.                                                          |
-| [`Identity & Organization ADRs`](./docs/contexts/identity-and-organization/docs/adr) | Authentication and organization-scoped app route decisions.                              |
-| [`Control Library ADRs`](./docs/contexts/control-library/docs/adr) | Control publish approval decisions.                                                     |
+| [`Identity & Organization ADRs`](./apps/backend-hono/src/contexts/identity-organization/docs/adr) | Authentication and organization-scoped app route decisions.                              |
+| [`Control Library ADRs`](./apps/backend-hono/src/contexts/control-library/docs/adr) | Control publish approval decisions.                                                     |
 
 ## Troubleshooting
 

@@ -10,7 +10,7 @@ This root node covers repo-wide language, boundaries, and navigation. Load app-s
 
 - Backend product/API work lives in `apps/backend-hono`. Read `apps/backend-hono/AGENTS.md` before changing Hono routes, Better Auth integration, Drizzle schema, D1 queries, tRPC procedures, or domain services.
 - Frontend product/UI work lives in `apps/web`. Read `apps/web/AGENTS.md` before changing React pages, TanStack Query usage, tRPC client calls, Better Auth client flows, routing, or UI components.
-- Shared product language is discovered through `CONTEXT-MAP.md`; architectural decisions live in `docs/adr/` and context-specific ADR folders linked from the context map. Check these before renaming domain concepts or changing boundaries.
+- Shared product language is discovered through `CONTEXT-MAP.md`; system-wide decisions live in `docs/adr/`, and context-specific decisions live beside their context files. Check these before renaming domain concepts or changing boundaries.
 
 ## Global Domain Invariants
 

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { organizationSlugInput } from './organization-schemas';
+import { organizationSlugInput } from '../identity-organization/organization-schemas';
 
 export const projectIdentityInput = organizationSlugInput.extend({
   projectSlug: z.string().min(1),

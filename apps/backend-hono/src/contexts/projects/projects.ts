@@ -1,7 +1,8 @@
 import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm';
-import { db } from '../db/client';
-import { members, organizations, projects, users } from '../db/schema';
-import type { OrganizationMembership } from '../types/organization-types';
+import { db } from '../../db/client';
+import { members, projects, users } from '../../db/schema';
+import type { OrganizationMembership } from '../../types/organization-types';
+import { getOrganizationMembership } from '../identity-organization/organization-membership';
 
 export type ProjectListStatus = 'active' | 'archived';
 
@@ -21,38 +22,8 @@ type UpdateProjectInput = {
 const editableOrganizationRoles = new Set(['owner', 'admin']);
 const projectSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-export async function getOrganizationMembership(organizationSlug: string, userId: string) {
-  return db
-    .select({
-      id: members.id,
-      organizationId: organizations.id,
-      organizationName: organizations.name,
-      organizationSlug: organizations.slug,
-      role: members.role,
-    })
-    .from(members)
-    .innerJoin(organizations, eq(members.organizationId, organizations.id))
-    .where(and(eq(organizations.slug, organizationSlug), eq(members.userId, userId)))
-    .limit(1)
-    .then((rows) => rows[0] ?? null);
-}
-
 export function canManageProjects(role: string) {
   return editableOrganizationRoles.has(role);
-}
-
-export async function listOrganizationMembers(organizationId: string) {
-  return db
-    .select({
-      email: users.email,
-      id: members.id,
-      name: users.name,
-      role: members.role,
-    })
-    .from(members)
-    .innerJoin(users, eq(members.userId, users.id))
-    .where(eq(members.organizationId, organizationId))
-    .orderBy(asc(users.name), asc(users.email));
 }
 
 export async function listProjects(organizationId: string, status: ProjectListStatus) {

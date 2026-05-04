@@ -1,8 +1,8 @@
 import { TRPCError } from '@trpc/server';
-import { resolveInvitationEntryState, resolveMembershipResolution } from '../lib/auth-organization';
-import { getOrganizationMembership, listOrganizationMembers } from '../lib/projects';
-import { invitationEntryStateInput, organizationSlugInput } from '../schemas/organization-schemas';
-import { protectedProcedure, publicProcedure, router } from './core';
+import { resolveInvitationEntryState, resolveMembershipResolution } from './auth-organization';
+import { getOrganizationMembership, listOrganizationMembers } from './organization-membership';
+import { invitationEntryStateInput, organizationSlugInput } from './organization-schemas';
+import { protectedProcedure, publicProcedure, router } from '../../trpc/core';
 
 export const organizationsRouter = router({
   membershipResolution: protectedProcedure.query(async ({ ctx }) => {

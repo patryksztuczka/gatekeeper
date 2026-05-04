@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { organizationSlugInput } from './organization-schemas';
+import { organizationSlugInput } from '../identity-organization/organization-schemas';
 
 export const controlIdentityInput = organizationSlugInput.extend({
   controlId: z.string().min(1),

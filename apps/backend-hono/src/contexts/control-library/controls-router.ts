@@ -5,7 +5,7 @@ import {
   getControlApprovalPolicy,
   normalizeControlApprovalPolicyUpdateBody,
   updateControlApprovalPolicy,
-} from '../lib/control-approval-policy';
+} from './control-approval-policy';
 import {
   approveControlPublishRequest,
   canArchiveControls,
@@ -37,8 +37,8 @@ import {
   submitControlProposedUpdatePublishRequest,
   submitDraftControlPublishRequest,
   withdrawControlPublishRequest,
-} from '../lib/controls';
-import { getOrganizationMembership } from '../lib/projects';
+} from './controls';
+import { getOrganizationMembership } from '../identity-organization/organization-membership';
 import {
   archiveControlInput,
   controlIdentityInput,
@@ -53,9 +53,9 @@ import {
   rejectPublishRequestInput,
   submitDraftPublishRequestInput,
   updateControlApprovalPolicyInput,
-} from '../schemas/controls-schemas';
-import { organizationSlugInput } from '../schemas/organization-schemas';
-import { protectedProcedure, router } from './core';
+} from './controls-schemas';
+import { organizationSlugInput } from '../identity-organization/organization-schemas';
+import { protectedProcedure, router } from '../../trpc/core';
 
 async function getMembershipOrThrow(input: { organizationSlug: string; userId: string }) {
   const membership = await getOrganizationMembership(input.organizationSlug, input.userId);

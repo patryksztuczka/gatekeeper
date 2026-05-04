@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '../src/db/client';
 import { invitations, sessions, users } from '../src/db/schema';
 import { auth } from '../src/lib/auth';
-import type { MembershipResolutionResponse } from '../src/lib/auth-organization';
+import type { MembershipResolutionResponse } from '../src/contexts/identity-organization/auth-organization';
 import { callTRPC } from './trpc-test-utils';
 
 const authHeaders = {
