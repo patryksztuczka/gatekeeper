@@ -329,6 +329,17 @@ async function submitControlProposedUpdatePublishRequest(
   );
 }
 
+async function rejectControlProposedUpdateRequest(
+  organizationSlug: string,
+  controlId: string,
+  proposedUpdateId: string,
+  headers: Headers,
+) {
+  return callTRPC(headers, (caller) =>
+    caller.controls.rejectProposedUpdate({ controlId, organizationSlug, proposedUpdateId }),
+  );
+}
+
 beforeEach(() => {
   const originalFetch = globalThis.fetch;
 
@@ -1501,6 +1512,69 @@ describe('Draft Controls', () => {
       },
       status: 400,
     });
+  });
+
+  it('lets Organization owners and admins reject open proposed Control updates', async () => {
+    const { headers: ownerHeaders, organization } =
+      await createSignedInOwner('proposal-reject-owner');
+    const member = await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'proposal-reject-member',
+      role: 'member',
+    });
+
+    const createResponse = await createDraftControlRequest(organization.slug, ownerHeaders, {
+      controlCode: 'AUTH-040',
+      title: 'Require MFA before rejected update',
+    });
+    const draftControl = createResponse.body.draftControl as { id: string };
+    const publishResponse = await publishDraftControlRequest(
+      organization.slug,
+      draftControl.id,
+      ownerHeaders,
+    );
+    const control = publishResponse.body.control as { id: string };
+
+    const proposedResponse = await createControlProposedUpdateRequest(
+      organization.slug,
+      control.id,
+      member.headers,
+      {
+        ...completePublishBody,
+        businessMeaning: 'Rejected release assurance meaning.',
+        controlCode: 'AUTH-040',
+        title: 'Require MFA after rejected update',
+      },
+    );
+    const proposedUpdate = proposedResponse.body.proposedUpdate as { id: string };
+
+    await expect(
+      rejectControlProposedUpdateRequest(
+        organization.slug,
+        control.id,
+        proposedUpdate.id,
+        member.headers,
+      ),
+    ).resolves.toMatchObject({
+      body: { error: 'Only Organization owners and admins can reject proposed Control updates.' },
+      status: 403,
+    });
+
+    await expect(
+      rejectControlProposedUpdateRequest(
+        organization.slug,
+        control.id,
+        proposedUpdate.id,
+        ownerHeaders,
+      ),
+    ).resolves.toMatchObject({
+      body: { rejected: true },
+      status: 200,
+    });
+    await expect(
+      listControlProposedUpdatesRequest(organization.slug, ownerHeaders),
+    ).resolves.toMatchObject({ body: { proposedUpdates: [] }, status: 200 });
   });
 
   it('restricts archived Control access and archive actions to Organization owners and admins', async () => {

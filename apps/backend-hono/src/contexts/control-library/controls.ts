@@ -169,6 +169,10 @@ export const controlLibraryAuthorizationActions = {
     allowedRoles: controlPublisherRoles,
     deniedMessage: 'Only Organization owners and admins can reject Control Publish Requests.',
   },
+  rejectProposedUpdate: {
+    allowedRoles: controlPublisherRoles,
+    deniedMessage: 'Only Organization owners and admins can reject proposed Control updates.',
+  },
   restore: {
     allowedRoles: controlPublisherRoles,
     deniedMessage: 'Only Organization owners and admins can restore Controls.',
@@ -1026,6 +1030,33 @@ export async function publishControlProposedUpdate(
   await db.delete(controlProposedUpdates).where(eq(controlProposedUpdates.id, proposedUpdateId));
 
   return getControlDetail(membership, controlId);
+}
+
+export async function rejectControlProposedUpdate(
+  membership: AuthorizedOrganizationMember,
+  controlId: string,
+  proposedUpdateId: string,
+) {
+  const proposedUpdate = await db
+    .select({ id: controlProposedUpdates.id })
+    .from(controlProposedUpdates)
+    .where(
+      and(
+        eq(controlProposedUpdates.id, proposedUpdateId),
+        eq(controlProposedUpdates.controlId, controlId),
+        eq(controlProposedUpdates.organizationId, membership.organizationId),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (!proposedUpdate) {
+    return false;
+  }
+
+  await db.delete(controlProposedUpdates).where(eq(controlProposedUpdates.id, proposedUpdateId));
+
+  return true;
 }
 
 export function normalizeDraftControlCreateBody(body: unknown) {
