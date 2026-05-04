@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import type { SyntheticEvent } from 'react';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { AlertCircle, Archive, CheckCircle2, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { useForm } from 'react-hook-form';
 import { useParams, useSearchParams } from 'react-router';
 import { humanizeAuthError } from '@/features/auth/api/auth-errors';
 import type {
@@ -17,6 +19,10 @@ import {
   findSubmittedProposedUpdatePublishRequest,
   type ControlPublishRequestListItem,
 } from '@/features/controls/api/control-publish-governance';
+import {
+  createControlFormSchema,
+  type CreateControlFormValues,
+} from '@/features/controls/schemas/control-form-schemas';
 import { queryClient, trpc } from '@/lib/trpc';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -46,31 +52,24 @@ export function ControlsPage() {
   const [rejectionComment, setRejectionComment] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [controlCode, setControlCode] = useState('');
-  const [title, setTitle] = useState('');
   const [archiveControlId, setArchiveControlId] = useState<string | null>(null);
   const [archiveReason, setArchiveReason] = useState('');
+  const createControlForm = useForm<CreateControlFormValues>({
+    resolver: zodResolver(createControlFormSchema),
+    defaultValues: { title: '', businessMeaning: '' },
+  });
+  const createControlBusinessMeaning = createControlForm.watch('businessMeaning');
   const search = searchParams.get('q') ?? '';
   const statusFilter = toStatusFilter(searchParams.get('status'));
   const archivedView = statusFilter === 'archived';
-  const releaseImpact = searchParams.get('releaseImpact') ?? '';
-  const acceptedEvidenceType = searchParams.get('acceptedEvidenceType') ?? '';
-  const standardsFramework = searchParams.get('standardsFramework') ?? '';
-  const canListDrafts =
-    (statusFilter === 'all' || statusFilter === 'draft') &&
-    !releaseImpact &&
-    !acceptedEvidenceType &&
-    !standardsFramework;
+  const canListDrafts = statusFilter === 'all' || statusFilter === 'draft';
   const hasOrganization = Boolean(organizationSlug);
 
   const controlQuery = useQuery(
     trpc.controls.list.queryOptions(
       {
-        acceptedEvidenceType,
         organizationSlug: organizationSlug ?? '',
-        releaseImpact,
         search,
-        standardsFramework,
         status: statusFilter === 'archived' ? 'archived' : 'active',
       },
       { enabled: hasOrganization && statusFilter !== 'draft' },
@@ -108,9 +107,6 @@ export function ControlsPage() {
     trpc.controls.createDraft.mutationOptions({
       onSuccess: () => {
         void queryClient.invalidateQueries();
-        setControlCode('');
-        setTitle('');
-        setStatus('Draft Control saved.');
       },
       onError: (caughtError) => {
         setError(humanizeAuthError(null, caughtError.message, 'Unable to save Draft Control.'));
@@ -296,26 +292,70 @@ export function ControlsPage() {
     const nextParams = new URLSearchParams();
     const nextSearch = String(formData.get('q') ?? '').trim();
     const nextStatus = String(formData.get('status') ?? 'all');
-    const nextReleaseImpact = String(formData.get('releaseImpact') ?? '');
-    const nextAcceptedEvidenceType = String(formData.get('acceptedEvidenceType') ?? '').trim();
-    const nextStandardsFramework = String(formData.get('standardsFramework') ?? '').trim();
 
     if (nextSearch) nextParams.set('q', nextSearch);
     if (nextStatus !== 'all') nextParams.set('status', nextStatus);
-    if (nextReleaseImpact) nextParams.set('releaseImpact', nextReleaseImpact);
-    if (nextAcceptedEvidenceType) nextParams.set('acceptedEvidenceType', nextAcceptedEvidenceType);
-    if (nextStandardsFramework) nextParams.set('standardsFramework', nextStandardsFramework);
 
     setSearchParams(nextParams);
   };
 
-  const handleCreateDraftControl = (event: SyntheticEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const resetCreateControlForm = () => {
+    createControlForm.reset();
+  };
+
+  const handleSaveDraftControl = (values: CreateControlFormValues) => {
     if (!organizationSlug) return;
 
     setError(null);
     setStatus(null);
-    createDraftMutation.mutate({ controlCode, organizationSlug, title });
+    createDraftMutation.mutate(
+      { organizationSlug, title: values.title },
+      {
+        onSuccess: () => {
+          resetCreateControlForm();
+          setStatus('Draft Control saved.');
+        },
+      },
+    );
+  };
+
+  const handlePublishCreatedControl = (values: CreateControlFormValues) => {
+    if (!organizationSlug) return;
+
+    const businessMeaning = values.businessMeaning.trim();
+
+    if (!businessMeaning) {
+      setError('Business meaning is required.');
+      return;
+    }
+
+    setError(null);
+    setStatus(null);
+    createDraftMutation.mutate(
+      { organizationSlug, title: values.title },
+      {
+        onSuccess: ({ draftControl }) => {
+          const payload = {
+            businessMeaning,
+            draftControlId: draftControl.id,
+            organizationSlug,
+          };
+
+          setPublishingDraftId(draftControl.id);
+
+          if (approvalPolicyEnabled) {
+            submitDraftPublishRequestMutation.mutate(payload, {
+              onSuccess: resetCreateControlForm,
+            });
+            return;
+          }
+
+          publishDraftMutation.mutate(payload, {
+            onSuccess: resetCreateControlForm,
+          });
+        },
+      },
+    );
   };
 
   const handlePublishDraftControl = (
@@ -326,22 +366,14 @@ export function ControlsPage() {
     if (!organizationSlug) return;
 
     const formData = new FormData(event.currentTarget);
-    const acceptedEvidenceTypes = String(formData.get('acceptedEvidenceTypes') ?? '')
-      .split(',')
-      .map((value) => value.trim())
-      .filter(Boolean);
 
     setPublishingDraftId(draftControl.id);
     setError(null);
     setStatus(null);
     const payload = {
-      acceptedEvidenceTypes,
-      applicabilityConditions: String(formData.get('applicabilityConditions') ?? ''),
       businessMeaning: String(formData.get('businessMeaning') ?? ''),
       draftControlId: draftControl.id,
       organizationSlug,
-      releaseImpact: String(formData.get('releaseImpact') ?? ''),
-      verificationMethod: String(formData.get('verificationMethod') ?? ''),
     };
 
     if (approvalPolicyEnabled) {
@@ -382,24 +414,15 @@ export function ControlsPage() {
     if (!organizationSlug) return;
 
     const formData = new FormData(event.currentTarget);
-    const acceptedEvidenceTypes = String(formData.get('acceptedEvidenceTypes') ?? '')
-      .split(',')
-      .map((value) => value.trim())
-      .filter(Boolean);
 
     setCreatingProposalControlId(control.id);
     setError(null);
     setStatus(null);
     createProposedUpdateMutation.mutate({
-      acceptedEvidenceTypes,
-      applicabilityConditions: String(formData.get('applicabilityConditions') ?? ''),
       businessMeaning: String(formData.get('businessMeaning') ?? ''),
-      controlCode: String(formData.get('controlCode') ?? ''),
       controlId: control.id,
       organizationSlug,
-      releaseImpact: String(formData.get('releaseImpact') ?? ''),
       title: String(formData.get('title') ?? ''),
-      verificationMethod: String(formData.get('verificationMethod') ?? ''),
     });
   };
 
@@ -567,39 +590,58 @@ export function ControlsPage() {
       {!archivedView ? (
         <section className="rounded-xl border bg-card p-5">
           <div className="space-y-1">
-            <h2 className="text-lg font-semibold">Create Draft Control</h2>
+            <h2 className="text-lg font-semibold">Create Control</h2>
             <p className="text-sm text-muted-foreground">
-              Only Control Code and title are required while a Control is still a draft.
+              Gatekeeper assigns the Control Code when the Control is saved.
             </p>
           </div>
           <form
-            className="mt-5 grid gap-4 sm:grid-cols-[12rem_1fr_auto]"
-            onSubmit={handleCreateDraftControl}
+            className="mt-5 grid gap-4"
+            onSubmit={createControlForm.handleSubmit(handleSaveDraftControl)}
           >
-            <div className="space-y-2">
-              <Label htmlFor="control-code">Control Code</Label>
-              <Input
-                id="control-code"
-                value={controlCode}
-                onChange={(event) => setControlCode(event.target.value)}
-                placeholder="AUTH-001"
-                required
-              />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="control-title">Title</Label>
+                <Input
+                  id="control-title"
+                  {...createControlForm.register('title')}
+                  placeholder="Require multi-factor authentication"
+                />
+                {createControlForm.formState.errors.title ? (
+                  <p className="text-sm text-destructive">
+                    {createControlForm.formState.errors.title.message}
+                  </p>
+                ) : null}
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="control-business-meaning">Business meaning</Label>
+                <textarea
+                  id="control-business-meaning"
+                  {...createControlForm.register('businessMeaning')}
+                  className="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                />
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="control-title">Title</Label>
-              <Input
-                id="control-title"
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
-                placeholder="Require multi-factor authentication"
-                required
-              />
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button type="submit" variant="outline" disabled={createDraftMutation.isPending}>
+                <Plus />
+                {createDraftMutation.isPending ? 'Saving...' : 'Save Draft'}
+              </Button>
+              <Button
+                type="button"
+                disabled={
+                  createDraftMutation.isPending ||
+                  publishDraftMutation.isPending ||
+                  submitDraftPublishRequestMutation.isPending ||
+                  !createControlBusinessMeaning.trim() ||
+                  (!approvalPolicyEnabled && !canPublish)
+                }
+                onClick={createControlForm.handleSubmit(handlePublishCreatedControl)}
+              >
+                <CheckCircle2 />
+                {approvalPolicyEnabled ? 'Submit for Review' : 'Publish Control'}
+              </Button>
             </div>
-            <Button className="self-end" type="submit" disabled={createDraftMutation.isPending}>
-              <Plus />
-              {createDraftMutation.isPending ? 'Saving...' : 'Save Draft'}
-            </Button>
           </form>
         </section>
       ) : null}
@@ -617,13 +659,13 @@ export function ControlsPage() {
         </div>
         <form className="rounded-xl border bg-card p-4" onSubmit={handleFilterControls}>
           <div className="grid gap-4 md:grid-cols-5">
-            <div className="space-y-2 md:col-span-2">
+            <div className="space-y-2 md:col-span-4">
               <Label htmlFor="control-search">Search Controls</Label>
               <Input
                 id="control-search"
                 name="q"
                 defaultValue={search}
-                placeholder="Control Code, title, meaning, or standard"
+                placeholder="Control Code, title, or business meaning"
               />
             </div>
             <div className="space-y-2">
@@ -640,40 +682,8 @@ export function ControlsPage() {
                 <option value="archived">Archived</option>
               </select>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="release-impact-filter">Release Impact</Label>
-              <select
-                id="release-impact-filter"
-                name="releaseImpact"
-                className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-                defaultValue={releaseImpact}
-              >
-                <option value="">Any</option>
-                <option value="blocking">blocking</option>
-                <option value="needs review">needs review</option>
-                <option value="advisory">advisory</option>
-              </select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="evidence-type-filter">Accepted Evidence Type</Label>
-              <Input
-                id="evidence-type-filter"
-                name="acceptedEvidenceType"
-                defaultValue={acceptedEvidenceType}
-                placeholder="document"
-              />
-            </div>
           </div>
-          <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-end">
-            <div className="flex-1 space-y-2">
-              <Label htmlFor="standards-framework-filter">Standards framework</Label>
-              <Input
-                id="standards-framework-filter"
-                name="standardsFramework"
-                defaultValue={standardsFramework}
-                placeholder="SOC 2"
-              />
-            </div>
+          <div className="mt-4 flex justify-end">
             <div className="flex gap-2">
               <Button type="submit">Apply filters</Button>
               <Button type="button" variant="outline" onClick={() => setSearchParams({})}>
@@ -712,9 +722,6 @@ export function ControlsPage() {
                         {control.controlCode} · v{control.currentVersion.versionNumber}
                       </p>
                       <h3 className="text-base font-semibold">{control.title}</h3>
-                      <p className="text-sm text-muted-foreground">
-                        Release Impact: {control.currentVersion.releaseImpact}
-                      </p>
                       <p className="text-sm">{control.currentVersion.businessMeaning}</p>
                     </div>
                     <p className="shrink-0 text-xs text-muted-foreground">
@@ -791,15 +798,6 @@ export function ControlsPage() {
                       <h4 className="text-sm font-medium">Propose update</h4>
                       <div className="grid gap-4 sm:grid-cols-2">
                         <div className="space-y-2">
-                          <Label htmlFor={`${control.id}-proposal-code`}>Control Code</Label>
-                          <Input
-                            id={`${control.id}-proposal-code`}
-                            name="controlCode"
-                            defaultValue={control.currentVersion.controlCode}
-                            required
-                          />
-                        </div>
-                        <div className="space-y-2">
                           <Label htmlFor={`${control.id}-proposal-title`}>Title</Label>
                           <Input
                             id={`${control.id}-proposal-title`}
@@ -817,57 +815,6 @@ export function ControlsPage() {
                             name="businessMeaning"
                             className="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm"
                             defaultValue={control.currentVersion.businessMeaning}
-                            required
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor={`${control.id}-proposal-verification-method`}>
-                            Verification method
-                          </Label>
-                          <textarea
-                            id={`${control.id}-proposal-verification-method`}
-                            name="verificationMethod"
-                            className="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm"
-                            defaultValue={control.currentVersion.verificationMethod}
-                            required
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor={`${control.id}-proposal-evidence-types`}>
-                            Accepted Evidence Types
-                          </Label>
-                          <Input
-                            id={`${control.id}-proposal-evidence-types`}
-                            name="acceptedEvidenceTypes"
-                            defaultValue={control.currentVersion.acceptedEvidenceTypes.join(', ')}
-                            required
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor={`${control.id}-proposal-release-impact`}>
-                            Release Impact
-                          </Label>
-                          <select
-                            id={`${control.id}-proposal-release-impact`}
-                            name="releaseImpact"
-                            className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-                            defaultValue={control.currentVersion.releaseImpact}
-                            required
-                          >
-                            <option value="blocking">blocking</option>
-                            <option value="needs review">needs review</option>
-                            <option value="advisory">advisory</option>
-                          </select>
-                        </div>
-                        <div className="space-y-2 sm:col-span-2">
-                          <Label htmlFor={`${control.id}-proposal-applicability`}>
-                            Applicability conditions
-                          </Label>
-                          <textarea
-                            id={`${control.id}-proposal-applicability`}
-                            name="applicabilityConditions"
-                            className="min-h-20 w-full rounded-md border bg-background px-3 py-2 text-sm"
-                            defaultValue={control.currentVersion.applicabilityConditions}
                             required
                           />
                         </div>
@@ -993,63 +940,14 @@ export function ControlsPage() {
                     className="mt-5 grid gap-4"
                     onSubmit={(event) => handlePublishDraftControl(event, draftControl)}
                   >
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label htmlFor={`${draftControl.id}-business-meaning`}>
-                          Business meaning
-                        </Label>
-                        <textarea
-                          id={`${draftControl.id}-business-meaning`}
-                          name="businessMeaning"
-                          className="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm"
-                          required
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor={`${draftControl.id}-verification-method`}>
-                          Verification method
-                        </Label>
-                        <textarea
-                          id={`${draftControl.id}-verification-method`}
-                          name="verificationMethod"
-                          className="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm"
-                          required
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor={`${draftControl.id}-accepted-evidence-types`}>
-                          Accepted Evidence Types
-                        </Label>
-                        <Input
-                          id={`${draftControl.id}-accepted-evidence-types`}
-                          name="acceptedEvidenceTypes"
-                          placeholder="document, approval record"
-                          required
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor={`${draftControl.id}-release-impact`}>Release Impact</Label>
-                        <select
-                          id={`${draftControl.id}-release-impact`}
-                          name="releaseImpact"
-                          className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-                          required
-                          defaultValue="blocking"
-                        >
-                          <option value="blocking">blocking</option>
-                          <option value="needs review">needs review</option>
-                          <option value="advisory">advisory</option>
-                        </select>
-                      </div>
-                    </div>
                     <div className="space-y-2">
-                      <Label htmlFor={`${draftControl.id}-applicability-conditions`}>
-                        Applicability conditions
+                      <Label htmlFor={`${draftControl.id}-business-meaning`}>
+                        Business meaning
                       </Label>
                       <textarea
-                        id={`${draftControl.id}-applicability-conditions`}
-                        name="applicabilityConditions"
-                        className="min-h-20 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                        id={`${draftControl.id}-business-meaning`}
+                        name="businessMeaning"
+                        className="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm"
                         required
                       />
                     </div>

@@ -18,20 +18,7 @@ export const publishRequestIdentityInput = organizationSlugInput.extend({
 });
 
 export const publishControlInput = z.object({
-  acceptedEvidenceTypes: z.array(z.string()),
-  applicabilityConditions: z.string(),
   businessMeaning: z.string(),
-  externalStandardsMappings: z
-    .array(
-      z.object({
-        description: z.string().optional(),
-        framework: z.string(),
-        reference: z.string(),
-      }),
-    )
-    .optional(),
-  releaseImpact: z.string(),
-  verificationMethod: z.string(),
 });
 
 export const updateControlApprovalPolicyInput = organizationSlugInput.extend({
@@ -40,10 +27,7 @@ export const updateControlApprovalPolicyInput = organizationSlugInput.extend({
 });
 
 export const controlListInput = organizationSlugInput.extend({
-  acceptedEvidenceType: z.string().optional(),
-  releaseImpact: z.string().optional(),
   search: z.string().optional(),
-  standardsFramework: z.string().optional(),
   status: z.enum(['active', 'archived']).default('active'),
 });
 
@@ -52,7 +36,6 @@ export const draftControlListInput = organizationSlugInput.extend({
 });
 
 export const createDraftControlInput = organizationSlugInput.extend({
-  controlCode: z.string(),
   title: z.string(),
 });
 
@@ -62,7 +45,6 @@ export const submitDraftPublishRequestInput = draftControlIdentityInput.merge(pu
 
 export const createProposedUpdateInput = controlIdentityInput.merge(
   publishControlInput.extend({
-    controlCode: z.string(),
     title: z.string(),
   }),
 );

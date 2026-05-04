@@ -135,11 +135,7 @@ async function listDraftControlsRequest(
 }
 
 const completePublishBody = {
-  acceptedEvidenceTypes: ['document', 'approval record'],
-  applicabilityConditions: 'Applies to internet-facing authentication surfaces.',
   businessMeaning: 'Release teams must verify users have a second authentication factor.',
-  releaseImpact: 'blocking',
-  verificationMethod: 'Review identity provider MFA policy evidence.',
 };
 
 async function publishDraftControlRequest(
@@ -370,14 +366,14 @@ describe('Draft Controls', () => {
     expect(createResponse.status).toBe(201);
     expect(createResponse.body.draftControl).toMatchObject({
       author: { email: member.credentials.email },
-      controlCode: 'AUTH-001',
+      controlCode: 'CTL-001',
       title: 'Require multi-factor authentication',
     });
 
     await expect(
       listDraftControlsRequest(organization.slug, member.headers),
     ).resolves.toMatchObject({
-      body: { draftControls: [{ controlCode: 'AUTH-001' }] },
+      body: { draftControls: [{ controlCode: 'CTL-001' }] },
       status: 200,
     });
   });
@@ -416,40 +412,28 @@ describe('Draft Controls', () => {
     await expect(
       listDraftControlsRequest(organization.slug, firstMember.headers),
     ).resolves.toMatchObject({
-      body: { draftControls: [{ controlCode: 'AUTH-002' }] },
+      body: { draftControls: [{ controlCode: 'CTL-001' }] },
       status: 200,
     });
     await expect(listDraftControlsRequest(organization.slug, ownerHeaders)).resolves.toMatchObject({
       body: {
-        draftControls: [{ controlCode: 'AUTH-002' }, { controlCode: 'DATA-001' }],
+        draftControls: [{ controlCode: 'CTL-001' }, { controlCode: 'CTL-002' }],
       },
       status: 200,
     });
     await expect(listDraftControlsRequest(organization.slug, admin.headers)).resolves.toMatchObject(
       {
         body: {
-          draftControls: [{ controlCode: 'AUTH-002' }, { controlCode: 'DATA-001' }],
+          draftControls: [{ controlCode: 'CTL-001' }, { controlCode: 'CTL-002' }],
         },
         status: 200,
       },
     );
   });
 
-  it('validates required Draft Control fields and Organization-local Control Code uniqueness', async () => {
+  it('validates required Draft Control fields and generates Organization-local Control Codes', async () => {
     const first = await createSignedInOwner('draft-first-org');
     const second = await createSignedInOwner('draft-second-org');
-
-    const missingCodeResponse = await createDraftControlRequest(
-      first.organization.slug,
-      first.headers,
-      {
-        controlCode: '',
-        title: 'Missing code',
-      },
-    );
-
-    expect(missingCodeResponse.status).toBe(400);
-    expect(missingCodeResponse.body).toMatchObject({ error: 'Control Code is required.' });
 
     const missingTitleResponse = await createDraftControlRequest(
       first.organization.slug,
@@ -463,23 +447,24 @@ describe('Draft Controls', () => {
     expect(missingTitleResponse.status).toBe(400);
     expect(missingTitleResponse.body).toMatchObject({ error: 'Control title is required.' });
 
-    await createDraftControlRequest(first.organization.slug, first.headers, {
-      controlCode: 'AUTH-003',
-      title: 'First code use',
-    });
-
-    const duplicateResponse = await createDraftControlRequest(
+    const firstDraftResponse = await createDraftControlRequest(
       first.organization.slug,
       first.headers,
       {
         controlCode: 'AUTH-003',
-        title: 'Duplicate code use',
+        title: 'First code use',
       },
     );
+    expect(firstDraftResponse.body.draftControl).toMatchObject({ controlCode: 'CTL-001' });
 
-    expect(duplicateResponse.status).toBe(400);
-    expect(duplicateResponse.body).toMatchObject({
-      error: 'Control Code is already used in this Organization.',
+    await expect(
+      createDraftControlRequest(first.organization.slug, first.headers, {
+        controlCode: 'AUTH-003',
+        title: 'Next generated code',
+      }),
+    ).resolves.toMatchObject({
+      body: { draftControl: { controlCode: 'CTL-002' } },
+      status: 201,
     });
 
     await expect(
@@ -487,7 +472,10 @@ describe('Draft Controls', () => {
         controlCode: 'AUTH-003',
         title: 'Same code in another Organization',
       }),
-    ).resolves.toMatchObject({ status: 201 });
+    ).resolves.toMatchObject({
+      body: { draftControl: { controlCode: 'CTL-001' } },
+      status: 201,
+    });
   });
 
   it('lets Organization owners publish a complete Draft Control as active Control Version v1', async () => {
@@ -509,10 +497,8 @@ describe('Draft Controls', () => {
 
     expect(publishResponse.status).toBe(201);
     expect(publishResponse.body.control).toMatchObject({
-      controlCode: 'AUTH-004',
+      controlCode: 'CTL-001',
       currentVersion: {
-        acceptedEvidenceTypes: ['document', 'approval record'],
-        releaseImpact: 'blocking',
         title: 'Require phishing-resistant MFA',
         versionNumber: 1,
       },
@@ -523,14 +509,14 @@ describe('Draft Controls', () => {
       .select()
       .from(controls)
       .where(eq(controls.organizationId, organization.id));
-    expect(controlRow?.currentControlCode).toBe('AUTH-004');
+    expect(controlRow?.currentControlCode).toBe('CTL-001');
 
     const versions = await db
       .select()
       .from(controlVersions)
       .where(eq(controlVersions.controlId, controlRow!.id));
     expect(versions).toHaveLength(1);
-    expect(versions[0]).toMatchObject({ controlCode: 'AUTH-004', versionNumber: 1 });
+    expect(versions[0]).toMatchObject({ controlCode: 'CTL-001', versionNumber: 1 });
 
     await expect(listDraftControlsRequest(organization.slug, ownerHeaders)).resolves.toMatchObject({
       body: { draftControls: [] },
@@ -560,18 +546,18 @@ describe('Draft Controls', () => {
     const control = publishResponse.body.control as { id: string };
 
     await expect(listControlsRequest(organization.slug, member.headers)).resolves.toMatchObject({
-      body: { controls: [{ controlCode: 'DATA-002', currentVersion: { versionNumber: 1 } }] },
+      body: { controls: [{ controlCode: 'CTL-001', currentVersion: { versionNumber: 1 } }] },
       status: 200,
     });
     await expect(
       getControlRequest(organization.slug, control.id, member.headers),
     ).resolves.toMatchObject({
-      body: { control: { controlCode: 'DATA-002', currentVersion: { releaseImpact: 'blocking' } } },
+      body: { control: { controlCode: 'CTL-001', currentVersion: { versionNumber: 1 } } },
       status: 200,
     });
   });
 
-  it('searches and filters active Controls by current Control fields', async () => {
+  it('searches active Controls by current MVP Control fields', async () => {
     const { headers: ownerHeaders, organization } = await createSignedInOwner('control-search');
     const member = await createSignedInMember({
       ownerHeaders,
@@ -591,51 +577,21 @@ describe('Draft Controls', () => {
     const firstDraft = firstDraftResponse.body.draftControl as { id: string };
     const secondDraft = secondDraftResponse.body.draftControl as { id: string };
 
-    await publishDraftControlRequest(organization.slug, firstDraft.id, ownerHeaders, {
-      ...completePublishBody,
-      externalStandardsMappings: [
-        { description: 'Logical access controls', framework: 'SOC 2', reference: 'CC6.1' },
-      ],
-    });
+    await publishDraftControlRequest(organization.slug, firstDraft.id, ownerHeaders);
     await publishDraftControlRequest(organization.slug, secondDraft.id, ownerHeaders, {
-      acceptedEvidenceTypes: ['scanner result'],
-      applicabilityConditions: 'Applies to audit log pipelines.',
       businessMeaning: 'Release teams must preserve audit events for investigation.',
-      externalStandardsMappings: [{ framework: 'ISO 27001', reference: 'A.8.15' }],
-      releaseImpact: 'advisory',
-      verificationMethod: 'Review scanner retention output.',
     });
 
     await expect(
-      listControlsRequest(organization.slug, member.headers, { q: 'CC6.1' }),
+      listControlsRequest(organization.slug, member.headers, { q: 'phishing' }),
     ).resolves.toMatchObject({
-      body: { controls: [{ controlCode: 'AUTH-008' }] },
+      body: { controls: [{ controlCode: 'CTL-001' }] },
       status: 200,
     });
     await expect(
       listControlsRequest(organization.slug, member.headers, { q: 'investigation' }),
     ).resolves.toMatchObject({
-      body: { controls: [{ controlCode: 'DATA-003' }] },
-      status: 200,
-    });
-    await expect(
-      listControlsRequest(organization.slug, member.headers, { releaseImpact: 'advisory' }),
-    ).resolves.toMatchObject({
-      body: { controls: [{ controlCode: 'DATA-003' }] },
-      status: 200,
-    });
-    await expect(
-      listControlsRequest(organization.slug, member.headers, {
-        acceptedEvidenceType: 'scanner result',
-      }),
-    ).resolves.toMatchObject({
-      body: { controls: [{ controlCode: 'DATA-003' }] },
-      status: 200,
-    });
-    await expect(
-      listControlsRequest(organization.slug, member.headers, { standardsFramework: 'SOC 2' }),
-    ).resolves.toMatchObject({
-      body: { controls: [{ controlCode: 'AUTH-008' }] },
+      body: { controls: [{ controlCode: 'CTL-002' }] },
       status: 200,
     });
     await expect(
@@ -671,15 +627,15 @@ describe('Draft Controls', () => {
     });
 
     await expect(
-      listDraftControlsRequest(organization.slug, firstMember.headers, { q: 'DATA' }),
+      listDraftControlsRequest(organization.slug, firstMember.headers, { q: 'Classify' }),
     ).resolves.toMatchObject({
       body: { draftControls: [] },
       status: 200,
     });
     await expect(
-      listDraftControlsRequest(organization.slug, ownerHeaders, { q: 'DATA' }),
+      listDraftControlsRequest(organization.slug, ownerHeaders, { q: 'Classify' }),
     ).resolves.toMatchObject({
-      body: { draftControls: [{ controlCode: 'DATA-004' }] },
+      body: { draftControls: [{ controlCode: 'CTL-002' }] },
       status: 200,
     });
   });
@@ -756,7 +712,7 @@ describe('Draft Controls', () => {
     expect(submitResponse.body.publishRequest).toMatchObject({
       approvalCount: 0,
       author: { email: member.credentials.email },
-      controlCode: 'AUTH-026',
+      controlCode: 'CTL-001',
       draftControlId: draftControl.id,
       requestType: 'draft_control',
       requiredApprovalCount: 1,
@@ -808,7 +764,7 @@ describe('Draft Controls', () => {
     await expect(
       listControlPublishRequestsRequest(organization.slug, firstMember.headers),
     ).resolves.toMatchObject({
-      body: { publishRequests: [{ controlCode: 'AUTH-027' }] },
+      body: { publishRequests: [{ controlCode: 'CTL-001' }] },
       status: 200,
     });
     await expect(
@@ -817,13 +773,13 @@ describe('Draft Controls', () => {
     await expect(
       listControlPublishRequestsRequest(organization.slug, ownerHeaders),
     ).resolves.toMatchObject({
-      body: { publishRequests: [{ controlCode: 'AUTH-027' }] },
+      body: { publishRequests: [{ controlCode: 'CTL-001' }] },
       status: 200,
     });
     await expect(
       listControlPublishRequestsRequest(organization.slug, admin.headers),
     ).resolves.toMatchObject({
-      body: { publishRequests: [{ controlCode: 'AUTH-027' }] },
+      body: { publishRequests: [{ controlCode: 'CTL-001' }] },
       status: 200,
     });
   });
@@ -994,13 +950,13 @@ describe('Draft Controls', () => {
       organization.slug,
       publishRequest.id,
       ownerHeaders,
-      { comment: 'Evidence does not cover the applicability conditions.' },
+      { comment: 'Business meaning needs more detail.' },
     );
 
     expect(rejectResponse.status).toBe(200);
     expect(rejectResponse.body.publishRequest).toMatchObject({
       approvalCount: 0,
-      rejectionComment: 'Evidence does not cover the applicability conditions.',
+      rejectionComment: 'Business meaning needs more detail.',
       status: 'draft',
     });
     await expect(
@@ -1096,7 +1052,7 @@ describe('Draft Controls', () => {
     await enableControlApprovalPolicy(organization.slug, ownerHeaders);
 
     const createResponse = await createDraftControlRequest(organization.slug, member.headers, {
-      controlCode: 'AUTH-034',
+      controlCode: 'CTL-001',
       title: 'Approved new Control',
     });
     const draftControl = createResponse.body.draftControl as { id: string };
@@ -1117,7 +1073,7 @@ describe('Draft Controls', () => {
 
     expect(publishResponse.status).toBe(201);
     expect(publishResponse.body.control).toMatchObject({
-      controlCode: 'AUTH-034',
+      controlCode: 'CTL-001',
       currentVersion: { title: 'Approved new Control', versionNumber: 1 },
       versions: [{ versionNumber: 1 }],
     });
@@ -1253,7 +1209,7 @@ describe('Draft Controls', () => {
     await expect(
       listControlPublishRequestsRequest(organization.slug, ownerHeaders),
     ).resolves.toMatchObject({
-      body: { publishRequests: [{ controlCode: 'AUTH-036', isPublishable: false }] },
+      body: { publishRequests: [{ controlCode: 'CTL-001', isPublishable: false }] },
       status: 200,
     });
     await expect(
@@ -1270,13 +1226,13 @@ describe('Draft Controls', () => {
     await expect(
       listControlPublishRequestsRequest(organization.slug, ownerHeaders),
     ).resolves.toMatchObject({
-      body: { publishRequests: [{ controlCode: 'AUTH-036', isPublishable: true }] },
+      body: { publishRequests: [{ controlCode: 'CTL-001', isPublishable: true }] },
       status: 200,
     });
     await expect(
       publishControlPublishRequest(organization.slug, firstRequest.id, ownerHeaders),
     ).resolves.toMatchObject({
-      body: { control: { controlCode: 'AUTH-036', currentVersion: { versionNumber: 1 } } },
+      body: { control: { controlCode: 'CTL-001', currentVersion: { versionNumber: 1 } } },
       status: 201,
     });
 
@@ -1324,7 +1280,7 @@ describe('Draft Controls', () => {
     await expect(
       publishDraftControlRequest(organization.slug, thirdDraft.id, ownerHeaders),
     ).resolves.toMatchObject({
-      body: { control: { controlCode: 'AUTH-038', currentVersion: { versionNumber: 1 } } },
+      body: { control: { controlCode: 'CTL-003', currentVersion: { versionNumber: 1 } } },
       status: 201,
     });
   });
@@ -1343,13 +1299,13 @@ describe('Draft Controls', () => {
       ownerHeaders,
       {
         ...completePublishBody,
-        acceptedEvidenceTypes: [],
+        businessMeaning: '',
       },
     );
 
     expect(publishResponse.status).toBe(400);
     expect(publishResponse.body).toMatchObject({
-      error: 'At least one Accepted Evidence Type is required.',
+      error: 'Business meaning is required.',
     });
   });
 
@@ -1380,7 +1336,7 @@ describe('Draft Controls', () => {
     expect(archiveResponse.status).toBe(200);
     expect(archiveResponse.body.control).toMatchObject({
       archiveReason: 'Replaced by a stricter Control.',
-      controlCode: 'AUTH-008',
+      controlCode: 'CTL-001',
     });
     expect((archiveResponse.body.control as { archivedAt?: string }).archivedAt).toBeTruthy();
 
@@ -1391,7 +1347,7 @@ describe('Draft Controls', () => {
     await expect(
       listControlsRequest(organization.slug, ownerHeaders, { status: 'archived' }),
     ).resolves.toMatchObject({
-      body: { controls: [{ controlCode: 'AUTH-008' }] },
+      body: { controls: [{ controlCode: 'CTL-001' }] },
       status: 200,
     });
 
@@ -1405,10 +1361,10 @@ describe('Draft Controls', () => {
     expect(restoreResponse.body.control).toMatchObject({
       archivedAt: null,
       archiveReason: null,
-      controlCode: 'AUTH-008',
+      controlCode: 'CTL-001',
     });
     await expect(listControlsRequest(organization.slug, ownerHeaders)).resolves.toMatchObject({
-      body: { controls: [{ controlCode: 'AUTH-008' }] },
+      body: { controls: [{ controlCode: 'CTL-001' }] },
       status: 200,
     });
   });
@@ -1443,7 +1399,7 @@ describe('Draft Controls', () => {
     expect(proposedResponse.status).toBe(201);
     expect(proposedResponse.body.proposedUpdate).toMatchObject({
       businessMeaning: proposedBody.businessMeaning,
-      controlCode: 'AUTH-008',
+      controlCode: 'CTL-001',
       title: 'Require phishing-resistant MFA',
     });
 
@@ -1522,7 +1478,7 @@ describe('Draft Controls', () => {
     ).resolves.toMatchObject({
       body: {
         publishRequest: {
-          controlCode: 'AUTH-029',
+          controlCode: 'CTL-001',
           controlId: control.id,
           proposedUpdateId: proposedUpdate.id,
           requestType: 'proposed_update',
@@ -1633,7 +1589,7 @@ describe('Draft Controls', () => {
 
     expect(proposedPublishResponse.status).toBe(201);
     expect(proposedPublishResponse.body.control).toMatchObject({
-      controlCode: 'AUTH-009A',
+      controlCode: 'CTL-001',
       currentVersion: {
         businessMeaning: 'Updated release assurance meaning.',
         title: 'Require MFA after update',
@@ -1653,7 +1609,7 @@ describe('Draft Controls', () => {
     ).resolves.toMatchObject({ body: { proposedUpdates: [] }, status: 200 });
   });
 
-  it('keeps archived published Control Codes reserved while canceled Draft Control codes can be reused', async () => {
+  it('keeps generated Control Codes reserved after archive and Draft Control cancellation', async () => {
     const { headers: ownerHeaders, organization } = await createSignedInOwner('code-reuse-owner');
 
     const publishedDraftResponse = await createDraftControlRequest(
@@ -1674,15 +1630,13 @@ describe('Draft Controls', () => {
 
     await archiveControlRequest(organization.slug, control.id, ownerHeaders);
 
-    const reservedCodeResponse = await createDraftControlRequest(organization.slug, ownerHeaders, {
+    const nextDraftResponse = await createDraftControlRequest(organization.slug, ownerHeaders, {
       controlCode: 'AUTH-010',
       title: 'Reuse archived published code',
     });
 
-    expect(reservedCodeResponse.status).toBe(400);
-    expect(reservedCodeResponse.body).toMatchObject({
-      error: 'Control Code is already used in this Organization.',
-    });
+    expect(nextDraftResponse.status).toBe(201);
+    expect(nextDraftResponse.body.draftControl).toMatchObject({ controlCode: 'CTL-002' });
 
     const canceledDraftResponse = await createDraftControlRequest(organization.slug, ownerHeaders, {
       controlCode: 'AUTH-011',
@@ -1698,6 +1652,9 @@ describe('Draft Controls', () => {
         controlCode: 'AUTH-011',
         title: 'Reused canceled draft code',
       }),
-    ).resolves.toMatchObject({ status: 201 });
+    ).resolves.toMatchObject({
+      body: { draftControl: { controlCode: 'CTL-004' } },
+      status: 201,
+    });
   });
 });

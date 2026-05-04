@@ -128,10 +128,7 @@ export const controlsRouter = router({
 
   list: protectedProcedure.input(controlListInput).query(async ({ ctx, input }) => {
     const filters = normalizeControlListFilters({
-      acceptedEvidenceType: input.acceptedEvidenceType,
       q: input.search,
-      releaseImpact: input.releaseImpact,
-      standardsFramework: input.standardsFramework,
       status: input.status,
     });
 
