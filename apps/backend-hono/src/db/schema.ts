@@ -216,6 +216,33 @@ export const draftControls = sqliteTable(
   ],
 );
 
+export const controlCodeReservations = sqliteTable(
+  'control_code_reservations',
+  {
+    id: text('id').primaryKey(),
+    organizationId: text('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    controlCode: text('control_code').notNull(),
+    sequenceNumber: integer('sequence_number').notNull(),
+    reservedByDraftControlId: text('reserved_by_draft_control_id'),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+  },
+  (table) => [
+    index('control_code_reservation_organization_id_idx').on(table.organizationId),
+    uniqueIndex('control_code_reservation_organization_code_unique').on(
+      table.organizationId,
+      table.controlCode,
+    ),
+    uniqueIndex('control_code_reservation_organization_sequence_unique').on(
+      table.organizationId,
+      table.sequenceNumber,
+    ),
+  ],
+);
+
 export const controls = sqliteTable(
   'controls',
   {
@@ -259,11 +286,6 @@ export const controlVersions = sqliteTable(
     controlCode: text('control_code').notNull(),
     title: text('title').notNull(),
     businessMeaning: text('business_meaning').notNull(),
-    verificationMethod: text('verification_method').notNull(),
-    acceptedEvidenceTypes: text('accepted_evidence_types').notNull(),
-    applicabilityConditions: text('applicability_conditions').notNull(),
-    releaseImpact: text('release_impact').notNull(),
-    externalStandardsMappings: text('external_standards_mappings').notNull(),
     createdAt: integer('created_at', { mode: 'timestamp_ms' })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),
@@ -287,14 +309,8 @@ export const controlProposedUpdates = sqliteTable(
     authorMemberId: text('author_member_id')
       .notNull()
       .references(() => members.id, { onDelete: 'cascade' }),
-    controlCode: text('control_code').notNull(),
     title: text('title').notNull(),
     businessMeaning: text('business_meaning').notNull(),
-    verificationMethod: text('verification_method').notNull(),
-    acceptedEvidenceTypes: text('accepted_evidence_types').notNull(),
-    applicabilityConditions: text('applicability_conditions').notNull(),
-    releaseImpact: text('release_impact').notNull(),
-    externalStandardsMappings: text('external_standards_mappings').notNull(),
     createdAt: integer('created_at', { mode: 'timestamp_ms' })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),
@@ -331,11 +347,6 @@ export const controlPublishRequests = sqliteTable(
     controlCode: text('control_code').notNull(),
     title: text('title').notNull(),
     businessMeaning: text('business_meaning').notNull(),
-    verificationMethod: text('verification_method').notNull(),
-    acceptedEvidenceTypes: text('accepted_evidence_types').notNull(),
-    applicabilityConditions: text('applicability_conditions').notNull(),
-    releaseImpact: text('release_impact').notNull(),
-    externalStandardsMappings: text('external_standards_mappings').notNull(),
     approvalCount: integer('approval_count').default(0).notNull(),
     requiredApprovalCount: integer('required_approval_count').notNull(),
     rejectionComment: text('rejection_comment'),
