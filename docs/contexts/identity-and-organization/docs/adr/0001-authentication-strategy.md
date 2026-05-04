@@ -1,4 +1,6 @@
-# ADR 002: Authentication Strategy
+# ADR 0001: Authentication Strategy
+
+_Moved from global ADR 002._
 
 ## Status
 

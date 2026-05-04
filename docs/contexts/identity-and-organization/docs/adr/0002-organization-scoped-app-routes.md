@@ -1,4 +1,6 @@
-# ADR 003: Organization-Scoped App Routes
+# ADR 0002: Organization-Scoped App Routes
+
+_Moved from global ADR 003._
 
 ## Status
 

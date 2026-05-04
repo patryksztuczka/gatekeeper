@@ -1,4 +1,6 @@
-# ADR 004: Control Publish Approval
+# ADR 0001: Control Publish Approval
+
+_Moved from global ADR 004._
 
 ## Status
 

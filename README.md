@@ -63,7 +63,7 @@ flowchart LR
 | `apps/web`          | Vite React 19 SPA with React Router, TanStack Query, tRPC client, Better Auth client, Tailwind CSS, and shadcn-style UI primitives. |
 | `apps/backend-hono` | Hono Cloudflare Worker with Better Auth, tRPC, Drizzle ORM, Cloudflare D1, and Zod validation.                                      |
 | `docs`              | Business docs, feature specifications, and architecture decision records.                                                           |
-| `CONTEXT.md`        | Canonical domain language and invariants used across product, API, UI, and tests.                                                   |
+| `CONTEXT-MAP.md`    | Root map for domain contexts, relationships, and canonical product language.                                                        |
 | `compose.yaml`      | Local Mailpit service for auth and invitation emails.                                                                               |
 
 ## Getting Started
@@ -197,11 +197,11 @@ CI runs separate web and backend workflows on pull requests and pushes to `maste
 
 | Document                                                                           | What it covers                                                                                                                                                 |
 | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`CONTEXT.md`](./CONTEXT.md)                                                       | Domain terms, relationships, and invariants.                                                                                                                   |
+| [`CONTEXT-MAP.md`](./CONTEXT-MAP.md)                                               | Root map for domain contexts, relationships, and canonical product language.                                                                                    |
 | [`docs/README.md`](./docs/README.md)                                               | Index of business documents, feature specs, and ADRs.                                                                                                          |
 | [`docs/01-problem-and-business-value.md`](./docs/01-problem-and-business-value.md) | Problem statement and business value.                                                                                                                          |
 | [`docs/02-product-vision-and-scope.md`](./docs/02-product-vision-and-scope.md)     | Product vision, scope, and principles.                                                                                                                         |
-| [`docs/adr`](./docs/adr)                                                           | Architecture decisions for database access, authentication, app routes, and Control publish approval.                                                          |
+| [`docs/adr`](./docs/adr)                                                           | Global architecture decisions; context-specific ADRs are linked from `CONTEXT-MAP.md`.                                                                          |
 | [`docs/features`](./docs/features)                                                 | Feature-level specs for Projects, checklists, Control Library, evidence, exceptions, approvals, audit, MCP workflows, RBAC, notifications, and authentication. |
 
 ## Troubleshooting
