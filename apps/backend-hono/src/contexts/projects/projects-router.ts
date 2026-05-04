@@ -4,15 +4,14 @@ import {
   OrganizationAuthorizationError,
 } from '../identity-organization/organization-authorization';
 import {
-  createProject,
-  getProjectDetailForMembership,
-  listProjects,
-  normalizeProjectCreateBody,
-  normalizeProjectUpdateBody,
+  archiveProjectForMember,
+  createProjectForMember,
+  listProjectsForMember,
   projectAuthorizationActions,
   ProjectInputError,
-  setProjectArchivedForMembership,
-  updateProjectForMembership,
+  restoreProjectForMember,
+  updateProjectSettingsForMember,
+  viewProjectForMember,
 } from './projects';
 import {
   projectCreateInput,
@@ -50,7 +49,7 @@ export const projectsRouter = router({
       });
 
       return {
-        projects: await listProjects(membership.organizationId, input.status),
+        projects: await listProjectsForMember(membership, input.status),
       };
     } catch (caughtError) {
       toProjectInputError(caughtError);
@@ -74,7 +73,7 @@ export const projectsRouter = router({
       throw caughtError;
     }
 
-    const project = await getProjectDetailForMembership(membership, input.projectSlug);
+    const project = await viewProjectForMember(membership, input.projectSlug);
 
     return project ? { status: 'available' as const, project } : { status: 'unavailable' as const };
   }),
@@ -88,7 +87,7 @@ export const projectsRouter = router({
       });
 
       return {
-        project: await createProject(membership.organizationId, normalizeProjectCreateBody(input)),
+        project: await createProjectForMember(membership, input),
       };
     } catch (caughtError) {
       toProjectInputError(caughtError);
@@ -102,10 +101,10 @@ export const projectsRouter = router({
         organizationSlug: input.organizationSlug,
         userId: ctx.session.user.id,
       });
-      const project = await updateProjectForMembership({
+      const project = await updateProjectSettingsForMember({
         membership,
         projectSlug: input.projectSlug,
-        updates: normalizeProjectUpdateBody(input),
+        settings: input,
       });
 
       if (!project) {
@@ -125,8 +124,7 @@ export const projectsRouter = router({
         organizationSlug: input.organizationSlug,
         userId: ctx.session.user.id,
       });
-      const project = await setProjectArchivedForMembership({
-        archived: true,
+      const project = await archiveProjectForMember({
         membership,
         projectSlug: input.projectSlug,
       });
@@ -148,8 +146,7 @@ export const projectsRouter = router({
         organizationSlug: input.organizationSlug,
         userId: ctx.session.user.id,
       });
-      const project = await setProjectArchivedForMembership({
-        archived: false,
+      const project = await restoreProjectForMember({
         membership,
         projectSlug: input.projectSlug,
       });

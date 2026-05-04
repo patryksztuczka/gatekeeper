@@ -9,14 +9,14 @@ export type ProjectListStatus = 'active' | 'archived';
 type CreateProjectInput = {
   description: string;
   name: string;
-  projectOwnerMemberId: string | null;
+  projectOwnerMemberId?: string | null;
   slug: string;
 };
 
-type UpdateProjectInput = {
+type UpdateProjectSettingsInput = {
   description: string;
   name: string;
-  projectOwnerMemberId: string | null;
+  projectOwnerMemberId?: string | null;
 };
 
 const projectManagerRoles = ['owner', 'admin'] as const;
@@ -53,7 +53,10 @@ export const projectAuthorizationActions = {
   },
 } satisfies Record<string, OrganizationAuthorizationPolicy>;
 
-export async function listProjects(organizationId: string, status: ProjectListStatus) {
+export async function listProjectsForMember(
+  membership: AuthorizedOrganizationMember,
+  status: ProjectListStatus,
+) {
   const rows = await db
     .select({
       archivedAt: projects.archivedAt,
@@ -71,7 +74,7 @@ export async function listProjects(organizationId: string, status: ProjectListSt
     .leftJoin(users, eq(members.userId, users.id))
     .where(
       and(
-        eq(projects.organizationId, organizationId),
+        eq(projects.organizationId, membership.organizationId),
         status === 'archived' ? isNotNull(projects.archivedAt) : isNull(projects.archivedAt),
       ),
     )
@@ -92,7 +95,7 @@ export async function listProjects(organizationId: string, status: ProjectListSt
   }));
 }
 
-export async function getProjectDetailForMembership(
+export async function viewProjectForMember(
   membership: AuthorizedOrganizationMember,
   projectSlug: string,
 ) {
@@ -140,17 +143,25 @@ export async function getProjectDetailForMembership(
   };
 }
 
-export type ProjectDetailResponse = NonNullable<
-  Awaited<ReturnType<typeof getProjectDetailForMembership>>
->;
+export type ProjectDetailResponse = NonNullable<Awaited<ReturnType<typeof viewProjectForMember>>>;
 
-export async function createProject(organizationId: string, input: CreateProjectInput) {
-  validateProjectInput(input);
+export async function createProjectForMember(
+  membership: AuthorizedOrganizationMember,
+  input: CreateProjectInput,
+) {
+  const projectInput = normalizeProjectCreateBody(input);
+
+  validateProjectInput(projectInput);
 
   const existingProject = await db
     .select({ id: projects.id })
     .from(projects)
-    .where(and(eq(projects.organizationId, organizationId), eq(projects.slug, input.slug)))
+    .where(
+      and(
+        eq(projects.organizationId, membership.organizationId),
+        eq(projects.slug, projectInput.slug),
+      ),
+    )
     .limit(1)
     .then((rows) => rows[0] ?? null);
 
@@ -158,12 +169,15 @@ export async function createProject(organizationId: string, input: CreateProject
     throw new ProjectInputError('Project slug is already used in this Organization.');
   }
 
-  if (input.projectOwnerMemberId) {
+  if (projectInput.projectOwnerMemberId) {
     const ownerMembership = await db
       .select({ id: members.id })
       .from(members)
       .where(
-        and(eq(members.id, input.projectOwnerMemberId), eq(members.organizationId, organizationId)),
+        and(
+          eq(members.id, projectInput.projectOwnerMemberId),
+          eq(members.organizationId, membership.organizationId),
+        ),
       )
       .limit(1)
       .then((rows) => rows[0] ?? null);
@@ -176,21 +190,35 @@ export async function createProject(organizationId: string, input: CreateProject
   const now = new Date();
   const project = {
     createdAt: now,
-    description: input.description.trim(),
+    description: projectInput.description.trim(),
     id: crypto.randomUUID(),
-    name: input.name.trim(),
-    organizationId,
-    projectOwnerMemberId: input.projectOwnerMemberId,
-    slug: input.slug,
+    name: projectInput.name.trim(),
+    organizationId: membership.organizationId,
+    projectOwnerMemberId: projectInput.projectOwnerMemberId,
+    slug: projectInput.slug,
     updatedAt: now,
   };
 
   await db.insert(projects).values(project);
 
-  return (await listProjects(organizationId, 'active')).find(({ id }) => id === project.id)!;
+  return (await listProjectsForMember(membership, 'active')).find(({ id }) => id === project.id)!;
 }
 
-export async function setProjectArchivedForMembership(input: {
+export async function archiveProjectForMember(input: {
+  membership: AuthorizedOrganizationMember;
+  projectSlug: string;
+}) {
+  return setProjectArchivedForMember({ ...input, archived: true });
+}
+
+export async function restoreProjectForMember(input: {
+  membership: AuthorizedOrganizationMember;
+  projectSlug: string;
+}) {
+  return setProjectArchivedForMember({ ...input, archived: false });
+}
+
+async function setProjectArchivedForMember(input: {
   archived: boolean;
   membership: AuthorizedOrganizationMember;
   projectSlug: string;
@@ -219,15 +247,17 @@ export async function setProjectArchivedForMembership(input: {
     })
     .where(eq(projects.id, existingProject.id));
 
-  return getProjectDetailForMembership(input.membership, input.projectSlug);
+  return viewProjectForMember(input.membership, input.projectSlug);
 }
 
-export async function updateProjectForMembership(input: {
+export async function updateProjectSettingsForMember(input: {
   membership: AuthorizedOrganizationMember;
   projectSlug: string;
-  updates: UpdateProjectInput;
+  settings: UpdateProjectSettingsInput;
 }) {
-  validateProjectUpdateInput(input.updates);
+  const settings = normalizeProjectUpdateBody(input.settings);
+
+  validateProjectUpdateInput(settings);
 
   const existingProject = await db
     .select({ id: projects.id })
@@ -245,13 +275,13 @@ export async function updateProjectForMembership(input: {
     return null;
   }
 
-  if (input.updates.projectOwnerMemberId) {
+  if (settings.projectOwnerMemberId) {
     const ownerMembership = await db
       .select({ id: members.id })
       .from(members)
       .where(
         and(
-          eq(members.id, input.updates.projectOwnerMemberId),
+          eq(members.id, settings.projectOwnerMemberId),
           eq(members.organizationId, input.membership.organizationId),
         ),
       )
@@ -266,14 +296,14 @@ export async function updateProjectForMembership(input: {
   await db
     .update(projects)
     .set({
-      description: input.updates.description.trim(),
-      name: input.updates.name.trim(),
-      projectOwnerMemberId: input.updates.projectOwnerMemberId,
+      description: settings.description.trim(),
+      name: settings.name.trim(),
+      projectOwnerMemberId: settings.projectOwnerMemberId,
       updatedAt: new Date(),
     })
     .where(eq(projects.id, existingProject.id));
 
-  return getProjectDetailForMembership(input.membership, input.projectSlug);
+  return viewProjectForMember(input.membership, input.projectSlug);
 }
 
 export function slugifyProjectName(value: string) {
@@ -307,7 +337,7 @@ function validateProjectInput(input: CreateProjectInput) {
   }
 }
 
-function validateProjectUpdateInput(input: UpdateProjectInput) {
+function validateProjectUpdateInput(input: Required<UpdateProjectSettingsInput>) {
   validateProjectNameAndDescription(input.name.trim(), input.description.trim());
 }
 
@@ -321,7 +351,7 @@ function validateProjectNameAndDescription(name: string, description: string) {
   }
 }
 
-export function normalizeProjectCreateBody(body: unknown) {
+function normalizeProjectCreateBody(body: unknown) {
   const value = typeof body === 'object' && body !== null ? body : {};
   const record = value as Record<string, unknown>;
 
@@ -336,7 +366,7 @@ export function normalizeProjectCreateBody(body: unknown) {
   };
 }
 
-export function normalizeProjectUpdateBody(body: unknown) {
+function normalizeProjectUpdateBody(body: unknown) {
   const value = typeof body === 'object' && body !== null ? body : {};
   const record = value as Record<string, unknown>;
 
