@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { db } from '../src/db/client';
 import { checklistItems, members, users } from '../src/db/schema';
+import { createChecklistTemplateForMember } from '../src/contexts/checklists/checklists';
 import { auth } from '../src/lib/auth';
 import { callTRPC } from './trpc-test-utils';
 
@@ -543,6 +544,26 @@ describe('Project Checklists', () => {
         itemStatus: 'active',
       }),
     ]);
+  });
+
+  it('rejects empty Checklist Templates at the domain service boundary', async () => {
+    const { organization } = await createSignedInOwner('checklist-empty-template-owner');
+    const ownerMembership = await getFirstMembership(organization.id);
+
+    await expect(
+      createChecklistTemplateForMember(
+        {
+          id: ownerMembership.id,
+          organizationId: organization.id,
+          organizationSlug: organization.slug,
+          role: 'owner',
+        },
+        {
+          controlIds: [],
+          name: 'Empty template',
+        },
+      ),
+    ).rejects.toThrow('Checklist Template needs at least one selected Control.');
   });
 
   it('rejects Checklist Items whose Control Version belongs to another Control', async () => {

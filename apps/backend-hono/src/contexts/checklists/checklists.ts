@@ -101,6 +101,7 @@ export async function createChecklistTemplateForMember(
   const body = normalizeCreateChecklistTemplateBody(input);
 
   validateChecklistTemplateName(body.name);
+  validateChecklistTemplateControlIds(body.controlIds);
   validateUniqueControlIds(
     body.controlIds,
     'A Control can appear only once in a Checklist Template.',
@@ -1158,6 +1159,12 @@ function validateProjectChecklistName(name: string) {
 function validateChecklistTemplateName(name: string) {
   if (!name.trim()) {
     throw new ChecklistInputError('Checklist Template name is required.');
+  }
+}
+
+function validateChecklistTemplateControlIds(controlIds: string[]) {
+  if (controlIds.length === 0) {
+    throw new ChecklistInputError('Checklist Template needs at least one selected Control.');
   }
 }
 
