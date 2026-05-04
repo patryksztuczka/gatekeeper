@@ -12,6 +12,7 @@ import {
   buildProjectSettingsPath,
   buildProjectsPath,
 } from '@/features/projects/routing/project-routing';
+import { ProjectChecklistsSection } from '@/features/checklists/components/project-checklists-section';
 import {
   useProjectAccess,
   useProjectArchiveActions,
@@ -182,21 +183,14 @@ export function ProjectDetailPage() {
         </Card>
       </div>
 
-      <Card className="border-dashed bg-muted/30">
-        <CardHeader>
-          <CardTitle>Governance work will appear here</CardTitle>
-          <CardDescription>
-            Controls, checklists, exceptions, and audit evidence will connect to this Project in
-            future slices.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="rounded-lg border bg-background p-6 text-sm text-muted-foreground">
-            This Project is ready. Start by adding governance workflows when those areas become
-            available.
-          </div>
-        </CardContent>
-      </Card>
+      <ProjectChecklistsSection
+        canManage={canManage}
+        currentMemberId={projectAccess.currentMemberId}
+        organizationSlug={organizationSlug}
+        projectArchived={Boolean(project.archivedAt)}
+        projectOwnerMemberId={project.projectOwner?.id ?? null}
+        projectSlug={project.slug}
+      />
     </div>
   );
 }
