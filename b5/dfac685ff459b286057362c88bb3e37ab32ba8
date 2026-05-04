@@ -1,0 +1,33 @@
+apps/web/src/features/controls/schemas/control-form-schemas.ts
+  db673187c0fe8536 3-7,10,13
+apps/backend-hono/src/contexts/control-library/controls.ts
+  db673187c0fe8536 1,4,113,274,281,292,459-460,463,465,505-550,815-819,831,979,1012,1127-1128,1194-1200
+apps/backend-hono/test/draft-controls.spec.ts
+  db673187c0fe8536 369,376,415,420,427,434,450,455,458,460-467,475-478,500,512,519,549,555,560,580,586,588,594,630,636,638,715,767,776,782,953,959,1055,1076,1212,1229,1235,1283,1302,1308,1339,1350,1364,1367,1402,1481,1592,1612,1633,1638-1639,1655-1658
+apps/backend-hono/src/db/schema.ts
+  db673187c0fe8536 219-245
+apps/backend-hono/drizzle/migrations/0003_draft_controls.sql
+  db673187c0fe8536 16-29
+apps/web/src/features/controls/pages/controls.tsx
+  db673187c0fe8536 3,6,22-25,57-61,65,302-306,311-358,593,595,599-600,602-623,625-643,662,668,686,944-945,948-950
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "b5dfac685ff459b286057362c88bb3e37ab32ba8",
+  "prompts": {
+    "db673187c0fe8536": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019df403-b0fa-7b13-904f-50a3cba27c70",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Patryk Sztuczka",
+      "messages": [],
+      "total_additions": 339,
+      "total_deletions": 672,
+      "accepted_lines": 303,
+      "overriden_lines": 0
+    }
+  }
+}
