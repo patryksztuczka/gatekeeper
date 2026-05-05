@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { db } from '../src/db/client';
-import { members, projects, users } from '../src/db/schema';
+import { auditEvents, members, projects, users } from '../src/db/schema';
 import { auth } from '../src/lib/auth';
 import { callTRPC } from './trpc-test-utils';
 
@@ -118,6 +118,10 @@ async function listOrganizationMembersRequest(organizationSlug: string, headers:
   return callTRPC(headers, (caller) => caller.organizations.members({ organizationSlug }));
 }
 
+async function listAuditEventsRequest(organizationSlug: string, headers: Headers) {
+  return callTRPC(headers, (caller) => caller.auditLog.list({ organizationSlug }));
+}
+
 beforeEach(() => {
   const originalFetch = globalThis.fetch;
 
@@ -178,6 +182,119 @@ describe('organization projects', () => {
           slug: 'soc-2-readiness',
         },
       ],
+    });
+  });
+
+  it('records an Audit Event when an Organization owner creates a Project', async () => {
+    const { headers, organization } = await createSignedInOwner('project-audit-owner');
+    const ownerMembership = await db
+      .select({ id: members.id, userId: members.userId })
+      .from(members)
+      .where(eq(members.organizationId, organization.id))
+      .limit(1)
+      .then((rows) => rows[0]);
+
+    expect(ownerMembership?.id).toBeTruthy();
+
+    if (!ownerMembership?.id) {
+      throw new Error('Expected an owner membership.');
+    }
+
+    const createResponse = await createProjectRequest(organization.slug, headers, {
+      description: 'Governance launch work.',
+      name: 'Governance Launch',
+      projectOwnerMemberId: ownerMembership.id,
+      slug: 'governance-launch',
+    });
+
+    expect(createResponse.status).toBe(201);
+
+    const [auditEvent] = await db
+      .select()
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.organizationId, organization.id),
+          eq(auditEvents.action, 'project.created'),
+        ),
+      );
+
+    expect(auditEvent).toMatchObject({
+      actorOrganizationMemberId: ownerMembership.id,
+      actorType: 'organization_member',
+      actorUserId: ownerMembership.userId,
+      organizationId: organization.id,
+      targetDisplayName: 'Governance Launch',
+      targetId: createResponse.body.project.id,
+      targetSecondaryLabel: 'governance-launch',
+      targetType: 'project',
+    });
+    expect(auditEvent?.id).toBeTruthy();
+    expect(auditEvent?.occurredAt).toBeInstanceOf(Date);
+  });
+
+  it('lets Organization owners list their Organization Audit Events', async () => {
+    const { headers, organization } = await createSignedInOwner('project-audit-list-owner');
+
+    const createResponse = await createProjectRequest(organization.slug, headers, {
+      description: 'Audit list work.',
+      name: 'Audit List Project',
+      slug: 'audit-list-project',
+    });
+
+    expect(createResponse.status).toBe(201);
+
+    const listResponse = await listAuditEventsRequest(organization.slug, headers);
+
+    expect(listResponse.status).toBe(200);
+    expect(listResponse.body).toMatchObject({
+      auditEvents: [
+        {
+          action: 'project.created',
+          actorType: 'organization_member',
+          targetDisplayName: 'Audit List Project',
+          targetId: createResponse.body.project.id,
+          targetSecondaryLabel: 'audit-list-project',
+          targetType: 'project',
+        },
+      ],
+    });
+  });
+
+  it('prevents regular Organization Members from listing Audit Events', async () => {
+    const { headers: ownerHeaders, organization } = await createSignedInOwner(
+      'project-audit-member-owner',
+    );
+    const member = createCredentials('project-audit-member');
+
+    await signUpUser(member);
+
+    const invitation = await auth.api.createInvitation({
+      body: {
+        email: member.email,
+        organizationId: organization.id,
+        role: 'member',
+      },
+      headers: ownerHeaders,
+    });
+    const memberHeaders = await signInUser(member);
+
+    await auth.api.acceptInvitation({
+      body: { invitationId: invitation.id },
+      headers: memberHeaders,
+    });
+
+    await createProjectRequest(organization.slug, ownerHeaders, {
+      description: 'Private audit history.',
+      name: 'Private Audit Project',
+      slug: 'private-audit-project',
+    });
+
+    const listResponse = await listAuditEventsRequest(organization.slug, memberHeaders);
+
+    expect(listResponse.status).toBe(403);
+    expect(listResponse.body).toMatchObject({
+      error: 'Only Organization owners and admins can view the Audit Log.',
     });
   });
 

@@ -85,7 +85,7 @@ _Avoid_: Generic note
 - Product services produce **Audit Events** from domain mutation boundaries.
 - Transport handlers should not be the sole source of **Audit Events** for domain mutations.
 - Database triggers should not produce **Audit Events** in v1.
-- Audited domain mutations and their **Audit Events** commit in the same transaction when possible.
+- Audited domain mutations and their **Audit Events** commit atomically when possible.
 - If an **Audit Event** cannot be recorded for an audited domain mutation, the domain mutation should not commit.
 - An **Audit Event** records completed **Governance-Relevant Actions** and blocked security-sensitive or accountability-sensitive attempts.
 - Routine validation failures are not **Audit Events**.
@@ -122,7 +122,7 @@ _Avoid_: Generic note
 > **Dev:** "Do failed sign-ins belong in the v1 **Audit Log**?"
 > **Domain expert:** "No — v1 **Audit Events** are Organization-scoped only; non-Organization authentication and security events are deferred."
 > **Dev:** "Can a Project be archived if the `project.archived` **Audit Event** fails to insert?"
-> **Domain expert:** "No — audited domain mutations and their **Audit Events** commit together."
+> **Domain expert:** "No — audited domain mutations and their **Audit Events** commit atomically together."
 > **Dev:** "If completing a Checklist Item also relates to a Project and Control Version, how many targets does the **Audit Event** have?"
 > **Domain expert:** "One primary **Audit Target**, with related references for the Project and Control Version."
 > **Dev:** "Should rejecting a Control Publish Request include a reason?"
@@ -143,6 +143,6 @@ _Avoid_: Generic note
 - "action" can mean a route, table write, or domain behavior — resolved: use **Audit Action** names in stable domain language.
 - "where audit happens" can mean transport, service, or database — resolved: product services produce **Audit Events** from domain mutation boundaries in v1.
 - "security event" can include events outside an **Organization** — resolved: non-Organization authentication and security events are deferred from the v1 **Audit Log**.
-- "best-effort audit" would allow missing records for audited actions — resolved: audited domain mutations and their **Audit Events** commit in the same transaction when possible.
+- "best-effort audit" would allow missing records for audited actions — resolved: audited domain mutations and their **Audit Events** commit atomically when possible.
 - "target" can imply every related record is equally primary — resolved: an **Audit Event** has one primary **Audit Target** and may include related references.
 - "reason" can become a generic note field — resolved: **Audit Reason** is a human-entered justification for selected decision-heavy or destructive actions.

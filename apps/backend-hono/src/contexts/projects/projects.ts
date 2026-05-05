@@ -1,6 +1,6 @@
 import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm';
 import { db } from '../../db/client';
-import { members, projects, users } from '../../db/schema';
+import { auditEvents, members, projects, users } from '../../db/schema';
 import type { AuthorizedOrganizationMember } from '../../types/organization-types';
 import type { OrganizationAuthorizationPolicy } from '../identity-organization/organization-authorization';
 
@@ -187,6 +187,13 @@ export async function createProjectForMember(
     }
   }
 
+  const actorMembership = await db
+    .select({ userId: members.userId })
+    .from(members)
+    .where(eq(members.id, membership.id))
+    .limit(1)
+    .then((rows) => rows[0]);
+
   const now = new Date();
   const project = {
     createdAt: now,
@@ -199,7 +206,21 @@ export async function createProjectForMember(
     updatedAt: now,
   };
 
-  await db.insert(projects).values(project);
+  await db.batch([
+    db.insert(projects).values(project),
+    db.insert(auditEvents).values({
+      action: 'project.created',
+      actorOrganizationMemberId: membership.id,
+      actorType: 'organization_member',
+      actorUserId: actorMembership?.userId,
+      id: crypto.randomUUID(),
+      organizationId: membership.organizationId,
+      targetDisplayName: project.name,
+      targetId: project.id,
+      targetSecondaryLabel: project.slug,
+      targetType: 'project',
+    }),
+  ]);
 
   return (await listProjectsForMember(membership, 'active')).find(({ id }) => id === project.id)!;
 }

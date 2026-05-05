@@ -193,6 +193,52 @@ export const projects = sqliteTable(
   ],
 );
 
+export const auditEvents = sqliteTable(
+  'audit_events',
+  {
+    id: text('id').primaryKey(),
+    organizationId: text('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    action: text('action').notNull(),
+    actorType: text('actor_type').notNull(),
+    actorUserId: text('actor_user_id').references(() => users.id, { onDelete: 'set null' }),
+    actorOrganizationMemberId: text('actor_organization_member_id').references(() => members.id, {
+      onDelete: 'set null',
+    }),
+    actorDisplayName: text('actor_display_name'),
+    actorEmail: text('actor_email'),
+    targetType: text('target_type').notNull(),
+    targetId: text('target_id').notNull(),
+    targetDisplayName: text('target_display_name'),
+    targetSecondaryLabel: text('target_secondary_label'),
+    outcome: text('outcome').default('success').notNull(),
+    metadata: text('metadata'),
+    occurredAt: integer('occurred_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+  },
+  (table) => [
+    index('audit_event_organization_occurred_at_idx').on(table.organizationId, table.occurredAt),
+    index('audit_event_organization_actor_member_idx').on(
+      table.organizationId,
+      table.actorOrganizationMemberId,
+      table.occurredAt,
+    ),
+    index('audit_event_organization_target_idx').on(
+      table.organizationId,
+      table.targetType,
+      table.targetId,
+      table.occurredAt,
+    ),
+    index('audit_event_organization_action_idx').on(
+      table.organizationId,
+      table.action,
+      table.occurredAt,
+    ),
+  ],
+);
+
 export const draftControls = sqliteTable(
   'draft_controls',
   {
