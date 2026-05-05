@@ -1,0 +1,31 @@
+apps/backend-hono/test/projects.spec.ts
+  e578962ca660d601 802,824-857
+apps/backend-hono/drizzle/migrations/0012_project_assignment_organization_integrity.sql
+  e578962ca660d601 1-57
+apps/backend-hono/src/contexts/projects/projects.ts
+  e578962ca660d601 415
+apps/backend-hono/test/project-detail.spec.ts
+  e578962ca660d601 160
+apps/backend-hono/src/db/schema.ts
+  e578962ca660d601 138,189,198,215,218-227
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "790498063f05ad323e805d3066edd5994deff762",
+  "prompts": {
+    "e578962ca660d601": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019df79e-8272-7992-84be-81bafbb145e3",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Patryk Sztuczka",
+      "messages": [],
+      "total_additions": 110,
+      "total_deletions": 0,
+      "accepted_lines": 110,
+      "overriden_lines": 0
+    }
+  }
+}
