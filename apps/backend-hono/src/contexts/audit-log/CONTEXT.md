@@ -92,6 +92,10 @@ _Avoid_: Generic note
 - Ordinary page views and routine detail reads are not **Audit Events**.
 - Sensitive downloads and exports are **Governance-Relevant Actions**.
 - Projects, Control Library, Checklists, and Identity & Organization may produce **Audit Events** for governance-relevant actions.
+- Implemented v1 Project **Audit Actions** are `project.created`, `project.updated`, `project.archived`, and `project.restored`.
+- Implemented v1 Control Library **Audit Actions** are `control.created`, `control.updated`, `control.archived`, `control.restored`, `control_proposed_update.created`, `control_proposed_update.rejected`, `control_publish_request.created`, `control_publish_request.approved`, and `control_publish_request.rejected`.
+- Implemented v1 Checklist **Audit Actions** are `checklist_template.created`, `checklist_template.renamed`, `checklist_template.archived`, `checklist_template.restored`, `project_checklist.created`, `project_checklist.renamed`, `project_checklist.archived`, `project_checklist.restored`, `checklist_item.added`, `checklist_item.checked`, `checklist_item.unchecked`, `checklist_item.refreshed`, and `checklist_item.removed`.
+- The v1 **Audit Log** read API supports Organization-scoped listing with optional action and target filters plus bounded offset pagination.
 
 ## Example dialogue
 

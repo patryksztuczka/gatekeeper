@@ -646,8 +646,14 @@ export async function setControlArchivedForMembership(input: {
   reason?: string;
 }) {
   const control = await db
-    .select({ id: controls.id })
+    .select({
+      controlCode: controlVersions.controlCode,
+      id: controls.id,
+      title: controlVersions.title,
+      versionNumber: controlVersions.versionNumber,
+    })
     .from(controls)
+    .innerJoin(controlVersions, eq(controls.currentVersionId, controlVersions.id))
     .where(
       and(
         eq(controls.id, input.controlId),
@@ -661,24 +667,41 @@ export async function setControlArchivedForMembership(input: {
     return null;
   }
 
-  await db
-    .update(controls)
-    .set(
-      input.archived
-        ? {
-            archivedAt: new Date(),
-            archivedByMemberId: input.membership.id,
-            archiveReason: input.reason?.trim() || null,
-            updatedAt: new Date(),
-          }
-        : {
-            archivedAt: null,
-            archivedByMemberId: null,
-            archiveReason: null,
-            updatedAt: new Date(),
-          },
-    )
-    .where(eq(controls.id, control.id));
+  const reason = input.reason?.trim() || null;
+
+  await db.batch([
+    db
+      .update(controls)
+      .set(
+        input.archived
+          ? {
+              archivedAt: new Date(),
+              archivedByMemberId: input.membership.id,
+              archiveReason: reason,
+              updatedAt: new Date(),
+            }
+          : {
+              archivedAt: null,
+              archivedByMemberId: null,
+              archiveReason: null,
+              updatedAt: new Date(),
+            },
+      )
+      .where(eq(controls.id, control.id)),
+    db.insert(auditEvents).values(
+      await buildOrganizationMemberAuditEvent({
+        action: input.archived ? 'control.archived' : 'control.restored',
+        membership: input.membership,
+        metadata: input.archived && reason ? { reason } : undefined,
+        target: {
+          displayName: control.title,
+          id: control.id,
+          secondaryLabel: control.controlCode,
+          type: 'control',
+        },
+      }),
+    ),
+  ]);
 
   return getControlDetail(input.membership, input.controlId);
 }
@@ -691,8 +714,9 @@ export async function createControlProposedUpdate(
   validateProposedUpdateInput(input);
 
   const control = await db
-    .select({ id: controls.id })
+    .select({ controlCode: controlVersions.controlCode, id: controls.id })
     .from(controls)
+    .innerJoin(controlVersions, eq(controls.currentVersionId, controlVersions.id))
     .where(
       and(
         eq(controls.id, controlId),
@@ -730,7 +754,20 @@ export async function createControlProposedUpdate(
     updatedAt: now,
   };
 
-  await db.insert(controlProposedUpdates).values(proposedUpdate);
+  await db.batch([
+    db.insert(controlProposedUpdates).values(proposedUpdate),
+    db.insert(auditEvents).values(
+      await buildControlProposedUpdateAuditEvent({
+        action: 'control_proposed_update.created',
+        membership,
+        proposedUpdate: {
+          controlCode: control.controlCode,
+          id: proposedUpdate.id,
+          title: proposedUpdate.title,
+        },
+      }),
+    ),
+  ]);
 
   return (await listControlProposedUpdates(membership)).find(({ id }) => id === proposedUpdate.id)!;
 }
@@ -874,7 +911,16 @@ export async function submitControlProposedUpdatePublishRequest(
   if (existingRequest) {
     await resetControlPublishRequest(existingRequest.id, request);
   } else {
-    await db.insert(controlPublishRequests).values(request);
+    await db.batch([
+      db.insert(controlPublishRequests).values(request),
+      db.insert(auditEvents).values(
+        await buildControlPublishRequestAuditEvent({
+          action: 'control_publish_request.created',
+          membership,
+          request,
+        }),
+      ),
+    ]);
   }
 
   return (await listControlPublishRequests(membership)).find(
@@ -1055,23 +1101,48 @@ export async function publishControlProposedUpdate(
   const now = new Date();
   const versionId = crypto.randomUUID();
 
-  await db.insert(controlVersions).values({
-    businessMeaning: proposedUpdate.businessMeaning,
-    controlCode: activeControl.currentControlCode,
-    controlId,
-    createdAt: now,
-    id: versionId,
-    title: proposedUpdate.title,
-    versionNumber: latestVersion.versionNumber + 1,
-  });
-  await db
-    .update(controls)
-    .set({
-      currentVersionId: versionId,
-      updatedAt: now,
-    })
-    .where(eq(controls.id, controlId));
-  await db.delete(controlProposedUpdates).where(eq(controlProposedUpdates.id, proposedUpdateId));
+  const nextVersionNumber = latestVersion.versionNumber + 1;
+
+  await db.batch([
+    db.insert(controlVersions).values({
+      businessMeaning: proposedUpdate.businessMeaning,
+      controlCode: activeControl.currentControlCode,
+      controlId,
+      createdAt: now,
+      id: versionId,
+      title: proposedUpdate.title,
+      versionNumber: nextVersionNumber,
+    }),
+    db
+      .update(controls)
+      .set({
+        currentVersionId: versionId,
+        updatedAt: now,
+      })
+      .where(eq(controls.id, controlId)),
+    db.delete(controlProposedUpdates).where(eq(controlProposedUpdates.id, proposedUpdateId)),
+    db.insert(auditEvents).values(
+      await buildOrganizationMemberAuditEvent({
+        action: 'control.updated',
+        membership,
+        metadata: {
+          changes: {
+            versionNumber: {
+              from: latestVersion.versionNumber,
+              to: nextVersionNumber,
+            },
+          },
+          proposedUpdateId,
+        },
+        target: {
+          displayName: proposedUpdate.title,
+          id: controlId,
+          secondaryLabel: `${activeControl.currentControlCode} v${nextVersionNumber}`,
+          type: 'control',
+        },
+      }),
+    ),
+  ]);
 
   return getControlDetail(membership, controlId);
 }
@@ -1082,8 +1153,14 @@ export async function rejectControlProposedUpdate(
   proposedUpdateId: string,
 ) {
   const proposedUpdate = await db
-    .select({ id: controlProposedUpdates.id })
+    .select({
+      controlCode: controlVersions.controlCode,
+      id: controlProposedUpdates.id,
+      title: controlProposedUpdates.title,
+    })
     .from(controlProposedUpdates)
+    .innerJoin(controls, eq(controlProposedUpdates.controlId, controls.id))
+    .innerJoin(controlVersions, eq(controls.currentVersionId, controlVersions.id))
     .where(
       and(
         eq(controlProposedUpdates.id, proposedUpdateId),
@@ -1098,7 +1175,16 @@ export async function rejectControlProposedUpdate(
     return false;
   }
 
-  await db.delete(controlProposedUpdates).where(eq(controlProposedUpdates.id, proposedUpdateId));
+  await db.batch([
+    db.delete(controlProposedUpdates).where(eq(controlProposedUpdates.id, proposedUpdateId)),
+    db.insert(auditEvents).values(
+      await buildControlProposedUpdateAuditEvent({
+        action: 'control_proposed_update.rejected',
+        membership,
+        proposedUpdate,
+      }),
+    ),
+  ]);
 
   return true;
 }
@@ -1288,6 +1374,27 @@ async function buildControlPublishRequestAuditEvent(input: {
       id: input.request.id,
       secondaryLabel: input.request.controlCode,
       type: 'control_publish_request',
+    },
+  });
+}
+
+async function buildControlProposedUpdateAuditEvent(input: {
+  action: 'control_proposed_update.created' | 'control_proposed_update.rejected';
+  membership: AuthorizedOrganizationMember;
+  proposedUpdate: {
+    controlCode: string;
+    id: string;
+    title: string;
+  };
+}) {
+  return buildOrganizationMemberAuditEvent({
+    action: input.action,
+    membership: input.membership,
+    target: {
+      displayName: input.proposedUpdate.title,
+      id: input.proposedUpdate.id,
+      secondaryLabel: input.proposedUpdate.controlCode,
+      type: 'control_proposed_update',
     },
   });
 }

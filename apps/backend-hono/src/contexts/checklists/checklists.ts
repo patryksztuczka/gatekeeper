@@ -224,10 +224,33 @@ export async function renameChecklistTemplateForMember(
     organizationId: membership.organizationId,
   });
 
-  await db
-    .update(checklistTemplates)
-    .set({ name: input.name.trim(), updatedAt: new Date() })
-    .where(eq(checklistTemplates.id, template.id));
+  const newName = input.name.trim();
+
+  await db.batch([
+    db
+      .update(checklistTemplates)
+      .set({ name: newName, updatedAt: new Date() })
+      .where(eq(checklistTemplates.id, template.id)),
+    db.insert(auditEvents).values(
+      await buildOrganizationMemberAuditEvent({
+        action: 'checklist_template.renamed',
+        membership,
+        metadata: {
+          changes: {
+            name: {
+              from: template.name,
+              to: newName,
+            },
+          },
+        },
+        target: {
+          displayName: newName,
+          id: template.id,
+          type: 'checklist_template',
+        },
+      }),
+    ),
+  ]);
 
   return getChecklistTemplateDetail(membership, template.id);
 }
@@ -424,10 +447,34 @@ export async function renameProjectChecklistForMember(
     projectId: projectChecklist.projectId,
   });
 
-  await db
-    .update(projectChecklists)
-    .set({ name: input.name.trim(), updatedAt: new Date() })
-    .where(eq(projectChecklists.id, projectChecklist.id));
+  const newName = input.name.trim();
+
+  await db.batch([
+    db
+      .update(projectChecklists)
+      .set({ name: newName, updatedAt: new Date() })
+      .where(eq(projectChecklists.id, projectChecklist.id)),
+    db.insert(auditEvents).values(
+      await buildOrganizationMemberAuditEvent({
+        action: 'project_checklist.renamed',
+        membership,
+        metadata: {
+          changes: {
+            name: {
+              from: projectChecklist.name,
+              to: newName,
+            },
+          },
+        },
+        target: {
+          displayName: newName,
+          id: projectChecklist.id,
+          secondaryLabel: projectChecklist.projectSlug,
+          type: 'project_checklist',
+        },
+      }),
+    ),
+  ]);
 
   return getProjectChecklistDetail({
     membership,
@@ -576,13 +623,26 @@ async function setChecklistTemplateArchivedForMember(input: {
     });
   }
 
-  await db
-    .update(checklistTemplates)
-    .set({
-      archivedAt: input.archived ? new Date() : null,
-      updatedAt: new Date(),
-    })
-    .where(eq(checklistTemplates.id, template.id));
+  await db.batch([
+    db
+      .update(checklistTemplates)
+      .set({
+        archivedAt: input.archived ? new Date() : null,
+        updatedAt: new Date(),
+      })
+      .where(eq(checklistTemplates.id, template.id)),
+    db.insert(auditEvents).values(
+      await buildOrganizationMemberAuditEvent({
+        action: input.archived ? 'checklist_template.archived' : 'checklist_template.restored',
+        membership: input.membership,
+        target: {
+          displayName: template.name,
+          id: template.id,
+          type: 'checklist_template',
+        },
+      }),
+    ),
+  ]);
 
   return getChecklistTemplateDetail(input.membership, template.id);
 }
@@ -618,6 +678,7 @@ async function getProjectChecklistForManagement(
     .select({
       archivedAt: projectChecklists.archivedAt,
       id: projectChecklists.id,
+      name: projectChecklists.name,
       projectArchivedAt: projects.archivedAt,
       projectId: projects.id,
       projectSlug: projects.slug,
@@ -691,13 +752,27 @@ async function setProjectChecklistArchivedForMember(input: {
     });
   }
 
-  await db
-    .update(projectChecklists)
-    .set({
-      archivedAt: input.archived ? new Date() : null,
-      updatedAt: new Date(),
-    })
-    .where(eq(projectChecklists.id, projectChecklist.id));
+  await db.batch([
+    db
+      .update(projectChecklists)
+      .set({
+        archivedAt: input.archived ? new Date() : null,
+        updatedAt: new Date(),
+      })
+      .where(eq(projectChecklists.id, projectChecklist.id)),
+    db.insert(auditEvents).values(
+      await buildOrganizationMemberAuditEvent({
+        action: input.archived ? 'project_checklist.archived' : 'project_checklist.restored',
+        membership: input.membership,
+        target: {
+          displayName: projectChecklist.name,
+          id: projectChecklist.id,
+          secondaryLabel: projectChecklist.projectSlug,
+          type: 'project_checklist',
+        },
+      }),
+    ),
+  ]);
 
   return getProjectChecklistDetail({
     membership: input.membership,
@@ -845,6 +920,8 @@ export async function removeChecklistItemForMember(
   const checklistItem = await db
     .select({
       archivedAt: projectChecklists.archivedAt,
+      controlCode: controlVersions.controlCode,
+      controlTitle: controlVersions.title,
       itemStatus: checklistItems.status,
       projectArchivedAt: projects.archivedAt,
       projectChecklistId: projectChecklists.id,
@@ -853,6 +930,7 @@ export async function removeChecklistItemForMember(
     .from(checklistItems)
     .innerJoin(projectChecklists, eq(checklistItems.projectChecklistId, projectChecklists.id))
     .innerJoin(projects, eq(projectChecklists.projectId, projects.id))
+    .innerJoin(controlVersions, eq(checklistItems.controlVersionId, controlVersions.id))
     .where(
       and(
         eq(checklistItems.id, input.checklistItemId),
@@ -874,13 +952,27 @@ export async function removeChecklistItemForMember(
     throw new ChecklistInputError('Only active Checklist Items can be removed.');
   }
 
-  await db
-    .update(checklistItems)
-    .set({
-      status: 'removed',
-      updatedAt: new Date(),
-    })
-    .where(eq(checklistItems.id, input.checklistItemId));
+  await db.batch([
+    db
+      .update(checklistItems)
+      .set({
+        status: 'removed',
+        updatedAt: new Date(),
+      })
+      .where(eq(checklistItems.id, input.checklistItemId)),
+    db.insert(auditEvents).values(
+      await buildOrganizationMemberAuditEvent({
+        action: 'checklist_item.removed',
+        membership,
+        target: {
+          displayName: checklistItem.controlTitle,
+          id: input.checklistItemId,
+          secondaryLabel: checklistItem.controlCode,
+          type: 'checklist_item',
+        },
+      }),
+    ),
+  ]);
 
   return getProjectChecklistDetail({
     membership,
@@ -934,17 +1026,32 @@ export async function addChecklistItemForMember(
   }
 
   const now = new Date();
+  const checklistItemId = crypto.randomUUID();
 
-  await db.insert(checklistItems).values({
-    checked: false,
-    controlId: selectedControl.controlId,
-    controlVersionId: selectedControl.controlVersionId,
-    createdAt: now,
-    id: crypto.randomUUID(),
-    projectChecklistId: projectChecklist.id,
-    status: 'active',
-    updatedAt: now,
-  });
+  await db.batch([
+    db.insert(checklistItems).values({
+      checked: false,
+      controlId: selectedControl.controlId,
+      controlVersionId: selectedControl.controlVersionId,
+      createdAt: now,
+      id: checklistItemId,
+      projectChecklistId: projectChecklist.id,
+      status: 'active',
+      updatedAt: now,
+    }),
+    db.insert(auditEvents).values(
+      await buildOrganizationMemberAuditEvent({
+        action: 'checklist_item.added',
+        membership,
+        target: {
+          displayName: selectedControl.controlTitle,
+          id: checklistItemId,
+          secondaryLabel: selectedControl.controlCode,
+          type: 'checklist_item',
+        },
+      }),
+    ),
+  ]);
 
   return getProjectChecklistDetail({
     membership,
@@ -971,8 +1078,13 @@ export async function enforceArchivedControlForMember(
   }
 
   const archivedControl = await db
-    .select({ id: controls.id })
+    .select({
+      controlCode: controlVersions.controlCode,
+      id: controls.id,
+      title: controlVersions.title,
+    })
     .from(controls)
+    .innerJoin(controlVersions, eq(controls.currentVersionId, controlVersions.id))
     .where(
       and(
         eq(controls.id, input.controlId),
@@ -987,9 +1099,9 @@ export async function enforceArchivedControlForMember(
     throw new ChecklistInputError('Archived Control unavailable.');
   }
 
-  await db
-    .update(checklistItems)
-    .set({ status: 'removed', updatedAt: new Date() })
+  const activeItems = await db
+    .select({ id: checklistItems.id })
+    .from(checklistItems)
     .where(
       and(
         eq(checklistItems.projectChecklistId, projectChecklist.id),
@@ -997,6 +1109,36 @@ export async function enforceArchivedControlForMember(
         eq(checklistItems.status, 'active'),
       ),
     );
+
+  const activeItemAuditEvents = await Promise.all(
+    activeItems.map((item) =>
+      buildOrganizationMemberAuditEvent({
+        action: 'checklist_item.removed',
+        membership,
+        metadata: { reason: 'Archived Control enforcement' },
+        target: {
+          displayName: archivedControl.title,
+          id: item.id,
+          secondaryLabel: archivedControl.controlCode,
+          type: 'checklist_item',
+        },
+      }),
+    ),
+  );
+
+  await db.batch([
+    db
+      .update(checklistItems)
+      .set({ status: 'removed', updatedAt: new Date() })
+      .where(
+        and(
+          eq(checklistItems.projectChecklistId, projectChecklist.id),
+          eq(checklistItems.controlId, archivedControl.id),
+          eq(checklistItems.status, 'active'),
+        ),
+      ),
+    ...activeItemAuditEvents.map((auditEvent) => db.insert(auditEvents).values(auditEvent)),
+  ]);
 
   return getProjectChecklistDetail({
     membership,
@@ -1012,7 +1154,9 @@ export async function refreshChecklistItemForMember(
   const checklistItem = await db
     .select({
       archivedAt: projectChecklists.archivedAt,
+      controlCode: controlVersions.controlCode,
       controlId: checklistItems.controlId,
+      controlTitle: controlVersions.title,
       controlVersionId: checklistItems.controlVersionId,
       itemStatus: checklistItems.status,
       projectArchivedAt: projects.archivedAt,
@@ -1022,6 +1166,7 @@ export async function refreshChecklistItemForMember(
     .from(checklistItems)
     .innerJoin(projectChecklists, eq(checklistItems.projectChecklistId, projectChecklists.id))
     .innerJoin(projects, eq(projectChecklists.projectId, projects.id))
+    .innerJoin(controlVersions, eq(checklistItems.controlVersionId, controlVersions.id))
     .where(
       and(
         eq(checklistItems.id, input.checklistItemId),
@@ -1045,7 +1190,10 @@ export async function refreshChecklistItemForMember(
 
   const latestControlVersion = await db
     .select({
+      controlCode: controlVersions.controlCode,
+      controlTitle: controlVersions.title,
       controlVersionId: controlVersions.id,
+      versionNumber: controlVersions.versionNumber,
     })
     .from(controls)
     .innerJoin(controlVersions, eq(controls.currentVersionId, controlVersions.id))
@@ -1069,24 +1217,43 @@ export async function refreshChecklistItemForMember(
 
   const now = new Date();
 
-  await db
-    .update(checklistItems)
-    .set({
-      status: 'superseded',
-      updatedAt: now,
-    })
-    .where(eq(checklistItems.id, input.checklistItemId));
+  const refreshedChecklistItemId = crypto.randomUUID();
 
-  await db.insert(checklistItems).values({
-    checked: false,
-    controlId: checklistItem.controlId,
-    controlVersionId: latestControlVersion.controlVersionId,
-    createdAt: now,
-    id: crypto.randomUUID(),
-    projectChecklistId: checklistItem.projectChecklistId,
-    status: 'active',
-    updatedAt: now,
-  });
+  await db.batch([
+    db
+      .update(checklistItems)
+      .set({
+        status: 'superseded',
+        updatedAt: now,
+      })
+      .where(eq(checklistItems.id, input.checklistItemId)),
+    db.insert(checklistItems).values({
+      checked: false,
+      controlId: checklistItem.controlId,
+      controlVersionId: latestControlVersion.controlVersionId,
+      createdAt: now,
+      id: refreshedChecklistItemId,
+      projectChecklistId: checklistItem.projectChecklistId,
+      status: 'active',
+      updatedAt: now,
+    }),
+    db.insert(auditEvents).values(
+      await buildOrganizationMemberAuditEvent({
+        action: 'checklist_item.refreshed',
+        membership,
+        metadata: {
+          refreshedChecklistItemId,
+          versionNumber: latestControlVersion.versionNumber,
+        },
+        target: {
+          displayName: latestControlVersion.controlTitle,
+          id: input.checklistItemId,
+          secondaryLabel: latestControlVersion.controlCode,
+          type: 'checklist_item',
+        },
+      }),
+    ),
+  ]);
 
   return getProjectChecklistDetail({
     membership,
@@ -1177,7 +1344,9 @@ async function getLatestActiveControlVersions(organizationId: string, controlIds
 
   return db
     .select({
+      controlCode: controlVersions.controlCode,
       controlId: controls.id,
+      controlTitle: controlVersions.title,
       controlVersionId: controlVersions.id,
     })
     .from(controls)

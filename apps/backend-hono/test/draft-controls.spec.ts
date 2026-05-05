@@ -1456,6 +1456,29 @@ describe('Draft Controls', () => {
       body: { controls: [{ controlCode: 'CTL-001' }] },
       status: 200,
     });
+
+    await expect(listAuditEventsRequest(organization.slug, ownerHeaders)).resolves.toMatchObject({
+      body: {
+        auditEvents: expect.arrayContaining([
+          expect.objectContaining({
+            action: 'control.archived',
+            metadata: { reason: 'Replaced by a stricter Control.' },
+            targetDisplayName: 'Archive published Control',
+            targetId: control.id,
+            targetSecondaryLabel: 'CTL-001',
+            targetType: 'control',
+          }),
+          expect.objectContaining({
+            action: 'control.restored',
+            targetDisplayName: 'Archive published Control',
+            targetId: control.id,
+            targetSecondaryLabel: 'CTL-001',
+            targetType: 'control',
+          }),
+        ]),
+      },
+      status: 200,
+    });
   });
 
   it('creates one proposed update for an active Control without changing the current version', async () => {
@@ -1590,6 +1613,27 @@ describe('Draft Controls', () => {
       },
       status: 400,
     });
+
+    await expect(listAuditEventsRequest(organization.slug, ownerHeaders)).resolves.toMatchObject({
+      body: {
+        auditEvents: expect.arrayContaining([
+          expect.objectContaining({
+            action: 'control_proposed_update.created',
+            targetDisplayName: 'Require MFA after request',
+            targetId: proposedUpdate.id,
+            targetSecondaryLabel: 'CTL-001',
+            targetType: 'control_proposed_update',
+          }),
+          expect.objectContaining({
+            action: 'control_publish_request.created',
+            targetDisplayName: 'Require MFA after request',
+            targetSecondaryLabel: 'CTL-001',
+            targetType: 'control_publish_request',
+          }),
+        ]),
+      },
+      status: 200,
+    });
   });
 
   it('lets Organization owners and admins reject open proposed Control updates', async () => {
@@ -1653,6 +1697,21 @@ describe('Draft Controls', () => {
     await expect(
       listControlProposedUpdatesRequest(organization.slug, ownerHeaders),
     ).resolves.toMatchObject({ body: { proposedUpdates: [] }, status: 200 });
+
+    await expect(listAuditEventsRequest(organization.slug, ownerHeaders)).resolves.toMatchObject({
+      body: {
+        auditEvents: expect.arrayContaining([
+          expect.objectContaining({
+            action: 'control_proposed_update.rejected',
+            targetDisplayName: 'Require MFA after rejected update',
+            targetId: proposedUpdate.id,
+            targetSecondaryLabel: 'CTL-001',
+            targetType: 'control_proposed_update',
+          }),
+        ]),
+      },
+      status: 200,
+    });
   });
 
   it('restricts archived Control access and archive actions to Organization owners and admins', async () => {
@@ -1759,6 +1818,20 @@ describe('Draft Controls', () => {
     await expect(
       listControlProposedUpdatesRequest(organization.slug, ownerHeaders),
     ).resolves.toMatchObject({ body: { proposedUpdates: [] }, status: 200 });
+    await expect(listAuditEventsRequest(organization.slug, ownerHeaders)).resolves.toMatchObject({
+      body: {
+        auditEvents: expect.arrayContaining([
+          expect.objectContaining({
+            action: 'control.updated',
+            targetDisplayName: 'Require MFA after update',
+            targetId: control.id,
+            targetSecondaryLabel: 'CTL-001 v2',
+            targetType: 'control',
+          }),
+        ]),
+      },
+      status: 200,
+    });
   });
 
   it('keeps generated Control Codes reserved after archive and Draft Control cancellation', async () => {
