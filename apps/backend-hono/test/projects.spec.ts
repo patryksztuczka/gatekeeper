@@ -799,6 +799,7 @@ describe('organization projects', () => {
     await db.insert(projectAssignments).values({
       createdAt: now,
       id: crypto.randomUUID(),
+      organizationId: organization.id,
       organizationMemberId: ownerMembership.id,
       projectId,
       role: 'project_owner',
@@ -818,6 +819,42 @@ describe('organization projects', () => {
       },
       status: 200,
     });
+  });
+
+  it('rejects cross-Organization Project Assignments at the database boundary', async () => {
+    const first = await createSignedInOwner('project-assignment-integrity-first');
+    const second = await createSignedInOwner('project-assignment-integrity-second');
+    const secondOwnerMembership = await db
+      .select({ id: members.id })
+      .from(members)
+      .where(eq(members.organizationId, second.organization.id))
+      .limit(1)
+      .then((rows) => rows[0]);
+
+    expect(secondOwnerMembership?.id).toBeTruthy();
+
+    if (!secondOwnerMembership?.id) {
+      throw new Error('Expected a second Organization owner membership.');
+    }
+
+    const createResponse = await createProjectRequest(first.organization.slug, first.headers, {
+      description: 'Cross-Organization assignment integrity.',
+      name: 'Assignment Integrity',
+      slug: 'assignment-integrity',
+    });
+
+    expect(createResponse.status).toBe(201);
+    await expect(
+      db.insert(projectAssignments).values({
+        createdAt: new Date(),
+        id: crypto.randomUUID(),
+        organizationId: first.organization.id,
+        organizationMemberId: secondOwnerMembership.id,
+        projectId: createResponse.body.project.id,
+        role: 'project_contributor',
+        updatedAt: new Date(),
+      }),
+    ).rejects.toThrow();
   });
 
   it('lets Organization owners assign Contributors to make Projects visible', async () => {

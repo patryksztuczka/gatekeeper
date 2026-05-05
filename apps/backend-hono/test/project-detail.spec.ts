@@ -157,6 +157,7 @@ async function createProject(input: {
     await db.insert(projectAssignments).values({
       createdAt: now,
       id: crypto.randomUUID(),
+      organizationId: input.organizationId,
       organizationMemberId: input.projectOwnerAssignmentMemberId,
       projectId: id,
       role: 'project_owner',

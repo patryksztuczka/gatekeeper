@@ -412,6 +412,7 @@ export async function createProjectAssignmentForMember(input: {
   const assignment = {
     createdAt: now,
     id: crypto.randomUUID(),
+    organizationId: input.membership.organizationId,
     organizationMemberId: input.assignment.organizationMemberId,
     projectId: project.id,
     role: input.assignment.role,
