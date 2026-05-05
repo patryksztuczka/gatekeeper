@@ -374,6 +374,24 @@ export async function createProjectAssignmentForMember(input: {
     throw new ProjectInputError('Project Assignment member must be a member of this Organization.');
   }
 
+  const existingAssignment = await db
+    .select({ id: projectAssignments.id })
+    .from(projectAssignments)
+    .where(
+      and(
+        eq(projectAssignments.projectId, project.id),
+        eq(projectAssignments.organizationMemberId, input.assignment.organizationMemberId),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (existingAssignment) {
+    throw new ProjectInputError(
+      'Organization Member already has a Project Assignment for this Project.',
+    );
+  }
+
   const now = new Date();
   const assignment = {
     createdAt: now,

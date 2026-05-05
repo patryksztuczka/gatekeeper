@@ -755,6 +755,55 @@ describe('organization projects', () => {
     });
   });
 
+  it('rejects duplicate Project Assignments for the same Organization Member', async () => {
+    const { headers: ownerHeaders, organization } = await createSignedInOwner(
+      'project-assignment-duplicate-owner',
+    );
+    const ownerMembership = await db
+      .select({ id: members.id })
+      .from(members)
+      .where(eq(members.organizationId, organization.id))
+      .limit(1)
+      .then((rows) => rows[0]);
+
+    expect(ownerMembership?.id).toBeTruthy();
+
+    if (!ownerMembership?.id) {
+      throw new Error('Expected owner membership.');
+    }
+
+    await createProjectRequest(organization.slug, ownerHeaders, {
+      description: 'Duplicate assignment governance work.',
+      name: 'Duplicate Assignment',
+      slug: 'duplicate-assignment',
+    });
+
+    const firstAssignment = await createProjectAssignmentRequest(
+      organization.slug,
+      'duplicate-assignment',
+      ownerHeaders,
+      {
+        organizationMemberId: ownerMembership.id,
+        role: 'project_contributor',
+      },
+    );
+    const duplicateAssignment = await createProjectAssignmentRequest(
+      organization.slug,
+      'duplicate-assignment',
+      ownerHeaders,
+      {
+        organizationMemberId: ownerMembership.id,
+        role: 'project_owner',
+      },
+    );
+
+    expect(firstAssignment.status).toBe(201);
+    expect(duplicateAssignment.status).toBe(400);
+    expect(duplicateAssignment.body).toMatchObject({
+      error: 'Organization Member already has a Project Assignment for this Project.',
+    });
+  });
+
   it('lets Organization owners change a Contributor assignment to Project Owner', async () => {
     const { headers: ownerHeaders, organization } = await createSignedInOwner(
       'project-assignment-role-owner',
