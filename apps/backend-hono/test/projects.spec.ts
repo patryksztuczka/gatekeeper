@@ -1295,7 +1295,9 @@ describe('organization projects', () => {
       })
       .from(projectAssignments)
       .innerJoin(projects, eq(projectAssignments.projectId, projects.id))
-      .where(and(eq(projects.organizationId, organization.id), eq(projects.slug, 'owner-replacement')));
+      .where(
+        and(eq(projects.organizationId, organization.id), eq(projects.slug, 'owner-replacement')),
+      );
 
     expect(assignments).toEqual(
       expect.arrayContaining([
@@ -1560,12 +1562,14 @@ describe('organization projects', () => {
     expect(createResponse.status).toBe(201);
     expect(assignmentResponse.status).toBe(201);
     expect(listResponse.body).toMatchObject({
-      projects: [{
-        projectOwner: {
-          email: member.email,
-          id: projectOwner?.id,
+      projects: [
+        {
+          projectOwner: {
+            email: member.email,
+            id: projectOwner?.id,
+          },
         },
-      }],
+      ],
     });
   });
 

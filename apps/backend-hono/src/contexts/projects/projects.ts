@@ -369,7 +369,9 @@ export async function createProjectAssignmentForMember(input: {
   }
 
   if (project.archivedAt) {
-    throw new ProjectInputError('Project Assignments cannot be changed while a Project is archived.');
+    throw new ProjectInputError(
+      'Project Assignments cannot be changed while a Project is archived.',
+    );
   }
 
   const organizationMember = await db
@@ -478,7 +480,9 @@ export async function removeProjectAssignmentForMember(input: {
   }
 
   if (assignment.archivedAt) {
-    throw new ProjectInputError('Project Assignments cannot be changed while a Project is archived.');
+    throw new ProjectInputError(
+      'Project Assignments cannot be changed while a Project is archived.',
+    );
   }
 
   await db.batch([
@@ -540,7 +544,9 @@ export async function updateProjectAssignmentForMember(input: {
   }
 
   if (assignment.archivedAt) {
-    throw new ProjectInputError('Project Assignments cannot be changed while a Project is archived.');
+    throw new ProjectInputError(
+      'Project Assignments cannot be changed while a Project is archived.',
+    );
   }
 
   const updateAssignment = db

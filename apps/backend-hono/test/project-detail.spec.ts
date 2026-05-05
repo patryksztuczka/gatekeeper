@@ -269,7 +269,10 @@ describe('Project detail API', () => {
 
   it('hides direct Project URLs from unassigned regular Organization members', async () => {
     const owner = await createSignedInOwner('project-detail-unassigned-owner');
-    const member = await addMemberToOrganization(owner.organization.id, 'project-detail-unassigned');
+    const member = await addMemberToOrganization(
+      owner.organization.id,
+      'project-detail-unassigned',
+    );
 
     await createProject({
       organizationId: owner.organization.id,
