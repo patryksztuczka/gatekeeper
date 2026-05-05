@@ -10,13 +10,17 @@ import {
   listProjectsForMember,
   projectAuthorizationActions,
   ProjectInputError,
+  removeProjectAssignmentForMember,
   restoreProjectForMember,
   updateProjectSettingsForMember,
+  updateProjectAssignmentForMember,
   viewProjectForMember,
 } from './projects';
 import {
   projectCreateInput,
   projectAssignmentCreateInput,
+  projectAssignmentRemoveInput,
+  projectAssignmentUpdateInput,
   projectIdentityInput,
   projectListInput,
   projectUpdateInput,
@@ -113,6 +117,56 @@ export const projectsRouter = router({
 
         if (!assignment) {
           throw new TRPCError({ code: 'NOT_FOUND', message: 'Project unavailable' });
+        }
+
+        return { assignment };
+      } catch (caughtError) {
+        toProjectInputError(caughtError);
+      }
+    }),
+
+  updateAssignment: protectedProcedure
+    .input(projectAssignmentUpdateInput)
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const membership = await authorizeOrganizationAction({
+          action: projectAuthorizationActions.updateAssignment,
+          organizationSlug: input.organizationSlug,
+          userId: ctx.session.user.id,
+        });
+        const assignment = await updateProjectAssignmentForMember({
+          assignment: input,
+          membership,
+          projectSlug: input.projectSlug,
+        });
+
+        if (!assignment) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Project Assignment unavailable' });
+        }
+
+        return { assignment };
+      } catch (caughtError) {
+        toProjectInputError(caughtError);
+      }
+    }),
+
+  removeAssignment: protectedProcedure
+    .input(projectAssignmentRemoveInput)
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const membership = await authorizeOrganizationAction({
+          action: projectAuthorizationActions.removeAssignment,
+          organizationSlug: input.organizationSlug,
+          userId: ctx.session.user.id,
+        });
+        const assignment = await removeProjectAssignmentForMember({
+          assignment: input,
+          membership,
+          projectSlug: input.projectSlug,
+        });
+
+        if (!assignment) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Project Assignment unavailable' });
         }
 
         return { assignment };

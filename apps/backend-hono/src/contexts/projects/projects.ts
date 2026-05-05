@@ -25,6 +25,15 @@ type CreateProjectAssignmentInput = {
   role: 'project_contributor' | 'project_owner';
 };
 
+type UpdateProjectAssignmentInput = {
+  assignmentId: string;
+  role: 'project_contributor' | 'project_owner';
+};
+
+type RemoveProjectAssignmentInput = {
+  assignmentId: string;
+};
+
 const projectManagerRoles = ['owner', 'admin'] as const;
 const projectSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const projectOwnerAssignmentRole = 'project_owner';
@@ -54,9 +63,17 @@ export const projectAuthorizationActions = {
     allowedRoles: projectManagerRoles,
     deniedMessage: 'Only Organization owners and admins can restore Projects.',
   },
+  removeAssignment: {
+    allowedRoles: projectManagerRoles,
+    deniedMessage: 'Only Organization owners and admins can remove Project Assignments.',
+  },
   update: {
     allowedRoles: projectManagerRoles,
     deniedMessage: 'Only Organization owners and admins can edit Projects.',
+  },
+  updateAssignment: {
+    allowedRoles: projectManagerRoles,
+    deniedMessage: 'Only Organization owners and admins can change Project Assignments.',
   },
   view: {
     allowedRoles: 'any-member',
@@ -287,7 +304,9 @@ async function buildProjectAuditEventValues(input: {
     | 'project.archived'
     | 'project.restored'
     | 'project.updated'
-    | 'project_assignment.created';
+    | 'project_assignment.created'
+    | 'project_assignment.role_changed'
+    | 'project_assignment.removed';
   membership: AuthorizedOrganizationMember;
   metadata?: unknown;
   project: {
@@ -385,6 +404,136 @@ export async function createProjectAssignmentForMember(input: {
     organizationMemberId: assignment.organizationMemberId,
     projectId: assignment.projectId,
     role: assignment.role,
+  };
+}
+
+export async function removeProjectAssignmentForMember(input: {
+  assignment: RemoveProjectAssignmentInput;
+  membership: AuthorizedOrganizationMember;
+  projectSlug: string;
+}) {
+  const assignment = await db
+    .select({
+      archivedAt: projects.archivedAt,
+      id: projectAssignments.id,
+      name: projects.name,
+      organizationMemberId: projectAssignments.organizationMemberId,
+      projectId: projects.id,
+      projectSlug: projects.slug,
+      role: projectAssignments.role,
+    })
+    .from(projectAssignments)
+    .innerJoin(projects, eq(projectAssignments.projectId, projects.id))
+    .where(
+      and(
+        eq(projectAssignments.id, input.assignment.assignmentId),
+        eq(projects.organizationId, input.membership.organizationId),
+        eq(projects.slug, input.projectSlug),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (!assignment) {
+    return null;
+  }
+
+  if (assignment.archivedAt) {
+    throw new ProjectInputError('Project Assignments cannot be changed while a Project is archived.');
+  }
+
+  await db.batch([
+    db.delete(projectAssignments).where(eq(projectAssignments.id, assignment.id)),
+    db.insert(auditEvents).values(
+      await buildProjectAuditEventValues({
+        action: 'project_assignment.removed',
+        membership: input.membership,
+        metadata: {
+          organizationMemberId: assignment.organizationMemberId,
+          role: assignment.role,
+        },
+        project: {
+          id: assignment.projectId,
+          name: assignment.name,
+          slug: assignment.projectSlug,
+        },
+      }),
+    ),
+  ]);
+
+  return {
+    id: assignment.id,
+    organizationMemberId: assignment.organizationMemberId,
+    projectId: assignment.projectId,
+    role: assignment.role,
+  };
+}
+
+export async function updateProjectAssignmentForMember(input: {
+  assignment: UpdateProjectAssignmentInput;
+  membership: AuthorizedOrganizationMember;
+  projectSlug: string;
+}) {
+  const assignment = await db
+    .select({
+      archivedAt: projects.archivedAt,
+      id: projectAssignments.id,
+      name: projects.name,
+      organizationMemberId: projectAssignments.organizationMemberId,
+      projectId: projects.id,
+      projectSlug: projects.slug,
+      role: projectAssignments.role,
+    })
+    .from(projectAssignments)
+    .innerJoin(projects, eq(projectAssignments.projectId, projects.id))
+    .where(
+      and(
+        eq(projectAssignments.id, input.assignment.assignmentId),
+        eq(projects.organizationId, input.membership.organizationId),
+        eq(projects.slug, input.projectSlug),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (!assignment) {
+    return null;
+  }
+
+  if (assignment.archivedAt) {
+    throw new ProjectInputError('Project Assignments cannot be changed while a Project is archived.');
+  }
+
+  await db.batch([
+    db
+      .update(projectAssignments)
+      .set({ role: input.assignment.role, updatedAt: new Date() })
+      .where(eq(projectAssignments.id, assignment.id)),
+    db.insert(auditEvents).values(
+      await buildProjectAuditEventValues({
+        action: 'project_assignment.role_changed',
+        membership: input.membership,
+        metadata: {
+          organizationMemberId: assignment.organizationMemberId,
+          role: {
+            from: assignment.role,
+            to: input.assignment.role,
+          },
+        },
+        project: {
+          id: assignment.projectId,
+          name: assignment.name,
+          slug: assignment.projectSlug,
+        },
+      }),
+    ),
+  ]);
+
+  return {
+    id: assignment.id,
+    organizationMemberId: assignment.organizationMemberId,
+    projectId: assignment.projectId,
+    role: input.assignment.role,
   };
 }
 

@@ -26,3 +26,12 @@ export const projectAssignmentCreateInput = projectIdentityInput.extend({
   organizationMemberId: z.string().min(1),
   role: z.enum(['project_owner', 'project_contributor']),
 });
+
+export const projectAssignmentUpdateInput = projectIdentityInput.extend({
+  assignmentId: z.string().min(1),
+  role: z.enum(['project_owner', 'project_contributor']),
+});
+
+export const projectAssignmentRemoveInput = projectIdentityInput.extend({
+  assignmentId: z.string().min(1),
+});
