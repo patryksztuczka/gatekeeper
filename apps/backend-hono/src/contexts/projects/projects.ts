@@ -51,6 +51,10 @@ export const projectAuthorizationActions = {
     allowedRoles: projectManagerRoles,
     deniedMessage: 'Only Organization owners and admins can create Project Assignments.',
   },
+  listAssignments: {
+    allowedRoles: projectManagerRoles,
+    deniedMessage: 'Only Organization owners and admins can view Project Assignments.',
+  },
   listActive: {
     allowedRoles: 'any-member',
     deniedMessage: 'Only Organization members can view Projects.',
@@ -213,6 +217,49 @@ export async function viewProjectForMember(
 }
 
 export type ProjectDetailResponse = NonNullable<Awaited<ReturnType<typeof viewProjectForMember>>>;
+
+export async function listProjectAssignmentsForMember(input: {
+  membership: AuthorizedOrganizationMember;
+  projectSlug: string;
+}) {
+  const project = await db
+    .select({ id: projects.id })
+    .from(projects)
+    .where(
+      and(
+        eq(projects.organizationId, input.membership.organizationId),
+        eq(projects.slug, input.projectSlug),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (!project) {
+    return null;
+  }
+
+  const assignments = await db
+    .select({
+      email: users.email,
+      id: projectAssignments.id,
+      name: users.name,
+      organizationMemberId: members.id,
+      organizationRole: members.role,
+      role: projectAssignments.role,
+    })
+    .from(projectAssignments)
+    .innerJoin(members, eq(projectAssignments.organizationMemberId, members.id))
+    .innerJoin(users, eq(users.id, members.userId))
+    .where(
+      and(
+        eq(projectAssignments.projectId, project.id),
+        eq(members.organizationId, input.membership.organizationId),
+      ),
+    )
+    .orderBy(asc(users.name), asc(users.email));
+
+  return assignments;
+}
 
 export async function createProjectForMember(
   membership: AuthorizedOrganizationMember,

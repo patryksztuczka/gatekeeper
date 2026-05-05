@@ -7,6 +7,7 @@ import {
   archiveProjectForMember,
   createProjectAssignmentForMember,
   createProjectForMember,
+  listProjectAssignmentsForMember,
   listProjectsForMember,
   projectAuthorizationActions,
   ProjectInputError,
@@ -57,6 +58,28 @@ export const projectsRouter = router({
       return {
         projects: await listProjectsForMember(membership, input.status),
       };
+    } catch (caughtError) {
+      toProjectInputError(caughtError);
+    }
+  }),
+
+  assignments: protectedProcedure.input(projectIdentityInput).query(async ({ ctx, input }) => {
+    try {
+      const membership = await authorizeOrganizationAction({
+        action: projectAuthorizationActions.listAssignments,
+        organizationSlug: input.organizationSlug,
+        userId: ctx.session.user.id,
+      });
+      const assignments = await listProjectAssignmentsForMember({
+        membership,
+        projectSlug: input.projectSlug,
+      });
+
+      if (!assignments) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Project unavailable' });
+      }
+
+      return { assignments };
     } catch (caughtError) {
       toProjectInputError(caughtError);
     }

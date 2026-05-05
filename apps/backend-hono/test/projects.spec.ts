@@ -147,6 +147,16 @@ async function removeProjectAssignmentRequest(
   );
 }
 
+async function listProjectAssignmentsRequest(
+  organizationSlug: string,
+  projectSlug: string,
+  headers: Headers,
+) {
+  return callTRPC(headers, (caller) =>
+    caller.projects.assignments({ organizationSlug, projectSlug }),
+  );
+}
+
 async function listProjectsRequest(
   organizationSlug: string,
   headers: Headers,
@@ -801,6 +811,221 @@ describe('organization projects', () => {
     expect(duplicateAssignment.status).toBe(400);
     expect(duplicateAssignment.body).toMatchObject({
       error: 'Organization Member already has a Project Assignment for this Project.',
+    });
+  });
+
+  it('rejects Project Assignment changes while the Project is archived', async () => {
+    const { headers: ownerHeaders, organization } = await createSignedInOwner(
+      'project-assignment-archived-owner',
+    );
+    const ownerMembership = await db
+      .select({ id: members.id })
+      .from(members)
+      .where(eq(members.organizationId, organization.id))
+      .limit(1)
+      .then((rows) => rows[0]);
+
+    expect(ownerMembership?.id).toBeTruthy();
+
+    if (!ownerMembership?.id) {
+      throw new Error('Expected owner membership.');
+    }
+
+    await createProjectRequest(organization.slug, ownerHeaders, {
+      description: 'Archived assignment governance work.',
+      name: 'Archived Assignment',
+      slug: 'archived-assignment',
+    });
+    const assignmentResponse = await createProjectAssignmentRequest(
+      organization.slug,
+      'archived-assignment',
+      ownerHeaders,
+      {
+        organizationMemberId: ownerMembership.id,
+        role: 'project_contributor',
+      },
+    );
+
+    expect(assignmentResponse.status).toBe(201);
+
+    await archiveProjectRequest(organization.slug, 'archived-assignment', ownerHeaders);
+
+    await expect(
+      createProjectAssignmentRequest(organization.slug, 'archived-assignment', ownerHeaders, {
+        organizationMemberId: ownerMembership.id,
+        role: 'project_owner',
+      }),
+    ).resolves.toMatchObject({
+      body: { error: 'Project Assignments cannot be changed while a Project is archived.' },
+      status: 400,
+    });
+    await expect(
+      updateProjectAssignmentRequest(organization.slug, 'archived-assignment', ownerHeaders, {
+        assignmentId: assignmentResponse.body.assignment.id,
+        role: 'project_owner',
+      }),
+    ).resolves.toMatchObject({
+      body: { error: 'Project Assignments cannot be changed while a Project is archived.' },
+      status: 400,
+    });
+    await expect(
+      removeProjectAssignmentRequest(
+        organization.slug,
+        'archived-assignment',
+        ownerHeaders,
+        assignmentResponse.body.assignment.id,
+      ),
+    ).resolves.toMatchObject({
+      body: { error: 'Project Assignments cannot be changed while a Project is archived.' },
+      status: 400,
+    });
+  });
+
+  it('prevents regular Organization members from managing Project Assignments', async () => {
+    const { headers: ownerHeaders, organization } = await createSignedInOwner(
+      'project-assignment-permission-owner',
+    );
+    const member = createCredentials('project-assignment-permission-member');
+
+    await signUpUser(member);
+
+    const invitation = await auth.api.createInvitation({
+      body: {
+        email: member.email,
+        organizationId: organization.id,
+        role: 'member',
+      },
+      headers: ownerHeaders,
+    });
+    const memberHeaders = await signInUser(member);
+
+    await auth.api.acceptInvitation({
+      body: { invitationId: invitation.id },
+      headers: memberHeaders,
+    });
+
+    const membersResponse = await listOrganizationMembersRequest(organization.slug, ownerHeaders);
+    const assignedMember = membersResponse.body.members.find(
+      (organizationMember: { email: string }) => organizationMember.email === member.email,
+    ) as { id: string } | undefined;
+
+    expect(assignedMember?.id).toBeTruthy();
+
+    await createProjectRequest(organization.slug, ownerHeaders, {
+      description: 'Assignment permission governance work.',
+      name: 'Assignment Permission',
+      slug: 'assignment-permission',
+    });
+    const assignmentResponse = await createProjectAssignmentRequest(
+      organization.slug,
+      'assignment-permission',
+      ownerHeaders,
+      {
+        organizationMemberId: assignedMember?.id ?? '',
+        role: 'project_contributor',
+      },
+    );
+
+    expect(assignmentResponse.status).toBe(201);
+
+    await expect(
+      createProjectAssignmentRequest(organization.slug, 'assignment-permission', memberHeaders, {
+        organizationMemberId: assignedMember?.id ?? '',
+        role: 'project_owner',
+      }),
+    ).resolves.toMatchObject({
+      body: { error: 'Only Organization owners and admins can create Project Assignments.' },
+      status: 403,
+    });
+    await expect(
+      updateProjectAssignmentRequest(organization.slug, 'assignment-permission', memberHeaders, {
+        assignmentId: assignmentResponse.body.assignment.id,
+        role: 'project_owner',
+      }),
+    ).resolves.toMatchObject({
+      body: { error: 'Only Organization owners and admins can change Project Assignments.' },
+      status: 403,
+    });
+    await expect(
+      removeProjectAssignmentRequest(
+        organization.slug,
+        'assignment-permission',
+        memberHeaders,
+        assignmentResponse.body.assignment.id,
+      ),
+    ).resolves.toMatchObject({
+      body: { error: 'Only Organization owners and admins can remove Project Assignments.' },
+      status: 403,
+    });
+  });
+
+  it('lists the Project Assignment roster for owners but not Contributors', async () => {
+    const { headers: ownerHeaders, organization } = await createSignedInOwner(
+      'project-assignment-roster-owner',
+    );
+    const member = createCredentials('project-assignment-roster-member');
+
+    await signUpUser(member);
+
+    const invitation = await auth.api.createInvitation({
+      body: {
+        email: member.email,
+        organizationId: organization.id,
+        role: 'member',
+      },
+      headers: ownerHeaders,
+    });
+    const memberHeaders = await signInUser(member);
+
+    await auth.api.acceptInvitation({
+      body: { invitationId: invitation.id },
+      headers: memberHeaders,
+    });
+
+    const membersResponse = await listOrganizationMembersRequest(organization.slug, ownerHeaders);
+    const assignedMember = membersResponse.body.members.find(
+      (organizationMember: { email: string }) => organizationMember.email === member.email,
+    ) as { id: string } | undefined;
+
+    expect(assignedMember?.id).toBeTruthy();
+
+    await createProjectRequest(organization.slug, ownerHeaders, {
+      description: 'Assignment roster governance work.',
+      name: 'Assignment Roster',
+      slug: 'assignment-roster',
+    });
+    const assignmentResponse = await createProjectAssignmentRequest(
+      organization.slug,
+      'assignment-roster',
+      ownerHeaders,
+      {
+        organizationMemberId: assignedMember?.id ?? '',
+        role: 'project_contributor',
+      },
+    );
+
+    expect(assignmentResponse.status).toBe(201);
+
+    await expect(
+      listProjectAssignmentsRequest(organization.slug, 'assignment-roster', ownerHeaders),
+    ).resolves.toMatchObject({
+      body: {
+        assignments: [
+          {
+            email: member.email,
+            id: assignmentResponse.body.assignment.id,
+            organizationMemberId: assignedMember?.id,
+            role: 'project_contributor',
+          },
+        ],
+      },
+      status: 200,
+    });
+    await expect(
+      listProjectAssignmentsRequest(organization.slug, 'assignment-roster', memberHeaders),
+    ).resolves.toMatchObject({
+      body: { error: 'Only Organization owners and admins can view Project Assignments.' },
+      status: 403,
     });
   });
 
