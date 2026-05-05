@@ -8,6 +8,10 @@ export const organizationMembershipAuthorizationActions = {
     allowedRoles: 'any-member',
     deniedMessage: 'Only Organization members can view Organization Members.',
   },
+  removeMember: {
+    allowedRoles: ['owner', 'admin'],
+    deniedMessage: 'Only Organization owners and admins can remove Organization Members.',
+  },
 } satisfies Record<string, OrganizationAuthorizationPolicy>;
 
 export async function getOrganizationMembership(organizationSlug: string, userId: string) {
@@ -39,3 +43,41 @@ export async function listOrganizationMembers(organizationId: string) {
     .where(eq(members.organizationId, organizationId))
     .orderBy(asc(users.name), asc(users.email));
 }
+
+export async function removeOrganizationMember(input: {
+  actorMemberId: string;
+  organizationId: string;
+  organizationMemberId: string;
+}) {
+  if (input.actorMemberId === input.organizationMemberId) {
+    throw new OrganizationMembershipInputError('Organization Members cannot remove themselves.');
+  }
+
+  const member = await db
+    .select({
+      email: users.email,
+      id: members.id,
+      name: users.name,
+      role: members.role,
+    })
+    .from(members)
+    .innerJoin(users, eq(members.userId, users.id))
+    .where(
+      and(
+        eq(members.id, input.organizationMemberId),
+        eq(members.organizationId, input.organizationId),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (!member) {
+    return null;
+  }
+
+  await db.delete(members).where(eq(members.id, member.id));
+
+  return member;
+}
+
+export class OrganizationMembershipInputError extends Error {}
