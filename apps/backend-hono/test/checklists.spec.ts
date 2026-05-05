@@ -143,7 +143,7 @@ async function getFirstMembership(organizationId: string) {
 async function createProject(input: {
   headers: Headers;
   organizationSlug: string;
-  projectOwnerMemberId?: string | null;
+  projectOwnerAssignmentMemberId?: string | null;
 }) {
   const projectToken = crypto.randomUUID().slice(0, 8);
   const response = await callTRPC(
@@ -153,13 +153,22 @@ async function createProject(input: {
         description: 'Checklist readiness work for this Organization.',
         name: `Checklist Readiness ${projectToken}`,
         organizationSlug: input.organizationSlug,
-        projectOwnerMemberId: input.projectOwnerMemberId ?? null,
         slug: `checklist-readiness-${projectToken}`,
       }),
     201,
   );
 
   expect(response.status).toBe(201);
+
+  if (input.projectOwnerAssignmentMemberId) {
+    await createProjectAssignment({
+      headers: input.headers,
+      organizationMemberId: input.projectOwnerAssignmentMemberId,
+      organizationSlug: input.organizationSlug,
+      projectSlug: response.body.project.slug,
+      role: 'project_owner',
+    });
+  }
 
   return response.body.project;
 }
@@ -534,7 +543,7 @@ describe('Project Checklists', () => {
     const project = await createProject({
       headers,
       organizationSlug: organization.slug,
-      projectOwnerMemberId: ownerMembership.id,
+      projectOwnerAssignmentMemberId: ownerMembership.id,
     });
     const control = await createActiveControl({
       headers,
@@ -596,7 +605,7 @@ describe('Project Checklists', () => {
     const project = await createProject({
       headers,
       organizationSlug: organization.slug,
-      projectOwnerMemberId: ownerMembership.id,
+      projectOwnerAssignmentMemberId: ownerMembership.id,
     });
     const firstControl = await createActiveControl({
       headers,
@@ -641,7 +650,7 @@ describe('Project Checklists', () => {
     const project = await createProject({
       headers: ownerHeaders,
       organizationSlug: organization.slug,
-      projectOwnerMemberId: projectOwner.membership.id,
+      projectOwnerAssignmentMemberId: projectOwner.membership.id,
     });
     const control = await createActiveControl({
       headers: ownerHeaders,
@@ -720,7 +729,7 @@ describe('Project Checklists', () => {
     const project = await createProject({
       headers: ownerHeaders,
       organizationSlug: organization.slug,
-      projectOwnerMemberId: projectOwner.membership.id,
+      projectOwnerAssignmentMemberId: projectOwner.membership.id,
     });
 
     await createProjectAssignment({
@@ -809,7 +818,7 @@ describe('Project Checklists', () => {
     const project = await createProject({
       headers,
       organizationSlug: organization.slug,
-      projectOwnerMemberId: null,
+      projectOwnerAssignmentMemberId: null,
     });
     const control = await createActiveControl({
       headers,
@@ -856,7 +865,7 @@ describe('Project Checklists', () => {
     const project = await createProject({
       headers: ownerHeaders,
       organizationSlug: organization.slug,
-      projectOwnerMemberId: projectOwner.membership.id,
+      projectOwnerAssignmentMemberId: projectOwner.membership.id,
     });
     const control = await createActiveControl({
       headers: ownerHeaders,
@@ -950,7 +959,7 @@ describe('Project Checklists', () => {
     const project = await createProject({
       headers: ownerHeaders,
       organizationSlug: organization.slug,
-      projectOwnerMemberId: ownerMembership.id,
+      projectOwnerAssignmentMemberId: ownerMembership.id,
     });
     const control = await createActiveControl({
       headers: ownerHeaders,
@@ -1019,7 +1028,7 @@ describe('Project Checklists', () => {
     const project = await createProject({
       headers,
       organizationSlug: organization.slug,
-      projectOwnerMemberId: ownerMembership.id,
+      projectOwnerAssignmentMemberId: ownerMembership.id,
     });
     const control = await createActiveControl({
       headers,
@@ -1100,7 +1109,7 @@ describe('Project Checklists', () => {
     const project = await createProject({
       headers,
       organizationSlug: organization.slug,
-      projectOwnerMemberId: ownerMembership.id,
+      projectOwnerAssignmentMemberId: ownerMembership.id,
     });
     const checkedControl = await createActiveControl({
       headers,
@@ -1176,7 +1185,7 @@ describe('Project Checklists', () => {
     const project = await createProject({
       headers,
       organizationSlug: organization.slug,
-      projectOwnerMemberId: ownerMembership.id,
+      projectOwnerAssignmentMemberId: ownerMembership.id,
     });
     const control = await createActiveControl({
       headers,
@@ -1400,7 +1409,7 @@ describe('Project Checklists', () => {
     const project = await createProject({
       headers,
       organizationSlug: organization.slug,
-      projectOwnerMemberId: ownerMembership.id,
+      projectOwnerAssignmentMemberId: ownerMembership.id,
     });
     const firstControl = await createActiveControl({
       headers,
@@ -1496,7 +1505,7 @@ describe('Project Checklists', () => {
     const project = await createProject({
       headers,
       organizationSlug: organization.slug,
-      projectOwnerMemberId: ownerMembership.id,
+      projectOwnerAssignmentMemberId: ownerMembership.id,
     });
     const control = await createActiveControl({
       headers,

@@ -12,14 +12,12 @@ export const projectListInput = organizationSlugInput.extend({
 export const projectCreateInput = organizationSlugInput.extend({
   description: z.string(),
   name: z.string(),
-  projectOwnerMemberId: z.string().nullable().optional(),
   slug: z.string(),
 });
 
 export const projectUpdateInput = projectIdentityInput.extend({
   description: z.string(),
   name: z.string(),
-  projectOwnerMemberId: z.string().nullable().optional(),
 });
 
 export const projectAssignmentCreateInput = projectIdentityInput.extend({

@@ -236,7 +236,6 @@ describe('organization projects', () => {
     const createResponse = await createProjectRequest(organization.slug, headers, {
       description: 'SOC 2 readiness work for this Organization.',
       name: 'SOC 2 Readiness',
-      projectOwnerMemberId: ownerMembership.id,
       slug: 'soc-2-readiness',
     });
 
@@ -244,8 +243,12 @@ describe('organization projects', () => {
     expect(createResponse.body.project).toMatchObject({
       description: 'SOC 2 readiness work for this Organization.',
       name: 'SOC 2 Readiness',
-      projectOwner: { id: ownerMembership.id },
+      projectOwner: null,
       slug: 'soc-2-readiness',
+    });
+    await createProjectAssignmentRequest(organization.slug, 'soc-2-readiness', headers, {
+      organizationMemberId: ownerMembership.id,
+      role: 'project_owner',
     });
 
     const listResponse = await listProjectsRequest(organization.slug, headers);
@@ -255,6 +258,7 @@ describe('organization projects', () => {
       projects: [
         {
           name: 'SOC 2 Readiness',
+          projectOwner: { id: ownerMembership.id },
           slug: 'soc-2-readiness',
         },
       ],
@@ -279,7 +283,6 @@ describe('organization projects', () => {
     const createResponse = await createProjectRequest(organization.slug, headers, {
       description: 'Governance launch work.',
       name: 'Governance Launch',
-      projectOwnerMemberId: ownerMembership.id,
       slug: 'governance-launch',
     });
 
@@ -638,7 +641,6 @@ describe('organization projects', () => {
         description: 'Updated governance work.',
         name: 'Updated Project Name',
         organizationSlug: organization.slug,
-        projectOwnerMemberId: ownerMembership.id,
         projectSlug: 'initial-project-name',
       }),
     );
@@ -663,14 +665,6 @@ describe('organization projects', () => {
         name: {
           from: 'Initial Project Name',
           to: 'Updated Project Name',
-        },
-        projectOwner: {
-          from: null,
-          to: {
-            displayName: 'project-audit-update-owner user',
-            email: expect.stringContaining('project-audit-update-owner-'),
-            organizationMemberId: ownerMembership.id,
-          },
         },
       },
     });
@@ -751,8 +745,11 @@ describe('organization projects', () => {
     await createProjectRequest(organization.slug, ownerHeaders, {
       description: 'Assigned governance work.',
       name: 'Assigned Project',
-      projectOwnerMemberId: assignedMember?.id,
       slug: 'assigned-project',
+    });
+    await createProjectAssignmentRequest(organization.slug, 'assigned-project', ownerHeaders, {
+      organizationMemberId: assignedMember?.id ?? '',
+      role: 'project_contributor',
     });
     await createProjectRequest(organization.slug, ownerHeaders, {
       description: 'Unassigned governance work.',
@@ -796,7 +793,6 @@ describe('organization projects', () => {
       id: projectId,
       name: 'Assignment Owner',
       organizationId: organization.id,
-      projectOwnerMemberId: null,
       slug: 'assignment-owner',
       updatedAt: now,
     });
@@ -1273,8 +1269,11 @@ describe('organization projects', () => {
     await createProjectRequest(organization.slug, ownerHeaders, {
       description: 'Owner replacement governance work.',
       name: 'Owner Replacement',
-      projectOwnerMemberId: firstProjectOwner.id,
       slug: 'owner-replacement',
+    });
+    await createProjectAssignmentRequest(organization.slug, 'owner-replacement', ownerHeaders, {
+      organizationMemberId: firstProjectOwner.id,
+      role: 'project_owner',
     });
 
     const nextOwnerAssignment = await createProjectAssignmentRequest(
@@ -1490,8 +1489,11 @@ describe('organization projects', () => {
     await createProjectRequest(organization.slug, ownerHeaders, {
       description: 'Owner removal governance work.',
       name: 'Owner Removal',
-      projectOwnerMemberId: projectOwnerMember?.id,
       slug: 'owner-removal',
+    });
+    await createProjectAssignmentRequest(organization.slug, 'owner-removal', ownerHeaders, {
+      organizationMemberId: projectOwnerMember?.id ?? '',
+      role: 'project_owner',
     });
 
     const removeMemberResponse = await removeOrganizationMemberRequest(
@@ -1542,16 +1544,28 @@ describe('organization projects', () => {
     const createResponse = await createProjectRequest(organization.slug, ownerHeaders, {
       description: 'Project owned by an invited Organization member.',
       name: 'Invited Owner',
-      projectOwnerMemberId: projectOwner?.id,
       slug: 'invited-owner',
     });
+    const assignmentResponse = await createProjectAssignmentRequest(
+      organization.slug,
+      'invited-owner',
+      ownerHeaders,
+      {
+        organizationMemberId: projectOwner?.id ?? '',
+        role: 'project_owner',
+      },
+    );
+    const listResponse = await listProjectsRequest(organization.slug, ownerHeaders);
 
     expect(createResponse.status).toBe(201);
-    expect(createResponse.body.project).toMatchObject({
-      projectOwner: {
-        email: member.email,
-        id: projectOwner?.id,
-      },
+    expect(assignmentResponse.status).toBe(201);
+    expect(listResponse.body).toMatchObject({
+      projects: [{
+        projectOwner: {
+          email: member.email,
+          id: projectOwner?.id,
+        },
+      }],
     });
   });
 
@@ -1586,16 +1600,24 @@ describe('organization projects', () => {
       error: 'Project description is required.',
     });
 
-    const wrongOwnerResponse = await createProjectRequest(first.organization.slug, first.headers, {
+    await createProjectRequest(first.organization.slug, first.headers, {
       description: 'Wrong owner membership.',
       name: 'Wrong Owner',
-      projectOwnerMemberId: secondOwnerMembership.id,
       slug: 'wrong-owner',
     });
+    const wrongOwnerResponse = await createProjectAssignmentRequest(
+      first.organization.slug,
+      'wrong-owner',
+      first.headers,
+      {
+        organizationMemberId: secondOwnerMembership.id,
+        role: 'project_owner',
+      },
+    );
 
     expect(wrongOwnerResponse.status).toBe(400);
     expect(wrongOwnerResponse.body).toMatchObject({
-      error: 'Project Owner must be a member of this Organization.',
+      error: 'Project Assignment member must be a member of this Organization.',
     });
 
     await createProjectRequest(first.organization.slug, first.headers, {
@@ -1738,8 +1760,11 @@ describe('organization projects', () => {
     await createProjectRequest(organization.slug, ownerHeaders, {
       description: 'Member-visible archived work.',
       name: 'Member Visible',
-      projectOwnerMemberId: assignedMember?.id,
       slug: 'member-visible',
+    });
+    await createProjectAssignmentRequest(organization.slug, 'member-visible', ownerHeaders, {
+      organizationMemberId: assignedMember?.id ?? '',
+      role: 'project_contributor',
     });
 
     await expect(

@@ -10,14 +10,12 @@ export type ProjectListStatus = 'active' | 'archived';
 type CreateProjectInput = {
   description: string;
   name: string;
-  projectOwnerMemberId?: string | null;
   slug: string;
 };
 
 type UpdateProjectSettingsInput = {
   description: string;
   name: string;
-  projectOwnerMemberId?: string | null;
 };
 
 type CreateProjectAssignmentInput = {
@@ -285,24 +283,6 @@ export async function createProjectForMember(
     throw new ProjectInputError('Project slug is already used in this Organization.');
   }
 
-  if (projectInput.projectOwnerMemberId) {
-    const ownerMembership = await db
-      .select({ id: members.id })
-      .from(members)
-      .where(
-        and(
-          eq(members.id, projectInput.projectOwnerMemberId),
-          eq(members.organizationId, membership.organizationId),
-        ),
-      )
-      .limit(1)
-      .then((rows) => rows[0] ?? null);
-
-    if (!ownerMembership) {
-      throw new ProjectInputError('Project Owner must be a member of this Organization.');
-    }
-  }
-
   const now = new Date();
   const project = {
     createdAt: now,
@@ -310,25 +290,12 @@ export async function createProjectForMember(
     id: crypto.randomUUID(),
     name: projectInput.name.trim(),
     organizationId: membership.organizationId,
-    projectOwnerMemberId: projectInput.projectOwnerMemberId,
     slug: projectInput.slug,
     updatedAt: now,
   };
 
   await db.batch([
     db.insert(projects).values(project),
-    ...(projectInput.projectOwnerMemberId
-      ? [
-          db.insert(projectAssignments).values({
-            createdAt: now,
-            id: crypto.randomUUID(),
-            organizationMemberId: projectInput.projectOwnerMemberId,
-            projectId: project.id,
-            role: projectOwnerAssignmentRole,
-            updatedAt: now,
-          }),
-        ]
-      : []),
     db.insert(auditEvents).values(
       await buildProjectAuditEventValues({
         action: 'project.created',
@@ -690,7 +657,6 @@ export async function updateProjectSettingsForMember(input: {
       description: projects.description,
       id: projects.id,
       name: projects.name,
-      projectOwnerMemberId: projects.projectOwnerMemberId,
       slug: projects.slug,
     })
     .from(projects)
@@ -707,53 +673,14 @@ export async function updateProjectSettingsForMember(input: {
     return null;
   }
 
-  if (settings.projectOwnerMemberId) {
-    const ownerMembership = await db
-      .select({ id: members.id })
-      .from(members)
-      .where(
-        and(
-          eq(members.id, settings.projectOwnerMemberId),
-          eq(members.organizationId, input.membership.organizationId),
-        ),
-      )
-      .limit(1)
-      .then((rows) => rows[0] ?? null);
-
-    if (!ownerMembership) {
-      throw new ProjectInputError('Project Owner must be a member of this Organization.');
-    }
-  }
-
   const updatedProject = {
     description: settings.description.trim(),
     name: settings.name.trim(),
-    projectOwnerMemberId: settings.projectOwnerMemberId,
     updatedAt: new Date(),
   };
 
   await db.batch([
     db.update(projects).set(updatedProject).where(eq(projects.id, existingProject.id)),
-    db
-      .delete(projectAssignments)
-      .where(
-        and(
-          eq(projectAssignments.projectId, existingProject.id),
-          eq(projectAssignments.role, projectOwnerAssignmentRole),
-        ),
-      ),
-    ...(settings.projectOwnerMemberId
-      ? [
-          db.insert(projectAssignments).values({
-            createdAt: new Date(),
-            id: crypto.randomUUID(),
-            organizationMemberId: settings.projectOwnerMemberId,
-            projectId: existingProject.id,
-            role: projectOwnerAssignmentRole,
-            updatedAt: new Date(),
-          }),
-        ]
-      : []),
     db.insert(auditEvents).values(
       await buildProjectAuditEventValues({
         action: 'project.updated',
@@ -780,12 +707,10 @@ async function buildProjectUpdateAuditDeltas(input: {
   after: {
     description: string;
     name: string;
-    projectOwnerMemberId: string | null;
   };
   before: {
     description: string;
     name: string;
-    projectOwnerMemberId: string | null;
   };
 }) {
   return {
@@ -805,35 +730,7 @@ async function buildProjectUpdateAuditDeltas(input: {
             to: input.after.description,
           },
         }),
-    ...(input.before.projectOwnerMemberId === input.after.projectOwnerMemberId
-      ? {}
-      : {
-          projectOwner: {
-            from: await getProjectOwnerAuditLabel(input.before.projectOwnerMemberId),
-            to: await getProjectOwnerAuditLabel(input.after.projectOwnerMemberId),
-          },
-        }),
   };
-}
-
-async function getProjectOwnerAuditLabel(organizationMemberId: string | null) {
-  if (!organizationMemberId) {
-    return null;
-  }
-
-  const member = await db
-    .select({
-      displayName: users.name,
-      email: users.email,
-      organizationMemberId: members.id,
-    })
-    .from(members)
-    .innerJoin(users, eq(users.id, members.userId))
-    .where(eq(members.id, organizationMemberId))
-    .limit(1)
-    .then((rows) => rows[0] ?? null);
-
-  return member ?? { organizationMemberId };
 }
 
 export function slugifyProjectName(value: string) {
@@ -905,10 +802,6 @@ function normalizeProjectCreateBody(body: unknown) {
   return {
     description: typeof record.description === 'string' ? record.description : '',
     name: typeof record.name === 'string' ? record.name : '',
-    projectOwnerMemberId:
-      typeof record.projectOwnerMemberId === 'string' && record.projectOwnerMemberId
-        ? record.projectOwnerMemberId
-        : null,
     slug: typeof record.slug === 'string' ? slugifyProjectName(record.slug) : '',
   };
 }
@@ -920,9 +813,5 @@ function normalizeProjectUpdateBody(body: unknown) {
   return {
     description: typeof record.description === 'string' ? record.description : '',
     name: typeof record.name === 'string' ? record.name : '',
-    projectOwnerMemberId:
-      typeof record.projectOwnerMemberId === 'string' && record.projectOwnerMemberId
-        ? record.projectOwnerMemberId
-        : null,
   };
 }
