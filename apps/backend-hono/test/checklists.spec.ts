@@ -143,7 +143,7 @@ async function getFirstMembership(organizationId: string) {
 async function createProject(input: {
   headers: Headers;
   organizationSlug: string;
-  projectOwnerMemberId: string;
+  projectOwnerMemberId?: string | null;
 }) {
   const projectToken = crypto.randomUUID().slice(0, 8);
   const response = await callTRPC(
@@ -153,7 +153,7 @@ async function createProject(input: {
         description: 'Checklist readiness work for this Organization.',
         name: `Checklist Readiness ${projectToken}`,
         organizationSlug: input.organizationSlug,
-        projectOwnerMemberId: input.projectOwnerMemberId,
+        projectOwnerMemberId: input.projectOwnerMemberId ?? null,
         slug: `checklist-readiness-${projectToken}`,
       }),
     201,
@@ -162,6 +162,26 @@ async function createProject(input: {
   expect(response.status).toBe(201);
 
   return response.body.project;
+}
+
+async function createProjectAssignment(input: {
+  headers: Headers;
+  organizationMemberId: string;
+  organizationSlug: string;
+  projectSlug: string;
+  role: 'project_contributor' | 'project_owner';
+}) {
+  return callTRPC(
+    input.headers,
+    (caller) =>
+      caller.projects.createAssignment({
+        organizationMemberId: input.organizationMemberId,
+        organizationSlug: input.organizationSlug,
+        projectSlug: input.projectSlug,
+        role: input.role,
+      }),
+    201,
+  );
 }
 
 async function archiveProject(input: {
@@ -672,6 +692,155 @@ describe('Project Checklists', () => {
     expect(uncheckedResponse.body.projectChecklist).toMatchObject({
       isComplete: false,
       items: [expect.objectContaining({ checked: false, id: checklistItemId })],
+    });
+  });
+
+  it('uses Project Assignments for Project Checklist visibility and checking', async () => {
+    const { headers: ownerHeaders, organization } = await createSignedInOwner(
+      'checklist-assignment-owner',
+    );
+    const projectOwner = await createSignedInMember({
+      organizationId: organization.id,
+      ownerHeaders,
+      prefix: 'checklist-assignment-project-owner',
+      role: 'member',
+    });
+    const contributor = await createSignedInMember({
+      organizationId: organization.id,
+      ownerHeaders,
+      prefix: 'checklist-assignment-contributor',
+      role: 'member',
+    });
+    const unassigned = await createSignedInMember({
+      organizationId: organization.id,
+      ownerHeaders,
+      prefix: 'checklist-assignment-unassigned',
+      role: 'member',
+    });
+    const project = await createProject({
+      headers: ownerHeaders,
+      organizationSlug: organization.slug,
+      projectOwnerMemberId: projectOwner.membership.id,
+    });
+
+    await createProjectAssignment({
+      headers: ownerHeaders,
+      organizationMemberId: contributor.membership.id,
+      organizationSlug: organization.slug,
+      projectSlug: project.slug,
+      role: 'project_contributor',
+    });
+
+    const control = await createActiveControl({
+      headers: ownerHeaders,
+      organizationSlug: organization.slug,
+      title: 'Verify assignment-scoped checklist access',
+    });
+    const checklistResponse = await createProjectChecklist({
+      controlIds: [control.id],
+      headers: ownerHeaders,
+      name: 'Assignment-scoped checklist',
+      organizationSlug: organization.slug,
+      projectSlug: project.slug,
+    });
+    const checklistItemId = checklistResponse.body.projectChecklist.items[0]?.id;
+
+    expect(checklistItemId).toBeTruthy();
+
+    if (!checklistItemId) {
+      throw new Error('Expected a Checklist Item.');
+    }
+
+    await expect(
+      listProjectChecklists({
+        headers: contributor.headers,
+        organizationSlug: organization.slug,
+        projectSlug: project.slug,
+      }),
+    ).resolves.toMatchObject({
+      body: { projectChecklists: [{ name: 'Assignment-scoped checklist' }] },
+      status: 200,
+    });
+    await expect(
+      listProjectChecklists({
+        headers: unassigned.headers,
+        organizationSlug: organization.slug,
+        projectSlug: project.slug,
+      }),
+    ).resolves.toMatchObject({ body: { error: 'Project unavailable' }, status: 404 });
+    await expect(
+      setChecklistItemChecked({
+        checked: true,
+        checklistItemId,
+        headers: contributor.headers,
+        organizationSlug: organization.slug,
+      }),
+    ).resolves.toMatchObject({
+      body: { error: 'Only the Project Owner can check Checklist Items.' },
+      status: 403,
+    });
+    await expect(
+      setChecklistItemChecked({
+        checked: true,
+        checklistItemId,
+        headers: ownerHeaders,
+        organizationSlug: organization.slug,
+      }),
+    ).resolves.toMatchObject({
+      body: { error: 'Only the Project Owner can check Checklist Items.' },
+      status: 403,
+    });
+
+    const checkedResponse = await setChecklistItemChecked({
+      checked: true,
+      checklistItemId,
+      headers: projectOwner.headers,
+      organizationSlug: organization.slug,
+    });
+
+    expect(checkedResponse.status).toBe(200);
+    expect(checkedResponse.body.projectChecklist).toMatchObject({
+      items: [expect.objectContaining({ checked: true, id: checklistItemId })],
+    });
+  });
+
+  it('blocks Checklist Item checking on ownerless Projects', async () => {
+    const { headers, organization } = await createSignedInOwner('checklist-ownerless-owner');
+    const project = await createProject({
+      headers,
+      organizationSlug: organization.slug,
+      projectOwnerMemberId: null,
+    });
+    const control = await createActiveControl({
+      headers,
+      organizationSlug: organization.slug,
+      title: 'Verify ownerless checklist completion',
+    });
+    const checklistResponse = await createProjectChecklist({
+      controlIds: [control.id],
+      headers,
+      name: 'Ownerless checklist',
+      organizationSlug: organization.slug,
+      projectSlug: project.slug,
+    });
+    const checklistItemId = checklistResponse.body.projectChecklist.items[0]?.id;
+
+    expect(checklistItemId).toBeTruthy();
+
+    if (!checklistItemId) {
+      throw new Error('Expected a Checklist Item.');
+    }
+
+    await expect(
+      setChecklistItemChecked({
+        checked: true,
+        checklistItemId,
+        headers,
+        organizationSlug: organization.slug,
+      }),
+    ).resolves.toMatchObject({
+      body: { error: 'Only the Project Owner can check Checklist Items.' },
+      status: 403,
     });
   });
 

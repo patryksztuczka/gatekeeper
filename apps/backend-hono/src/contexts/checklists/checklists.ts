@@ -7,6 +7,7 @@ import {
   checklistTemplates,
   controls,
   controlVersions,
+  projectAssignments,
   projectChecklists,
   projects,
 } from '../../db/schema';
@@ -29,6 +30,7 @@ type CreateChecklistTemplateInput = {
 export type ChecklistArchiveStatus = 'active' | 'archived';
 
 const checklistManagerRoles = ['owner', 'admin'] as const;
+const projectOwnerAssignmentRole = 'project_owner';
 
 export const checklistAuthorizationActions = {
   createTemplate: {
@@ -95,6 +97,10 @@ export const checklistAuthorizationActions = {
 
 export class ChecklistInputError extends Error {}
 export class ChecklistPermissionError extends Error {}
+
+function canViewAllProjectsForOrganizationRole(role: string) {
+  return checklistManagerRoles.includes(role as (typeof checklistManagerRoles)[number]);
+}
 
 export async function createChecklistTemplateForMember(
   membership: AuthorizedOrganizationMember,
@@ -652,7 +658,7 @@ async function getProjectForChecklistAction(
   projectSlug: string,
   options: { allowArchivedProject: boolean },
 ) {
-  return db
+  const project = await db
     .select({
       archivedAt: projects.archivedAt,
       id: projects.id,
@@ -668,6 +674,24 @@ async function getProjectForChecklistAction(
     )
     .limit(1)
     .then((rows) => rows[0] ?? null);
+
+  if (!project || canViewAllProjectsForOrganizationRole(membership.role)) {
+    return project;
+  }
+
+  const assignment = await db
+    .select({ id: projectAssignments.id })
+    .from(projectAssignments)
+    .where(
+      and(
+        eq(projectAssignments.projectId, project.id),
+        eq(projectAssignments.organizationMemberId, membership.id),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  return assignment ? project : null;
 }
 
 async function getProjectChecklistForManagement(
@@ -844,7 +868,7 @@ export async function setChecklistItemCheckedForMember(
       itemStatus: checklistItems.status,
       projectArchivedAt: projects.archivedAt,
       projectChecklistId: projectChecklists.id,
-      projectOwnerMemberId: projects.projectOwnerMemberId,
+      projectId: projects.id,
       projectSlug: projects.slug,
     })
     .from(checklistItems)
@@ -864,7 +888,20 @@ export async function setChecklistItemCheckedForMember(
     return null;
   }
 
-  if (checklistItem.projectOwnerMemberId !== membership.id) {
+  const projectOwnerAssignment = await db
+    .select({ id: projectAssignments.id })
+    .from(projectAssignments)
+    .where(
+      and(
+        eq(projectAssignments.projectId, checklistItem.projectId),
+        eq(projectAssignments.organizationMemberId, membership.id),
+        eq(projectAssignments.role, projectOwnerAssignmentRole),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (!projectOwnerAssignment) {
     throw new ChecklistPermissionError('Only the Project Owner can check Checklist Items.');
   }
 
