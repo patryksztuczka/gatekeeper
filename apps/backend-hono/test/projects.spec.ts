@@ -372,6 +372,70 @@ describe('organization projects', () => {
     );
   });
 
+  it('records Audit Deltas when an Organization owner updates Project settings', async () => {
+    const { headers, organization } = await createSignedInOwner('project-audit-update-owner');
+    const ownerMembership = await db
+      .select({ id: members.id })
+      .from(members)
+      .where(eq(members.organizationId, organization.id))
+      .limit(1)
+      .then((rows) => rows[0]);
+
+    expect(ownerMembership?.id).toBeTruthy();
+
+    if (!ownerMembership?.id) {
+      throw new Error('Expected an owner membership.');
+    }
+
+    const createResponse = await createProjectRequest(organization.slug, headers, {
+      description: 'Initial governance work.',
+      name: 'Initial Project Name',
+      slug: 'initial-project-name',
+    });
+
+    expect(createResponse.status).toBe(201);
+
+    const updateResponse = await callTRPC(headers, (caller) =>
+      caller.projects.update({
+        description: 'Updated governance work.',
+        name: 'Updated Project Name',
+        organizationSlug: organization.slug,
+        projectOwnerMemberId: ownerMembership.id,
+        projectSlug: 'initial-project-name',
+      }),
+    );
+
+    expect(updateResponse.status).toBe(200);
+
+    const listResponse = await listAuditEventsRequest(organization.slug, headers);
+    const updateAuditEvent = listResponse.body.auditEvents.find(
+      (auditEvent: { action: string }) => auditEvent.action === 'project.updated',
+    ) as { actorDisplayName: string; actorEmail: string; metadata: unknown } | undefined;
+
+    expect(updateAuditEvent).toMatchObject({
+      actorDisplayName: 'project-audit-update-owner user',
+      actorEmail: expect.stringContaining('project-audit-update-owner-'),
+    });
+    expect(updateAuditEvent?.metadata).toMatchObject({
+      changes: {
+        description: {
+          from: 'Initial governance work.',
+          to: 'Updated governance work.',
+        },
+        name: {
+          from: 'Initial Project Name',
+          to: 'Updated Project Name',
+        },
+        projectOwner: {
+          from: null,
+          to: {
+            organizationMemberId: ownerMembership.id,
+          },
+        },
+      },
+    });
+  });
+
   it('prevents members from creating Projects but allows them to list active Projects', async () => {
     const { headers: ownerHeaders, organization } =
       await createSignedInOwner('project-member-owner');

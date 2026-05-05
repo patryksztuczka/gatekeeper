@@ -340,6 +340,10 @@ async function rejectControlProposedUpdateRequest(
   );
 }
 
+async function listAuditEventsRequest(organizationSlug: string, headers: Headers) {
+  return callTRPC(headers, (caller) => caller.auditLog.list({ organizationSlug }));
+}
+
 beforeEach(() => {
   const originalFetch = globalThis.fetch;
 
@@ -531,6 +535,21 @@ describe('Draft Controls', () => {
 
     await expect(listDraftControlsRequest(organization.slug, ownerHeaders)).resolves.toMatchObject({
       body: { draftControls: [] },
+      status: 200,
+    });
+
+    await expect(listAuditEventsRequest(organization.slug, ownerHeaders)).resolves.toMatchObject({
+      body: {
+        auditEvents: expect.arrayContaining([
+          expect.objectContaining({
+            action: 'control.created',
+            targetDisplayName: 'Require phishing-resistant MFA',
+            targetId: controlRow!.id,
+            targetSecondaryLabel: 'CTL-001 v1',
+            targetType: 'control',
+          }),
+        ]),
+      },
       status: 200,
     });
   });
@@ -737,6 +756,65 @@ describe('Draft Controls', () => {
         .from(controlPublishRequests)
         .where(eq(controlPublishRequests.draftControlId, draftControl.id)),
     ).resolves.toHaveLength(1);
+  });
+
+  it('records Audit Events for Control Publish Request submission, approval, and rejection', async () => {
+    const { headers: ownerHeaders, organization } = await createSignedInOwner(
+      'audit-publish-request-owner',
+    );
+    const admin = await createSignedInMember({
+      ownerHeaders,
+      organizationId: organization.id,
+      prefix: 'audit-publish-request-admin',
+      role: 'admin',
+    });
+
+    await enableControlApprovalPolicy(organization.slug, ownerHeaders);
+
+    const createResponse = await createDraftControlRequest(organization.slug, ownerHeaders, {
+      controlCode: 'AUTH-010',
+      title: 'Audit publish request',
+    });
+    const draftControl = createResponse.body.draftControl as { id: string };
+    const submitResponse = await submitDraftControlPublishRequest(
+      organization.slug,
+      draftControl.id,
+      ownerHeaders,
+    );
+    const publishRequest = submitResponse.body.publishRequest as { id: string };
+
+    await approveControlPublishRequest(organization.slug, publishRequest.id, admin.headers);
+    await rejectControlPublishRequest(organization.slug, publishRequest.id, ownerHeaders, {
+      comment: 'Needs clearer evidence guidance.',
+    });
+
+    await expect(listAuditEventsRequest(organization.slug, ownerHeaders)).resolves.toMatchObject({
+      body: {
+        auditEvents: expect.arrayContaining([
+          expect.objectContaining({
+            action: 'control_publish_request.created',
+            targetDisplayName: 'Audit publish request',
+            targetId: publishRequest.id,
+            targetSecondaryLabel: 'CTL-001',
+            targetType: 'control_publish_request',
+          }),
+          expect.objectContaining({
+            action: 'control_publish_request.approved',
+            targetId: publishRequest.id,
+            targetType: 'control_publish_request',
+          }),
+          expect.objectContaining({
+            action: 'control_publish_request.rejected',
+            metadata: {
+              reason: 'Needs clearer evidence guidance.',
+            },
+            targetId: publishRequest.id,
+            targetType: 'control_publish_request',
+          }),
+        ]),
+      },
+      status: 200,
+    });
   });
 
   it('limits submitted Control Publish Request visibility to author and Organization owners/admins', async () => {

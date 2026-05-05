@@ -2,6 +2,7 @@ import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm';
 import { db } from '../../db/client';
 import { auditEvents, members, projects, users } from '../../db/schema';
 import type { AuthorizedOrganizationMember } from '../../types/organization-types';
+import { buildOrganizationMemberAuditEvent } from '../audit-log/audit-events';
 import type { OrganizationAuthorizationPolicy } from '../identity-organization/organization-authorization';
 
 export type ProjectListStatus = 'active' | 'archived';
@@ -218,33 +219,26 @@ export async function createProjectForMember(
 }
 
 async function buildProjectAuditEventValues(input: {
-  action: 'project.created' | 'project.archived' | 'project.restored';
+  action: 'project.created' | 'project.archived' | 'project.restored' | 'project.updated';
   membership: AuthorizedOrganizationMember;
+  metadata?: unknown;
   project: {
     id: string;
     name: string;
     slug: string;
   };
 }) {
-  const actorMembership = await db
-    .select({ userId: members.userId })
-    .from(members)
-    .where(eq(members.id, input.membership.id))
-    .limit(1)
-    .then((rows) => rows[0]);
-
-  return {
+  return buildOrganizationMemberAuditEvent({
     action: input.action,
-    actorOrganizationMemberId: input.membership.id,
-    actorType: 'organization_member',
-    actorUserId: actorMembership?.userId,
-    id: crypto.randomUUID(),
-    organizationId: input.membership.organizationId,
-    targetDisplayName: input.project.name,
-    targetId: input.project.id,
-    targetSecondaryLabel: input.project.slug,
-    targetType: 'project',
-  };
+    membership: input.membership,
+    metadata: input.metadata,
+    target: {
+      displayName: input.project.name,
+      id: input.project.id,
+      secondaryLabel: input.project.slug,
+      type: 'project',
+    },
+  });
 }
 
 export async function archiveProjectForMember(input: {
@@ -316,7 +310,13 @@ export async function updateProjectSettingsForMember(input: {
   validateProjectUpdateInput(settings);
 
   const existingProject = await db
-    .select({ id: projects.id })
+    .select({
+      description: projects.description,
+      id: projects.id,
+      name: projects.name,
+      projectOwnerMemberId: projects.projectOwnerMemberId,
+      slug: projects.slug,
+    })
     .from(projects)
     .where(
       and(
@@ -349,17 +349,79 @@ export async function updateProjectSettingsForMember(input: {
     }
   }
 
-  await db
-    .update(projects)
-    .set({
-      description: settings.description.trim(),
-      name: settings.name.trim(),
-      projectOwnerMemberId: settings.projectOwnerMemberId,
-      updatedAt: new Date(),
-    })
-    .where(eq(projects.id, existingProject.id));
+  const updatedProject = {
+    description: settings.description.trim(),
+    name: settings.name.trim(),
+    projectOwnerMemberId: settings.projectOwnerMemberId,
+    updatedAt: new Date(),
+  };
+
+  await db.batch([
+    db.update(projects).set(updatedProject).where(eq(projects.id, existingProject.id)),
+    db.insert(auditEvents).values(
+      await buildProjectAuditEventValues({
+        action: 'project.updated',
+        membership: input.membership,
+        metadata: {
+          changes: buildProjectUpdateAuditDeltas({
+            after: updatedProject,
+            before: existingProject,
+          }),
+        },
+        project: {
+          id: existingProject.id,
+          name: updatedProject.name,
+          slug: existingProject.slug,
+        },
+      }),
+    ),
+  ]);
 
   return viewProjectForMember(input.membership, input.projectSlug);
+}
+
+function buildProjectUpdateAuditDeltas(input: {
+  after: {
+    description: string;
+    name: string;
+    projectOwnerMemberId: string | null;
+  };
+  before: {
+    description: string;
+    name: string;
+    projectOwnerMemberId: string | null;
+  };
+}) {
+  return {
+    ...(input.before.name === input.after.name
+      ? {}
+      : {
+          name: {
+            from: input.before.name,
+            to: input.after.name,
+          },
+        }),
+    ...(input.before.description === input.after.description
+      ? {}
+      : {
+          description: {
+            from: input.before.description,
+            to: input.after.description,
+          },
+        }),
+    ...(input.before.projectOwnerMemberId === input.after.projectOwnerMemberId
+      ? {}
+      : {
+          projectOwner: {
+            from: input.before.projectOwnerMemberId
+              ? { organizationMemberId: input.before.projectOwnerMemberId }
+              : null,
+            to: input.after.projectOwnerMemberId
+              ? { organizationMemberId: input.after.projectOwnerMemberId }
+              : null,
+          },
+        }),
+  };
 }
 
 export function slugifyProjectName(value: string) {

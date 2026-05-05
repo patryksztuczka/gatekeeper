@@ -20,8 +20,21 @@ export async function listAuditEventsForViewer(membership: AuthorizedOrganizatio
     .where(eq(auditEvents.organizationId, membership.organizationId))
     .orderBy(desc(auditEvents.occurredAt));
 
-  return rows.map(({ occurredAt, ...auditEvent }) => ({
+  return rows.map(({ metadata, occurredAt, ...auditEvent }) => ({
     ...auditEvent,
+    metadata: parseAuditEventMetadata(metadata),
     occurredAt: occurredAt.toISOString(),
   }));
+}
+
+function parseAuditEventMetadata(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return null;
+  }
 }

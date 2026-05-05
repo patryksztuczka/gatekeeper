@@ -10,8 +10,10 @@ import {
   draftControls,
   members,
   users,
+  auditEvents,
 } from '../../db/schema';
 import type { AuthorizedOrganizationMember } from '../../types/organization-types';
+import { buildOrganizationMemberAuditEvent } from '../audit-log/audit-events';
 import type { OrganizationAuthorizationPolicy } from '../identity-organization/organization-authorization';
 import {
   canPublishControlPublishRequest,
@@ -601,24 +603,38 @@ export async function publishDraftControl(
   const controlId = crypto.randomUUID();
   const versionId = crypto.randomUUID();
 
-  await db.insert(controls).values({
-    createdAt: now,
-    currentControlCode: draftControl.controlCode,
-    currentVersionId: versionId,
-    id: controlId,
-    organizationId: membership.organizationId,
-    updatedAt: now,
-  });
-  await db.insert(controlVersions).values({
-    businessMeaning: input.businessMeaning.trim(),
-    controlCode: draftControl.controlCode,
-    controlId,
-    createdAt: now,
-    id: versionId,
-    title: draftControl.title,
-    versionNumber: 1,
-  });
-  await db.delete(draftControls).where(eq(draftControls.id, draftControl.id));
+  await db.batch([
+    db.insert(controls).values({
+      createdAt: now,
+      currentControlCode: draftControl.controlCode,
+      currentVersionId: versionId,
+      id: controlId,
+      organizationId: membership.organizationId,
+      updatedAt: now,
+    }),
+    db.insert(controlVersions).values({
+      businessMeaning: input.businessMeaning.trim(),
+      controlCode: draftControl.controlCode,
+      controlId,
+      createdAt: now,
+      id: versionId,
+      title: draftControl.title,
+      versionNumber: 1,
+    }),
+    db.delete(draftControls).where(eq(draftControls.id, draftControl.id)),
+    db.insert(auditEvents).values(
+      await buildOrganizationMemberAuditEvent({
+        action: 'control.created',
+        membership,
+        target: {
+          displayName: draftControl.title,
+          id: controlId,
+          secondaryLabel: `${draftControl.controlCode} v1`,
+          type: 'control',
+        },
+      }),
+    ),
+  ]);
 
   return getControlDetail(membership, controlId);
 }
@@ -778,7 +794,16 @@ export async function submitDraftControlPublishRequest(
   if (existingRequest) {
     await resetControlPublishRequest(existingRequest.id, request);
   } else {
-    await db.insert(controlPublishRequests).values(request);
+    await db.batch([
+      db.insert(controlPublishRequests).values(request),
+      db.insert(auditEvents).values(
+        await buildControlPublishRequestAuditEvent({
+          action: 'control_publish_request.created',
+          membership,
+          request,
+        }),
+      ),
+    ]);
   }
 
   return (await listControlPublishRequests(membership)).find(
@@ -886,12 +911,21 @@ export async function approveControlPublishRequest(
     .then((rows) => rows[0] ?? null);
 
   if (!existingApproval) {
-    await db.insert(controlPublishRequestApprovals).values({
-      approverMemberId: membership.id,
-      createdAt: new Date(),
-      id: crypto.randomUUID(),
-      requestId: publishRequestId,
-    });
+    await db.batch([
+      db.insert(controlPublishRequestApprovals).values({
+        approverMemberId: membership.id,
+        createdAt: new Date(),
+        id: crypto.randomUUID(),
+        requestId: publishRequestId,
+      }),
+      db.insert(auditEvents).values(
+        await buildControlPublishRequestAuditEvent({
+          action: 'control_publish_request.approved',
+          membership,
+          request,
+        }),
+      ),
+    ]);
   }
 
   await updateControlPublishRequestApprovalCount(publishRequestId);
@@ -918,10 +952,20 @@ export async function rejectControlPublishRequest(
   ensureControlPublishRequestRejectionAllowed(request.status);
 
   await clearControlPublishRequestApprovals(publishRequestId);
-  await db
-    .update(controlPublishRequests)
-    .set({ approvalCount: 0, rejectionComment: comment, status: 'draft' })
-    .where(eq(controlPublishRequests.id, publishRequestId));
+  await db.batch([
+    db
+      .update(controlPublishRequests)
+      .set({ approvalCount: 0, rejectionComment: comment, status: 'draft' })
+      .where(eq(controlPublishRequests.id, publishRequestId)),
+    db.insert(auditEvents).values(
+      await buildControlPublishRequestAuditEvent({
+        action: 'control_publish_request.rejected',
+        membership,
+        metadata: { reason: comment },
+        request,
+      }),
+    ),
+  ]);
 
   return (await listControlPublishRequests(membership)).find(({ id }) => id === publishRequestId)!;
 }
@@ -1222,6 +1266,32 @@ async function getControlVersions(controlId: string) {
   return rows.map((row) => toControlVersionResponse(row));
 }
 
+async function buildControlPublishRequestAuditEvent(input: {
+  action:
+    | 'control_publish_request.created'
+    | 'control_publish_request.approved'
+    | 'control_publish_request.rejected';
+  membership: AuthorizedOrganizationMember;
+  metadata?: unknown;
+  request: {
+    controlCode: string;
+    id: string;
+    title: string;
+  };
+}) {
+  return buildOrganizationMemberAuditEvent({
+    action: input.action,
+    membership: input.membership,
+    metadata: input.metadata,
+    target: {
+      displayName: input.request.title,
+      id: input.request.id,
+      secondaryLabel: input.request.controlCode,
+      type: 'control_publish_request',
+    },
+  });
+}
+
 async function getCurrentControlCode(controlId: string) {
   return db
     .select({ currentControlCode: controls.currentControlCode })
@@ -1238,8 +1308,10 @@ async function getReviewableControlPublishRequest(
   return db
     .select({
       authorMemberId: controlPublishRequests.authorMemberId,
+      controlCode: controlPublishRequests.controlCode,
       id: controlPublishRequests.id,
       status: controlPublishRequests.status,
+      title: controlPublishRequests.title,
     })
     .from(controlPublishRequests)
     .where(
