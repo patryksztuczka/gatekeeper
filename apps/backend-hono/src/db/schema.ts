@@ -193,6 +193,38 @@ export const projects = sqliteTable(
   ],
 );
 
+export const projectAssignments = sqliteTable(
+  'project_assignments',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    organizationMemberId: text('organization_member_id')
+      .notNull()
+      .references(() => members.id, { onDelete: 'cascade' }),
+    role: text('role').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index('project_assignment_project_id_idx').on(table.projectId),
+    index('project_assignment_organization_member_id_idx').on(table.organizationMemberId),
+    uniqueIndex('project_assignment_project_member_unique').on(
+      table.projectId,
+      table.organizationMemberId,
+    ),
+    uniqueIndex('project_assignment_one_owner_per_project_unique')
+      .on(table.projectId)
+      .where(sql`${table.role} = 'project_owner'`),
+  ],
+);
+
 export const auditEvents = sqliteTable(
   'audit_events',
   {

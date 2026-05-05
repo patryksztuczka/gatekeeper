@@ -1,6 +1,6 @@
-import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm';
+import { and, asc, eq, exists, isNotNull, isNull } from 'drizzle-orm';
 import { db } from '../../db/client';
-import { auditEvents, members, projects, users } from '../../db/schema';
+import { auditEvents, members, projectAssignments, projects, users } from '../../db/schema';
 import type { AuthorizedOrganizationMember } from '../../types/organization-types';
 import { buildOrganizationMemberAuditEvent } from '../audit-log/audit-events';
 import type { OrganizationAuthorizationPolicy } from '../identity-organization/organization-authorization';
@@ -22,6 +22,7 @@ type UpdateProjectSettingsInput = {
 
 const projectManagerRoles = ['owner', 'admin'] as const;
 const projectSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const projectOwnerAssignmentRole = 'project_owner';
 
 export const projectAuthorizationActions = {
   archive: {
@@ -58,6 +59,8 @@ export async function listProjectsForMember(
   membership: AuthorizedOrganizationMember,
   status: ProjectListStatus,
 ) {
+  const canViewAllProjects = canViewAllProjectsForOrganizationRole(membership.role);
+
   const rows = await db
     .select({
       archivedAt: projects.archivedAt,
@@ -77,6 +80,19 @@ export async function listProjectsForMember(
       and(
         eq(projects.organizationId, membership.organizationId),
         status === 'archived' ? isNotNull(projects.archivedAt) : isNull(projects.archivedAt),
+        canViewAllProjects
+          ? undefined
+          : exists(
+              db
+                .select({ id: projectAssignments.id })
+                .from(projectAssignments)
+                .where(
+                  and(
+                    eq(projectAssignments.projectId, projects.id),
+                    eq(projectAssignments.organizationMemberId, membership.id),
+                  ),
+                ),
+            ),
       ),
     )
     .orderBy(asc(projects.createdAt), asc(projects.name));
@@ -100,6 +116,7 @@ export async function viewProjectForMember(
   membership: AuthorizedOrganizationMember,
   projectSlug: string,
 ) {
+  const canViewAllProjects = canViewAllProjectsForOrganizationRole(membership.role);
   const project = await db
     .select()
     .from(projects)
@@ -111,6 +128,24 @@ export async function viewProjectForMember(
 
   if (!project) {
     return null;
+  }
+
+  if (!canViewAllProjects) {
+    const assignment = await db
+      .select({ id: projectAssignments.id })
+      .from(projectAssignments)
+      .where(
+        and(
+          eq(projectAssignments.projectId, project.id),
+          eq(projectAssignments.organizationMemberId, membership.id),
+        ),
+      )
+      .limit(1)
+      .then((rows) => rows[0] ?? null);
+
+    if (!assignment) {
+      return null;
+    }
   }
 
   const projectOwner = project.projectOwnerMemberId
@@ -202,6 +237,18 @@ export async function createProjectForMember(
 
   await db.batch([
     db.insert(projects).values(project),
+    ...(projectInput.projectOwnerMemberId
+      ? [
+          db.insert(projectAssignments).values({
+            createdAt: now,
+            id: crypto.randomUUID(),
+            organizationMemberId: projectInput.projectOwnerMemberId,
+            projectId: project.id,
+            role: projectOwnerAssignmentRole,
+            updatedAt: now,
+          }),
+        ]
+      : []),
     db.insert(auditEvents).values(
       await buildProjectAuditEventValues({
         action: 'project.created',
@@ -453,6 +500,10 @@ export function slugifyProjectName(value: string) {
 }
 
 export class ProjectInputError extends Error {}
+
+function canViewAllProjectsForOrganizationRole(role: string) {
+  return projectManagerRoles.includes(role as (typeof projectManagerRoles)[number]);
+}
 
 function validateProjectInput(input: CreateProjectInput) {
   const name = input.name.trim();

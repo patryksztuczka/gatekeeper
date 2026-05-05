@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 
 import { db } from '../src/db/client';
-import { members, projects, users } from '../src/db/schema';
+import { members, projectAssignments, projects, users } from '../src/db/schema';
 import { auth } from '../src/lib/auth';
 import { callTRPC } from './trpc-test-utils';
 
@@ -154,6 +154,17 @@ async function createProject(input: {
     updatedAt: now,
   });
 
+  if (input.projectOwnerMemberId) {
+    await db.insert(projectAssignments).values({
+      createdAt: now,
+      id: crypto.randomUUID(),
+      organizationMemberId: input.projectOwnerMemberId,
+      projectId: id,
+      role: 'project_owner',
+      updatedAt: now,
+    });
+  }
+
   return id;
 }
 
@@ -185,13 +196,13 @@ describe('Project detail API', () => {
     expect(response.status).toBe(401);
   });
 
-  it('loads a Project by organization-local slug for Organization members', async () => {
+  it('loads a Project by organization-local slug for assigned Organization members', async () => {
     const owner = await createSignedInOwner('project-detail-owner');
     const member = await addMemberToOrganization(owner.organization.id, 'project-detail-member');
 
     await createProject({
       organizationId: owner.organization.id,
-      projectOwnerMemberId: owner.member.id,
+      projectOwnerMemberId: member.memberId,
       slug: 'vendor-risk',
     });
 
@@ -203,16 +214,16 @@ describe('Project detail API', () => {
       description: 'Governance work for reviewing critical vendor risk.',
       slug: 'vendor-risk',
       projectOwner: {
-        email: owner.credentials.email,
-        name: owner.credentials.name,
-        role: 'owner',
+        email: member.credentials.email,
+        name: member.credentials.name,
+        role: 'member',
       },
     });
     expect(response.body.project?.createdAt).toBeTruthy();
     expect(response.body.project?.archivedAt).toBeNull();
   });
 
-  it('keeps archived Project detail URLs reachable for Organization members', async () => {
+  it('keeps archived Project detail URLs reachable for assigned Organization members', async () => {
     const owner = await createSignedInOwner('project-detail-archived-owner');
     const member = await addMemberToOrganization(
       owner.organization.id,
@@ -220,7 +231,7 @@ describe('Project detail API', () => {
     );
     const projectId = await createProject({
       organizationId: owner.organization.id,
-      projectOwnerMemberId: null,
+      projectOwnerMemberId: member.memberId,
       slug: 'archived-project',
     });
     const archivedAt = new Date();
@@ -259,6 +270,27 @@ describe('Project detail API', () => {
     await expect(
       getProjectDetail(outsider.headers, outsider.organization.slug, 'internal-controls'),
     ).resolves.toMatchObject({ body: { status: 'unavailable' }, status: 200 });
+  });
+
+  it('hides direct Project URLs from unassigned regular Organization members', async () => {
+    const owner = await createSignedInOwner('project-detail-unassigned-owner');
+    const member = await addMemberToOrganization(owner.organization.id, 'project-detail-unassigned');
+
+    await createProject({
+      organizationId: owner.organization.id,
+      projectOwnerMemberId: null,
+      slug: 'unassigned-project',
+    });
+
+    await expect(
+      getProjectDetail(member.headers, owner.organization.slug, 'unassigned-project'),
+    ).resolves.toMatchObject({ body: { status: 'unavailable' }, status: 200 });
+    await expect(
+      getProjectDetail(owner.headers, owner.organization.slug, 'unassigned-project'),
+    ).resolves.toMatchObject({
+      body: { project: { slug: 'unassigned-project' }, status: 'available' },
+      status: 200,
+    });
   });
 
   it('lets Organization owners edit Project settings without changing the slug', async () => {
