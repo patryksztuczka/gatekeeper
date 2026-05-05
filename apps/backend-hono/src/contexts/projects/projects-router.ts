@@ -5,6 +5,7 @@ import {
 } from '../identity-organization/organization-authorization';
 import {
   archiveProjectForMember,
+  createProjectAssignmentForMember,
   createProjectForMember,
   listProjectsForMember,
   projectAuthorizationActions,
@@ -15,6 +16,7 @@ import {
 } from './projects';
 import {
   projectCreateInput,
+  projectAssignmentCreateInput,
   projectIdentityInput,
   projectListInput,
   projectUpdateInput,
@@ -93,6 +95,31 @@ export const projectsRouter = router({
       toProjectInputError(caughtError);
     }
   }),
+
+  createAssignment: protectedProcedure
+    .input(projectAssignmentCreateInput)
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const membership = await authorizeOrganizationAction({
+          action: projectAuthorizationActions.createAssignment,
+          organizationSlug: input.organizationSlug,
+          userId: ctx.session.user.id,
+        });
+        const assignment = await createProjectAssignmentForMember({
+          assignment: input,
+          membership,
+          projectSlug: input.projectSlug,
+        });
+
+        if (!assignment) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Project unavailable' });
+        }
+
+        return { assignment };
+      } catch (caughtError) {
+        toProjectInputError(caughtError);
+      }
+    }),
 
   update: protectedProcedure.input(projectUpdateInput).mutation(async ({ ctx, input }) => {
     try {

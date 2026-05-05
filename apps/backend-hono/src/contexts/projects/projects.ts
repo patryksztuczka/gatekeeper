@@ -20,6 +20,11 @@ type UpdateProjectSettingsInput = {
   projectOwnerMemberId?: string | null;
 };
 
+type CreateProjectAssignmentInput = {
+  organizationMemberId: string;
+  role: 'project_contributor' | 'project_owner';
+};
+
 const projectManagerRoles = ['owner', 'admin'] as const;
 const projectSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const projectOwnerAssignmentRole = 'project_owner';
@@ -32,6 +37,10 @@ export const projectAuthorizationActions = {
   create: {
     allowedRoles: projectManagerRoles,
     deniedMessage: 'Only Organization owners and admins can create Projects.',
+  },
+  createAssignment: {
+    allowedRoles: projectManagerRoles,
+    deniedMessage: 'Only Organization owners and admins can create Project Assignments.',
   },
   listActive: {
     allowedRoles: 'any-member',
@@ -74,7 +83,14 @@ export async function listProjectsForMember(
       slug: projects.slug,
     })
     .from(projects)
-    .leftJoin(members, eq(projects.projectOwnerMemberId, members.id))
+    .leftJoin(
+      projectAssignments,
+      and(
+        eq(projectAssignments.projectId, projects.id),
+        eq(projectAssignments.role, projectOwnerAssignmentRole),
+      ),
+    )
+    .leftJoin(members, eq(projectAssignments.organizationMemberId, members.id))
     .leftJoin(users, eq(members.userId, users.id))
     .where(
       and(
@@ -148,25 +164,25 @@ export async function viewProjectForMember(
     }
   }
 
-  const projectOwner = project.projectOwnerMemberId
-    ? await db
-        .select({
-          email: users.email,
-          id: members.id,
-          name: users.name,
-          role: members.role,
-        })
-        .from(members)
-        .innerJoin(users, eq(users.id, members.userId))
-        .where(
-          and(
-            eq(members.id, project.projectOwnerMemberId),
-            eq(members.organizationId, membership.organizationId),
-          ),
-        )
-        .limit(1)
-        .then((rows) => rows[0] ?? null)
-    : null;
+  const projectOwner = await db
+    .select({
+      email: users.email,
+      id: members.id,
+      name: users.name,
+      role: members.role,
+    })
+    .from(projectAssignments)
+    .innerJoin(members, eq(projectAssignments.organizationMemberId, members.id))
+    .innerJoin(users, eq(users.id, members.userId))
+    .where(
+      and(
+        eq(projectAssignments.projectId, project.id),
+        eq(projectAssignments.role, projectOwnerAssignmentRole),
+        eq(members.organizationId, membership.organizationId),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
 
   return {
     id: project.id,
@@ -266,7 +282,12 @@ export async function createProjectForMember(
 }
 
 async function buildProjectAuditEventValues(input: {
-  action: 'project.created' | 'project.archived' | 'project.restored' | 'project.updated';
+  action:
+    | 'project.created'
+    | 'project.archived'
+    | 'project.restored'
+    | 'project.updated'
+    | 'project_assignment.created';
   membership: AuthorizedOrganizationMember;
   metadata?: unknown;
   project: {
@@ -286,6 +307,85 @@ async function buildProjectAuditEventValues(input: {
       type: 'project',
     },
   });
+}
+
+export async function createProjectAssignmentForMember(input: {
+  assignment: CreateProjectAssignmentInput;
+  membership: AuthorizedOrganizationMember;
+  projectSlug: string;
+}) {
+  const project = await db
+    .select({
+      archivedAt: projects.archivedAt,
+      id: projects.id,
+      name: projects.name,
+      slug: projects.slug,
+    })
+    .from(projects)
+    .where(
+      and(
+        eq(projects.organizationId, input.membership.organizationId),
+        eq(projects.slug, input.projectSlug),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (!project) {
+    return null;
+  }
+
+  if (project.archivedAt) {
+    throw new ProjectInputError('Project Assignments cannot be changed while a Project is archived.');
+  }
+
+  const organizationMember = await db
+    .select({ id: members.id })
+    .from(members)
+    .where(
+      and(
+        eq(members.id, input.assignment.organizationMemberId),
+        eq(members.organizationId, input.membership.organizationId),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  if (!organizationMember) {
+    throw new ProjectInputError('Project Assignment member must be a member of this Organization.');
+  }
+
+  const now = new Date();
+  const assignment = {
+    createdAt: now,
+    id: crypto.randomUUID(),
+    organizationMemberId: input.assignment.organizationMemberId,
+    projectId: project.id,
+    role: input.assignment.role,
+    updatedAt: now,
+  };
+
+  await db.batch([
+    db.insert(projectAssignments).values(assignment),
+    db.insert(auditEvents).values(
+      await buildProjectAuditEventValues({
+        action: 'project_assignment.created',
+        membership: input.membership,
+        metadata: {
+          organizationMemberId: assignment.organizationMemberId,
+          role: assignment.role,
+        },
+        project,
+      }),
+    ),
+  ]);
+
+  return {
+    id: assignment.id,
+    organizationMemberId: assignment.organizationMemberId,
+    projectId: assignment.projectId,
+    role: assignment.role,
+  };
 }
 
 export async function archiveProjectForMember(input: {
@@ -405,6 +505,26 @@ export async function updateProjectSettingsForMember(input: {
 
   await db.batch([
     db.update(projects).set(updatedProject).where(eq(projects.id, existingProject.id)),
+    db
+      .delete(projectAssignments)
+      .where(
+        and(
+          eq(projectAssignments.projectId, existingProject.id),
+          eq(projectAssignments.role, projectOwnerAssignmentRole),
+        ),
+      ),
+    ...(settings.projectOwnerMemberId
+      ? [
+          db.insert(projectAssignments).values({
+            createdAt: new Date(),
+            id: crypto.randomUUID(),
+            organizationMemberId: settings.projectOwnerMemberId,
+            projectId: existingProject.id,
+            role: projectOwnerAssignmentRole,
+            updatedAt: new Date(),
+          }),
+        ]
+      : []),
     db.insert(auditEvents).values(
       await buildProjectAuditEventValues({
         action: 'project.updated',

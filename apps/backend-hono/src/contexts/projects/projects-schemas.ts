@@ -21,3 +21,8 @@ export const projectUpdateInput = projectIdentityInput.extend({
   name: z.string(),
   projectOwnerMemberId: z.string().nullable().optional(),
 });
+
+export const projectAssignmentCreateInput = projectIdentityInput.extend({
+  organizationMemberId: z.string().min(1),
+  role: z.enum(['project_owner', 'project_contributor']),
+});
