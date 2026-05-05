@@ -298,6 +298,80 @@ describe('organization projects', () => {
     });
   });
 
+  it('records an Audit Event when an Organization owner archives a Project', async () => {
+    const { headers, organization } = await createSignedInOwner('project-audit-archive-owner');
+
+    const createResponse = await createProjectRequest(organization.slug, headers, {
+      description: 'Archive audit work.',
+      name: 'Archive Audit Project',
+      slug: 'archive-audit-project',
+    });
+
+    expect(createResponse.status).toBe(201);
+
+    const archiveResponse = await archiveProjectRequest(
+      organization.slug,
+      'archive-audit-project',
+      headers,
+    );
+
+    expect(archiveResponse.status).toBe(200);
+
+    const listResponse = await listAuditEventsRequest(organization.slug, headers);
+
+    expect(listResponse.status).toBe(200);
+    expect(listResponse.body.auditEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: 'project.archived',
+          actorType: 'organization_member',
+          targetDisplayName: 'Archive Audit Project',
+          targetId: createResponse.body.project.id,
+          targetSecondaryLabel: 'archive-audit-project',
+          targetType: 'project',
+        }),
+      ]),
+    );
+  });
+
+  it('records an Audit Event when an Organization owner restores a Project', async () => {
+    const { headers, organization } = await createSignedInOwner('project-audit-restore-owner');
+
+    const createResponse = await createProjectRequest(organization.slug, headers, {
+      description: 'Restore audit work.',
+      name: 'Restore Audit Project',
+      slug: 'restore-audit-project',
+    });
+
+    expect(createResponse.status).toBe(201);
+
+    await archiveProjectRequest(organization.slug, 'restore-audit-project', headers);
+
+    const restoreResponse = await restoreProjectRequest(
+      organization.slug,
+      'restore-audit-project',
+      headers,
+    );
+
+    expect(restoreResponse.status).toBe(200);
+
+    const listResponse = await listAuditEventsRequest(organization.slug, headers);
+
+    expect(listResponse.status).toBe(200);
+    expect(listResponse.body.auditEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: 'project.restored',
+          actorType: 'organization_member',
+          targetDisplayName: 'Restore Audit Project',
+          targetId: createResponse.body.project.id,
+          targetSecondaryLabel: 'restore-audit-project',
+          targetType: 'project',
+        }),
+      ]),
+    );
+  });
+
   it('prevents members from creating Projects but allows them to list active Projects', async () => {
     const { headers: ownerHeaders, organization } =
       await createSignedInOwner('project-member-owner');

@@ -187,13 +187,6 @@ export async function createProjectForMember(
     }
   }
 
-  const actorMembership = await db
-    .select({ userId: members.userId })
-    .from(members)
-    .where(eq(members.id, membership.id))
-    .limit(1)
-    .then((rows) => rows[0]);
-
   const now = new Date();
   const project = {
     createdAt: now,
@@ -208,21 +201,50 @@ export async function createProjectForMember(
 
   await db.batch([
     db.insert(projects).values(project),
-    db.insert(auditEvents).values({
-      action: 'project.created',
-      actorOrganizationMemberId: membership.id,
-      actorType: 'organization_member',
-      actorUserId: actorMembership?.userId,
-      id: crypto.randomUUID(),
-      organizationId: membership.organizationId,
-      targetDisplayName: project.name,
-      targetId: project.id,
-      targetSecondaryLabel: project.slug,
-      targetType: 'project',
-    }),
+    db.insert(auditEvents).values(
+      await buildProjectAuditEventValues({
+        action: 'project.created',
+        membership,
+        project: {
+          id: project.id,
+          name: project.name,
+          slug: project.slug,
+        },
+      }),
+    ),
   ]);
 
   return (await listProjectsForMember(membership, 'active')).find(({ id }) => id === project.id)!;
+}
+
+async function buildProjectAuditEventValues(input: {
+  action: 'project.created' | 'project.archived' | 'project.restored';
+  membership: AuthorizedOrganizationMember;
+  project: {
+    id: string;
+    name: string;
+    slug: string;
+  };
+}) {
+  const actorMembership = await db
+    .select({ userId: members.userId })
+    .from(members)
+    .where(eq(members.id, input.membership.id))
+    .limit(1)
+    .then((rows) => rows[0]);
+
+  return {
+    action: input.action,
+    actorOrganizationMemberId: input.membership.id,
+    actorType: 'organization_member',
+    actorUserId: actorMembership?.userId,
+    id: crypto.randomUUID(),
+    organizationId: input.membership.organizationId,
+    targetDisplayName: input.project.name,
+    targetId: input.project.id,
+    targetSecondaryLabel: input.project.slug,
+    targetType: 'project',
+  };
 }
 
 export async function archiveProjectForMember(input: {
@@ -245,7 +267,11 @@ async function setProjectArchivedForMember(input: {
   projectSlug: string;
 }) {
   const existingProject = await db
-    .select({ id: projects.id })
+    .select({
+      id: projects.id,
+      name: projects.name,
+      slug: projects.slug,
+    })
     .from(projects)
     .where(
       and(
@@ -260,13 +286,22 @@ async function setProjectArchivedForMember(input: {
     return null;
   }
 
-  await db
-    .update(projects)
-    .set({
-      archivedAt: input.archived ? new Date() : null,
-      updatedAt: new Date(),
-    })
-    .where(eq(projects.id, existingProject.id));
+  await db.batch([
+    db
+      .update(projects)
+      .set({
+        archivedAt: input.archived ? new Date() : null,
+        updatedAt: new Date(),
+      })
+      .where(eq(projects.id, existingProject.id)),
+    db.insert(auditEvents).values(
+      await buildProjectAuditEventValues({
+        action: input.archived ? 'project.archived' : 'project.restored',
+        membership: input.membership,
+        project: existingProject,
+      }),
+    ),
+  ]);
 
   return viewProjectForMember(input.membership, input.projectSlug);
 }
