@@ -1,0 +1,23 @@
+apps/backend-hono/src/contexts/checklists/checklists.ts
+  18b0fc23cfed083e 227-253,450-477,626-645,681,755-775,923-924,933,955-975,1029,1031-1054,1081-1085,1087,1102-1104,1113-1142,1157,1159,1169,1193-1194,1196,1220-1237,1239-1256,1347,1349
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "85b8571ac2500a0335d051b8a483f991abbeaff0",
+  "prompts": {
+    "18b0fc23cfed083e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019df530-424d-7852-9bcd-902507284f0b",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Patryk Sztuczka",
+      "messages": [],
+      "total_additions": 229,
+      "total_deletions": 60,
+      "accepted_lines": 229,
+      "overriden_lines": 0
+    }
+  }
+}
