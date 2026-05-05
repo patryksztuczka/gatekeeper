@@ -327,6 +327,117 @@ describe('organization projects', () => {
     });
   });
 
+  it('records Audit Events for Project Assignment creation, role changes, and removal', async () => {
+    const { headers: ownerHeaders, organization } = await createSignedInOwner(
+      'project-assignment-audit-owner',
+    );
+    const member = createCredentials('project-assignment-audit-member');
+
+    await signUpUser(member);
+
+    const invitation = await auth.api.createInvitation({
+      body: {
+        email: member.email,
+        organizationId: organization.id,
+        role: 'member',
+      },
+      headers: ownerHeaders,
+    });
+    const memberHeaders = await signInUser(member);
+
+    await auth.api.acceptInvitation({
+      body: { invitationId: invitation.id },
+      headers: memberHeaders,
+    });
+
+    const membersResponse = await listOrganizationMembersRequest(organization.slug, ownerHeaders);
+    const assignedMember = membersResponse.body.members.find(
+      (organizationMember: { email: string }) => organizationMember.email === member.email,
+    ) as { id: string } | undefined;
+
+    expect(assignedMember?.id).toBeTruthy();
+
+    const projectResponse = await createProjectRequest(organization.slug, ownerHeaders, {
+      description: 'Assignment audit governance work.',
+      name: 'Assignment Audit',
+      slug: 'assignment-audit',
+    });
+    const createAssignmentResponse = await createProjectAssignmentRequest(
+      organization.slug,
+      'assignment-audit',
+      ownerHeaders,
+      {
+        organizationMemberId: assignedMember?.id ?? '',
+        role: 'project_contributor',
+      },
+    );
+
+    expect(createAssignmentResponse.status).toBe(201);
+
+    const updateAssignmentResponse = await updateProjectAssignmentRequest(
+      organization.slug,
+      'assignment-audit',
+      ownerHeaders,
+      {
+        assignmentId: createAssignmentResponse.body.assignment.id,
+        role: 'project_owner',
+      },
+    );
+    const removeAssignmentResponse = await removeProjectAssignmentRequest(
+      organization.slug,
+      'assignment-audit',
+      ownerHeaders,
+      createAssignmentResponse.body.assignment.id,
+    );
+
+    expect(updateAssignmentResponse.status).toBe(200);
+    expect(removeAssignmentResponse.status).toBe(200);
+
+    const auditResponse = await listAuditEventsRequest(organization.slug, ownerHeaders, {
+      targetId: projectResponse.body.project.id,
+      targetType: 'project',
+    });
+
+    expect(auditResponse.status).toBe(200);
+    expect(auditResponse.body.auditEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: 'project_assignment.created',
+          metadata: {
+            organizationMemberId: assignedMember?.id,
+            role: 'project_contributor',
+          },
+          targetId: projectResponse.body.project.id,
+          targetSecondaryLabel: 'assignment-audit',
+          targetType: 'project',
+        }),
+        expect.objectContaining({
+          action: 'project_assignment.role_changed',
+          metadata: {
+            organizationMemberId: assignedMember?.id,
+            role: {
+              from: 'project_contributor',
+              to: 'project_owner',
+            },
+          },
+          targetId: projectResponse.body.project.id,
+          targetSecondaryLabel: 'assignment-audit',
+          targetType: 'project',
+        }),
+        expect.objectContaining({
+          action: 'project_assignment.removed',
+          metadata: {
+            organizationMemberId: assignedMember?.id,
+            role: 'project_owner',
+          },
+          targetId: projectResponse.body.project.id,
+          targetSecondaryLabel: 'assignment-audit',
+          targetType: 'project',
+        }),
+      ]),
+    );
+  });
+
   it('filters and bounds Organization Audit Events for read clients', async () => {
     const { headers, organization } = await createSignedInOwner('project-audit-filter-owner');
 
