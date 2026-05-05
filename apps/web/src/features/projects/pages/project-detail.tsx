@@ -188,7 +188,7 @@ export function ProjectDetailPage() {
         currentMemberId={projectAccess.currentMemberId}
         organizationSlug={organizationSlug}
         projectArchived={Boolean(project.archivedAt)}
-        projectOwnerMemberId={project.projectOwner?.id ?? null}
+        projectOwnerAssignmentMemberId={project.projectOwner?.id ?? null}
         projectSlug={project.slug}
       />
     </div>

@@ -6,18 +6,17 @@ type ProjectListStatus = 'active' | 'archived';
 type ProjectCreateValues = {
   description: string;
   name: string;
-  projectOwnerMemberId?: string | null;
   slug: string;
 };
 
 type ProjectSettingsValues = {
   description: string;
   name: string;
-  projectOwnerMemberId?: string | null;
 };
 
 type ProjectMutationResult = RouterOutputs['projects']['create'];
 type ProjectUpdateResult = RouterOutputs['projects']['update'];
+type ProjectAssignmentRole = 'project_contributor' | 'project_owner';
 
 export function canManageProjects(role: string | null) {
   return role === 'owner' || role === 'admin';
@@ -113,7 +112,6 @@ export function useCreateProject(input: {
         description: values.description,
         name: values.name,
         organizationSlug: input.organizationSlug,
-        projectOwnerMemberId: values.projectOwnerMemberId || null,
         slug: values.slug,
       });
     },
@@ -148,9 +146,81 @@ export function useProjectSettingsMutation(input: {
         description: values.description,
         name: values.name,
         organizationSlug: input.organizationSlug,
-        projectOwnerMemberId: values.projectOwnerMemberId || null,
         projectSlug: input.projectSlug,
       });
+    },
+  };
+}
+
+export function useProjectAssignments(input: {
+  organizationSlug: string | undefined;
+  projectSlug: string | undefined;
+}) {
+  const hasProjectIdentity = Boolean(input.organizationSlug && input.projectSlug);
+
+  return useQuery(
+    trpc.projects.assignments.queryOptions(
+      { organizationSlug: input.organizationSlug ?? '', projectSlug: input.projectSlug ?? '' },
+      { enabled: hasProjectIdentity },
+    ),
+  );
+}
+
+export function useProjectAssignmentActions(input: {
+  onError?: (message: string) => void;
+  onSuccess?: (message: string) => void;
+  organizationSlug: string | undefined;
+  projectSlug: string | undefined;
+}) {
+  const createMutation = useMutation(
+    trpc.projects.createAssignment.mutationOptions({
+      onError: (caughtError) => input.onError?.(caughtError.message),
+      onSuccess: () => {
+        void queryClient.invalidateQueries();
+        input.onSuccess?.('Project Assignment added.');
+      },
+    }),
+  );
+  const updateMutation = useMutation(
+    trpc.projects.updateAssignment.mutationOptions({
+      onError: (caughtError) => input.onError?.(caughtError.message),
+      onSuccess: () => {
+        void queryClient.invalidateQueries();
+        input.onSuccess?.('Project Assignment updated.');
+      },
+    }),
+  );
+  const removeMutation = useMutation(
+    trpc.projects.removeAssignment.mutationOptions({
+      onError: (caughtError) => input.onError?.(caughtError.message),
+      onSuccess: () => {
+        void queryClient.invalidateQueries();
+        input.onSuccess?.('Project Assignment removed.');
+      },
+    }),
+  );
+
+  const basePayload =
+    input.organizationSlug && input.projectSlug
+      ? { organizationSlug: input.organizationSlug, projectSlug: input.projectSlug }
+      : null;
+
+  return {
+    addAssignment: (organizationMemberId: string, role: ProjectAssignmentRole) => {
+      if (!basePayload || !organizationMemberId) return;
+
+      createMutation.mutate({ ...basePayload, organizationMemberId, role });
+    },
+    isPending: createMutation.isPending || updateMutation.isPending || removeMutation.isPending,
+    removeAssignment: (assignmentId: string) => {
+      if (!basePayload) return;
+
+      removeMutation.mutate({ ...basePayload, assignmentId });
+    },
+    updateAssignmentRole: (assignmentId: string, role: ProjectAssignmentRole) => {
+      if (!basePayload) return;
+
+      updateMutation.mutate({ ...basePayload, assignmentId, role });
     },
   };
 }
