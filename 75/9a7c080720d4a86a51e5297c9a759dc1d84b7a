@@ -1,0 +1,29 @@
+apps/backend-hono/src/contexts/projects/CONTEXT.md
+  0e40d9485efe6414 15-26,44-57,60-63,65-85,94-102,112-113
+CONTEXT-MAP.md
+  0e40d9485efe6414 8,19
+apps/backend-hono/src/contexts/projects/docs/adr/0001-project-assignments-and-owner-role.md
+  0e40d9485efe6414 1-25
+apps/backend-hono/src/contexts/checklists/CONTEXT.md
+  0e40d9485efe6414 117,128
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "759a7c080720d4a86a51e5297c9a759dc1d84b7a",
+  "prompts": {
+    "0e40d9485efe6414": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019df762-44c2-71c1-9168-f659dc93f6b8",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Patryk Sztuczka",
+      "messages": [],
+      "total_additions": 616,
+      "total_deletions": 15,
+      "accepted_lines": 610,
+      "overriden_lines": 0
+    }
+  }
+}
