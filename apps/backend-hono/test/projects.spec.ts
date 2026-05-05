@@ -118,8 +118,23 @@ async function listOrganizationMembersRequest(organizationSlug: string, headers:
   return callTRPC(headers, (caller) => caller.organizations.members({ organizationSlug }));
 }
 
-async function listAuditEventsRequest(organizationSlug: string, headers: Headers) {
-  return callTRPC(headers, (caller) => caller.auditLog.list({ organizationSlug }));
+async function listAuditEventsRequest(
+  organizationSlug: string,
+  headers: Headers,
+  filters?: {
+    action?: string;
+    limit?: number;
+    offset?: number;
+    targetId?: string;
+    targetType?: string;
+  },
+) {
+  return callTRPC(headers, (caller) =>
+    caller.auditLog.list({
+      organizationSlug,
+      ...filters,
+    }),
+  );
 }
 
 beforeEach(() => {
@@ -258,6 +273,57 @@ describe('organization projects', () => {
           targetType: 'project',
         },
       ],
+    });
+  });
+
+  it('filters and bounds Organization Audit Events for read clients', async () => {
+    const { headers, organization } = await createSignedInOwner('project-audit-filter-owner');
+
+    const firstProjectResponse = await createProjectRequest(organization.slug, headers, {
+      description: 'First audit filter work.',
+      name: 'First Audit Filter Project',
+      slug: 'first-audit-filter-project',
+    });
+    const secondProjectResponse = await createProjectRequest(organization.slug, headers, {
+      description: 'Second audit filter work.',
+      name: 'Second Audit Filter Project',
+      slug: 'second-audit-filter-project',
+    });
+
+    expect(firstProjectResponse.status).toBe(201);
+    expect(secondProjectResponse.status).toBe(201);
+
+    const targetFilteredResponse = await listAuditEventsRequest(organization.slug, headers, {
+      targetId: firstProjectResponse.body.project.id,
+      targetType: 'project',
+    });
+    const limitedResponse = await listAuditEventsRequest(organization.slug, headers, {
+      action: 'project.created',
+      limit: 1,
+    });
+    const offsetResponse = await listAuditEventsRequest(organization.slug, headers, {
+      action: 'project.created',
+      limit: 1,
+      offset: 1,
+    });
+
+    expect(targetFilteredResponse.status).toBe(200);
+    expect(targetFilteredResponse.body.auditEvents).toEqual([
+      expect.objectContaining({
+        action: 'project.created',
+        targetId: firstProjectResponse.body.project.id,
+        targetType: 'project',
+      }),
+    ]);
+    expect(limitedResponse.body.auditEvents).toHaveLength(1);
+    expect(limitedResponse.body.auditEvents[0]).toMatchObject({
+      action: 'project.created',
+      targetId: secondProjectResponse.body.project.id,
+    });
+    expect(offsetResponse.body.auditEvents).toHaveLength(1);
+    expect(offsetResponse.body.auditEvents[0]).toMatchObject({
+      action: 'project.created',
+      targetId: firstProjectResponse.body.project.id,
     });
   });
 
@@ -429,6 +495,8 @@ describe('organization projects', () => {
         projectOwner: {
           from: null,
           to: {
+            displayName: 'project-audit-update-owner user',
+            email: expect.stringContaining('project-audit-update-owner-'),
             organizationMemberId: ownerMembership.id,
           },
         },

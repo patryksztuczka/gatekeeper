@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, isNotNull, isNull, ne } from 'drizzle-orm';
 import { db } from '../../db/client';
 import {
+  auditEvents,
   checklistItems,
   checklistTemplateControls,
   checklistTemplates,
@@ -10,6 +11,7 @@ import {
   projects,
 } from '../../db/schema';
 import type { AuthorizedOrganizationMember } from '../../types/organization-types';
+import { buildOrganizationMemberAuditEvent } from '../audit-log/audit-events';
 import type { OrganizationAuthorizationPolicy } from '../identity-organization/organization-authorization';
 
 type CreateProjectChecklistInput = {
@@ -136,22 +138,36 @@ export async function createChecklistTemplateForMember(
   const now = new Date();
   const checklistTemplateId = crypto.randomUUID();
 
-  await db.insert(checklistTemplates).values({
-    createdAt: now,
-    id: checklistTemplateId,
-    name: body.name.trim(),
-    organizationId: membership.organizationId,
-    updatedAt: now,
-  });
+  const templateName = body.name.trim();
 
-  await db.insert(checklistTemplateControls).values(
-    selectedControls.map((control) => ({
-      checklistTemplateId,
-      controlId: control.controlId,
+  await db.batch([
+    db.insert(checklistTemplates).values({
       createdAt: now,
-      id: crypto.randomUUID(),
-    })),
-  );
+      id: checklistTemplateId,
+      name: templateName,
+      organizationId: membership.organizationId,
+      updatedAt: now,
+    }),
+    db.insert(checklistTemplateControls).values(
+      selectedControls.map((control) => ({
+        checklistTemplateId,
+        controlId: control.controlId,
+        createdAt: now,
+        id: crypto.randomUUID(),
+      })),
+    ),
+    db.insert(auditEvents).values(
+      await buildOrganizationMemberAuditEvent({
+        action: 'checklist_template.created',
+        membership,
+        target: {
+          displayName: templateName,
+          id: checklistTemplateId,
+          type: 'checklist_template',
+        },
+      }),
+    ),
+  ]);
 
   const checklistTemplate = await getChecklistTemplateDetail(membership, checklistTemplateId);
 
@@ -303,27 +319,42 @@ export async function createProjectChecklistForMember(
   const now = new Date();
   const projectChecklistId = crypto.randomUUID();
 
-  await db.insert(projectChecklists).values({
-    createdAt: now,
-    id: projectChecklistId,
-    name: body.name.trim(),
-    projectId: project.id,
-    sourceChecklistTemplateId: controlSource.checklistTemplateId,
-    updatedAt: now,
-  });
+  const projectChecklistName = body.name.trim();
 
-  await db.insert(checklistItems).values(
-    selectedControls.map((control) => ({
-      checked: false,
-      controlId: control.controlId,
-      controlVersionId: control.controlVersionId,
+  await db.batch([
+    db.insert(projectChecklists).values({
       createdAt: now,
-      id: crypto.randomUUID(),
-      projectChecklistId,
-      status: 'active',
+      id: projectChecklistId,
+      name: projectChecklistName,
+      projectId: project.id,
+      sourceChecklistTemplateId: controlSource.checklistTemplateId,
       updatedAt: now,
-    })),
-  );
+    }),
+    db.insert(checklistItems).values(
+      selectedControls.map((control) => ({
+        checked: false,
+        controlId: control.controlId,
+        controlVersionId: control.controlVersionId,
+        createdAt: now,
+        id: crypto.randomUUID(),
+        projectChecklistId,
+        status: 'active',
+        updatedAt: now,
+      })),
+    ),
+    db.insert(auditEvents).values(
+      await buildOrganizationMemberAuditEvent({
+        action: 'project_checklist.created',
+        membership,
+        target: {
+          displayName: projectChecklistName,
+          id: projectChecklistId,
+          secondaryLabel: project.slug,
+          type: 'project_checklist',
+        },
+      }),
+    ),
+  ]);
 
   return getProjectChecklistDetail({
     membership,
@@ -732,6 +763,9 @@ export async function setChecklistItemCheckedForMember(
   const checklistItem = await db
     .select({
       archivedAt: projectChecklists.archivedAt,
+      checked: checklistItems.checked,
+      controlCode: controlVersions.controlCode,
+      controlTitle: controlVersions.title,
       itemStatus: checklistItems.status,
       projectArchivedAt: projects.archivedAt,
       projectChecklistId: projectChecklists.id,
@@ -741,6 +775,7 @@ export async function setChecklistItemCheckedForMember(
     .from(checklistItems)
     .innerJoin(projectChecklists, eq(checklistItems.projectChecklistId, projectChecklists.id))
     .innerJoin(projects, eq(projectChecklists.projectId, projects.id))
+    .innerJoin(controlVersions, eq(checklistItems.controlVersionId, controlVersions.id))
     .where(
       and(
         eq(checklistItems.id, input.checklistItemId),
@@ -766,13 +801,35 @@ export async function setChecklistItemCheckedForMember(
     throw new ChecklistInputError('Only active Checklist Items can be checked or unchecked.');
   }
 
-  await db
-    .update(checklistItems)
-    .set({
-      checked: input.checked,
-      updatedAt: new Date(),
-    })
-    .where(eq(checklistItems.id, input.checklistItemId));
+  await db.batch([
+    db
+      .update(checklistItems)
+      .set({
+        checked: input.checked,
+        updatedAt: new Date(),
+      })
+      .where(eq(checklistItems.id, input.checklistItemId)),
+    db.insert(auditEvents).values(
+      await buildOrganizationMemberAuditEvent({
+        action: input.checked ? 'checklist_item.checked' : 'checklist_item.unchecked',
+        membership,
+        metadata: {
+          changes: {
+            checked: {
+              from: checklistItem.checked,
+              to: input.checked,
+            },
+          },
+        },
+        target: {
+          displayName: checklistItem.controlTitle,
+          id: input.checklistItemId,
+          secondaryLabel: checklistItem.controlCode,
+          type: 'checklist_item',
+        },
+      }),
+    ),
+  ]);
 
   return getProjectChecklistDetail({
     membership,

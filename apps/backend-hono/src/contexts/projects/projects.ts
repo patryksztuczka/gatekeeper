@@ -363,7 +363,7 @@ export async function updateProjectSettingsForMember(input: {
         action: 'project.updated',
         membership: input.membership,
         metadata: {
-          changes: buildProjectUpdateAuditDeltas({
+          changes: await buildProjectUpdateAuditDeltas({
             after: updatedProject,
             before: existingProject,
           }),
@@ -380,7 +380,7 @@ export async function updateProjectSettingsForMember(input: {
   return viewProjectForMember(input.membership, input.projectSlug);
 }
 
-function buildProjectUpdateAuditDeltas(input: {
+async function buildProjectUpdateAuditDeltas(input: {
   after: {
     description: string;
     name: string;
@@ -413,15 +413,31 @@ function buildProjectUpdateAuditDeltas(input: {
       ? {}
       : {
           projectOwner: {
-            from: input.before.projectOwnerMemberId
-              ? { organizationMemberId: input.before.projectOwnerMemberId }
-              : null,
-            to: input.after.projectOwnerMemberId
-              ? { organizationMemberId: input.after.projectOwnerMemberId }
-              : null,
+            from: await getProjectOwnerAuditLabel(input.before.projectOwnerMemberId),
+            to: await getProjectOwnerAuditLabel(input.after.projectOwnerMemberId),
           },
         }),
   };
+}
+
+async function getProjectOwnerAuditLabel(organizationMemberId: string | null) {
+  if (!organizationMemberId) {
+    return null;
+  }
+
+  const member = await db
+    .select({
+      displayName: users.name,
+      email: users.email,
+      organizationMemberId: members.id,
+    })
+    .from(members)
+    .innerJoin(users, eq(users.id, members.userId))
+    .where(eq(members.id, organizationMemberId))
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+
+  return member ?? { organizationMemberId };
 }
 
 export function slugifyProjectName(value: string) {

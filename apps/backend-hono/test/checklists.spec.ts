@@ -484,6 +484,10 @@ async function enforceArchivedControl(input: {
   );
 }
 
+async function listAuditEvents(organizationSlug: string, headers: Headers) {
+  return callTRPC(headers, (caller) => caller.auditLog.list({ organizationSlug }));
+}
+
 beforeEach(() => {
   const originalFetch = globalThis.fetch;
 
@@ -668,6 +672,98 @@ describe('Project Checklists', () => {
     expect(uncheckedResponse.body.projectChecklist).toMatchObject({
       isComplete: false,
       items: [expect.objectContaining({ checked: false, id: checklistItemId })],
+    });
+  });
+
+  it('records Audit Events for Checklist creation and Checklist Item state changes', async () => {
+    const { headers: ownerHeaders, organization } =
+      await createSignedInOwner('checklist-audit-owner');
+    const projectOwner = await createSignedInMember({
+      organizationId: organization.id,
+      ownerHeaders,
+      prefix: 'checklist-audit-project-owner',
+      role: 'member',
+    });
+    const project = await createProject({
+      headers: ownerHeaders,
+      organizationSlug: organization.slug,
+      projectOwnerMemberId: projectOwner.membership.id,
+    });
+    const control = await createActiveControl({
+      headers: ownerHeaders,
+      organizationSlug: organization.slug,
+      title: 'Verify audited checklist state',
+    });
+
+    const templateResponse = await createChecklistTemplate({
+      controlIds: [control.id],
+      headers: ownerHeaders,
+      name: 'Audited checklist template',
+      organizationSlug: organization.slug,
+    });
+    const checklistTemplate = templateResponse.body.checklistTemplate;
+    const checklistResponse = await createProjectChecklist({
+      checklistTemplateId: checklistTemplate.id,
+      headers: ownerHeaders,
+      name: 'Audited project checklist',
+      organizationSlug: organization.slug,
+      projectSlug: project.slug,
+    });
+    const projectChecklist = checklistResponse.body.projectChecklist;
+    const checklistItem = projectChecklist.items[0];
+
+    expect(checklistItem?.id).toBeTruthy();
+
+    if (!checklistItem?.id) {
+      throw new Error('Expected a Checklist Item.');
+    }
+
+    await setChecklistItemChecked({
+      checked: true,
+      checklistItemId: checklistItem.id,
+      headers: projectOwner.headers,
+      organizationSlug: organization.slug,
+    });
+    await setChecklistItemChecked({
+      checked: false,
+      checklistItemId: checklistItem.id,
+      headers: projectOwner.headers,
+      organizationSlug: organization.slug,
+    });
+
+    await expect(listAuditEvents(organization.slug, ownerHeaders)).resolves.toMatchObject({
+      body: {
+        auditEvents: expect.arrayContaining([
+          expect.objectContaining({
+            action: 'checklist_template.created',
+            targetDisplayName: 'Audited checklist template',
+            targetId: checklistTemplate.id,
+            targetType: 'checklist_template',
+          }),
+          expect.objectContaining({
+            action: 'project_checklist.created',
+            targetDisplayName: 'Audited project checklist',
+            targetId: projectChecklist.id,
+            targetSecondaryLabel: project.slug,
+            targetType: 'project_checklist',
+          }),
+          expect.objectContaining({
+            action: 'checklist_item.checked',
+            targetDisplayName: 'Verify audited checklist state',
+            targetId: checklistItem.id,
+            targetSecondaryLabel: control.controlCode,
+            targetType: 'checklist_item',
+          }),
+          expect.objectContaining({
+            action: 'checklist_item.unchecked',
+            targetDisplayName: 'Verify audited checklist state',
+            targetId: checklistItem.id,
+            targetSecondaryLabel: control.controlCode,
+            targetType: 'checklist_item',
+          }),
+        ]),
+      },
+      status: 200,
     });
   });
 

@@ -1,4 +1,4 @@
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { db } from '../../db/client';
 import { auditEvents } from '../../db/schema';
 import type { OrganizationAuthorizationPolicy } from '../identity-organization/organization-authorization';
@@ -13,12 +13,30 @@ export const auditLogAuthorizationActions = {
   },
 } satisfies Record<string, OrganizationAuthorizationPolicy>;
 
-export async function listAuditEventsForViewer(membership: AuthorizedOrganizationMember) {
+export async function listAuditEventsForViewer(
+  membership: AuthorizedOrganizationMember,
+  filters: {
+    action?: string;
+    limit: number;
+    offset: number;
+    targetId?: string;
+    targetType?: string;
+  },
+) {
   const rows = await db
     .select()
     .from(auditEvents)
-    .where(eq(auditEvents.organizationId, membership.organizationId))
-    .orderBy(desc(auditEvents.occurredAt));
+    .where(
+      and(
+        eq(auditEvents.organizationId, membership.organizationId),
+        filters.action ? eq(auditEvents.action, filters.action) : undefined,
+        filters.targetId ? eq(auditEvents.targetId, filters.targetId) : undefined,
+        filters.targetType ? eq(auditEvents.targetType, filters.targetType) : undefined,
+      ),
+    )
+    .orderBy(desc(auditEvents.occurredAt))
+    .limit(filters.limit)
+    .offset(filters.offset);
 
   return rows.map(({ metadata, occurredAt, ...auditEvent }) => ({
     ...auditEvent,

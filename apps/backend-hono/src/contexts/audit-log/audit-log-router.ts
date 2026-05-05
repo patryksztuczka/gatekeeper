@@ -1,11 +1,11 @@
 import { TRPCError } from '@trpc/server';
 import { protectedProcedure, router } from '../../trpc/core';
-import { organizationSlugInput } from '../identity-organization/organization-schemas';
 import {
   authorizeOrganizationAction,
   OrganizationAuthorizationError,
 } from '../identity-organization/organization-authorization';
 import { auditLogAuthorizationActions, listAuditEventsForViewer } from './audit-log';
+import { auditLogListInput } from './audit-log-schemas';
 
 function toAuditLogError(caughtError: unknown): never {
   if (caughtError instanceof OrganizationAuthorizationError) {
@@ -19,7 +19,7 @@ function toAuditLogError(caughtError: unknown): never {
 }
 
 export const auditLogRouter = router({
-  list: protectedProcedure.input(organizationSlugInput).query(async ({ ctx, input }) => {
+  list: protectedProcedure.input(auditLogListInput).query(async ({ ctx, input }) => {
     try {
       const membership = await authorizeOrganizationAction({
         action: auditLogAuthorizationActions.list,
@@ -28,7 +28,13 @@ export const auditLogRouter = router({
       });
 
       return {
-        auditEvents: await listAuditEventsForViewer(membership),
+        auditEvents: await listAuditEventsForViewer(membership, {
+          action: input.action,
+          limit: input.limit,
+          offset: input.offset,
+          targetId: input.targetId,
+          targetType: input.targetType,
+        }),
       };
     } catch (caughtError) {
       toAuditLogError(caughtError);
