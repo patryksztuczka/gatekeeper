@@ -144,7 +144,15 @@ const router = createBrowserRouter([
                       return { Component: ProjectSettingsPage };
                     },
                   },
-                  ...['exceptions', 'audit'].map((path) => ({
+                  {
+                    path: 'audit',
+                    lazy: async () => {
+                      const { AuditLogPage } =
+                        await import('../features/audit-log/pages/audit-log');
+                      return { Component: AuditLogPage };
+                    },
+                  },
+                  ...['exceptions'].map((path) => ({
                     path,
                     lazy: async () => {
                       const { StaticAppPage } =

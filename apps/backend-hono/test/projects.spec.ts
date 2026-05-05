@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { db } from '../src/db/client';
-import { members, projects, users } from '../src/db/schema';
+import { auditEvents, members, projects, users } from '../src/db/schema';
 import { auth } from '../src/lib/auth';
 import { callTRPC } from './trpc-test-utils';
 
@@ -118,6 +118,25 @@ async function listOrganizationMembersRequest(organizationSlug: string, headers:
   return callTRPC(headers, (caller) => caller.organizations.members({ organizationSlug }));
 }
 
+async function listAuditEventsRequest(
+  organizationSlug: string,
+  headers: Headers,
+  filters?: {
+    action?: string;
+    limit?: number;
+    offset?: number;
+    targetId?: string;
+    targetType?: string;
+  },
+) {
+  return callTRPC(headers, (caller) =>
+    caller.auditLog.list({
+      organizationSlug,
+      ...filters,
+    }),
+  );
+}
+
 beforeEach(() => {
   const originalFetch = globalThis.fetch;
 
@@ -178,6 +197,310 @@ describe('organization projects', () => {
           slug: 'soc-2-readiness',
         },
       ],
+    });
+  });
+
+  it('records an Audit Event when an Organization owner creates a Project', async () => {
+    const { headers, organization } = await createSignedInOwner('project-audit-owner');
+    const ownerMembership = await db
+      .select({ id: members.id, userId: members.userId })
+      .from(members)
+      .where(eq(members.organizationId, organization.id))
+      .limit(1)
+      .then((rows) => rows[0]);
+
+    expect(ownerMembership?.id).toBeTruthy();
+
+    if (!ownerMembership?.id) {
+      throw new Error('Expected an owner membership.');
+    }
+
+    const createResponse = await createProjectRequest(organization.slug, headers, {
+      description: 'Governance launch work.',
+      name: 'Governance Launch',
+      projectOwnerMemberId: ownerMembership.id,
+      slug: 'governance-launch',
+    });
+
+    expect(createResponse.status).toBe(201);
+
+    const [auditEvent] = await db
+      .select()
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.organizationId, organization.id),
+          eq(auditEvents.action, 'project.created'),
+        ),
+      );
+
+    expect(auditEvent).toMatchObject({
+      actorOrganizationMemberId: ownerMembership.id,
+      actorType: 'organization_member',
+      actorUserId: ownerMembership.userId,
+      organizationId: organization.id,
+      targetDisplayName: 'Governance Launch',
+      targetId: createResponse.body.project.id,
+      targetSecondaryLabel: 'governance-launch',
+      targetType: 'project',
+    });
+    expect(auditEvent?.id).toBeTruthy();
+    expect(auditEvent?.occurredAt).toBeInstanceOf(Date);
+  });
+
+  it('lets Organization owners list their Organization Audit Events', async () => {
+    const { headers, organization } = await createSignedInOwner('project-audit-list-owner');
+
+    const createResponse = await createProjectRequest(organization.slug, headers, {
+      description: 'Audit list work.',
+      name: 'Audit List Project',
+      slug: 'audit-list-project',
+    });
+
+    expect(createResponse.status).toBe(201);
+
+    const listResponse = await listAuditEventsRequest(organization.slug, headers);
+
+    expect(listResponse.status).toBe(200);
+    expect(listResponse.body).toMatchObject({
+      auditEvents: [
+        {
+          action: 'project.created',
+          actorType: 'organization_member',
+          targetDisplayName: 'Audit List Project',
+          targetId: createResponse.body.project.id,
+          targetSecondaryLabel: 'audit-list-project',
+          targetType: 'project',
+        },
+      ],
+    });
+  });
+
+  it('filters and bounds Organization Audit Events for read clients', async () => {
+    const { headers, organization } = await createSignedInOwner('project-audit-filter-owner');
+
+    const firstProjectResponse = await createProjectRequest(organization.slug, headers, {
+      description: 'First audit filter work.',
+      name: 'First Audit Filter Project',
+      slug: 'first-audit-filter-project',
+    });
+    const secondProjectResponse = await createProjectRequest(organization.slug, headers, {
+      description: 'Second audit filter work.',
+      name: 'Second Audit Filter Project',
+      slug: 'second-audit-filter-project',
+    });
+
+    expect(firstProjectResponse.status).toBe(201);
+    expect(secondProjectResponse.status).toBe(201);
+
+    const targetFilteredResponse = await listAuditEventsRequest(organization.slug, headers, {
+      targetId: firstProjectResponse.body.project.id,
+      targetType: 'project',
+    });
+    const limitedResponse = await listAuditEventsRequest(organization.slug, headers, {
+      action: 'project.created',
+      limit: 1,
+    });
+    const offsetResponse = await listAuditEventsRequest(organization.slug, headers, {
+      action: 'project.created',
+      limit: 1,
+      offset: 1,
+    });
+
+    expect(targetFilteredResponse.status).toBe(200);
+    expect(targetFilteredResponse.body.auditEvents).toEqual([
+      expect.objectContaining({
+        action: 'project.created',
+        targetId: firstProjectResponse.body.project.id,
+        targetType: 'project',
+      }),
+    ]);
+    expect(limitedResponse.body.auditEvents).toHaveLength(1);
+    expect(limitedResponse.body.auditEvents[0]).toMatchObject({
+      action: 'project.created',
+      targetId: secondProjectResponse.body.project.id,
+    });
+    expect(offsetResponse.body.auditEvents).toHaveLength(1);
+    expect(offsetResponse.body.auditEvents[0]).toMatchObject({
+      action: 'project.created',
+      targetId: firstProjectResponse.body.project.id,
+    });
+  });
+
+  it('prevents regular Organization Members from listing Audit Events', async () => {
+    const { headers: ownerHeaders, organization } = await createSignedInOwner(
+      'project-audit-member-owner',
+    );
+    const member = createCredentials('project-audit-member');
+
+    await signUpUser(member);
+
+    const invitation = await auth.api.createInvitation({
+      body: {
+        email: member.email,
+        organizationId: organization.id,
+        role: 'member',
+      },
+      headers: ownerHeaders,
+    });
+    const memberHeaders = await signInUser(member);
+
+    await auth.api.acceptInvitation({
+      body: { invitationId: invitation.id },
+      headers: memberHeaders,
+    });
+
+    await createProjectRequest(organization.slug, ownerHeaders, {
+      description: 'Private audit history.',
+      name: 'Private Audit Project',
+      slug: 'private-audit-project',
+    });
+
+    const listResponse = await listAuditEventsRequest(organization.slug, memberHeaders);
+
+    expect(listResponse.status).toBe(403);
+    expect(listResponse.body).toMatchObject({
+      error: 'Only Organization owners and admins can view the Audit Log.',
+    });
+  });
+
+  it('records an Audit Event when an Organization owner archives a Project', async () => {
+    const { headers, organization } = await createSignedInOwner('project-audit-archive-owner');
+
+    const createResponse = await createProjectRequest(organization.slug, headers, {
+      description: 'Archive audit work.',
+      name: 'Archive Audit Project',
+      slug: 'archive-audit-project',
+    });
+
+    expect(createResponse.status).toBe(201);
+
+    const archiveResponse = await archiveProjectRequest(
+      organization.slug,
+      'archive-audit-project',
+      headers,
+    );
+
+    expect(archiveResponse.status).toBe(200);
+
+    const listResponse = await listAuditEventsRequest(organization.slug, headers);
+
+    expect(listResponse.status).toBe(200);
+    expect(listResponse.body.auditEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: 'project.archived',
+          actorType: 'organization_member',
+          targetDisplayName: 'Archive Audit Project',
+          targetId: createResponse.body.project.id,
+          targetSecondaryLabel: 'archive-audit-project',
+          targetType: 'project',
+        }),
+      ]),
+    );
+  });
+
+  it('records an Audit Event when an Organization owner restores a Project', async () => {
+    const { headers, organization } = await createSignedInOwner('project-audit-restore-owner');
+
+    const createResponse = await createProjectRequest(organization.slug, headers, {
+      description: 'Restore audit work.',
+      name: 'Restore Audit Project',
+      slug: 'restore-audit-project',
+    });
+
+    expect(createResponse.status).toBe(201);
+
+    await archiveProjectRequest(organization.slug, 'restore-audit-project', headers);
+
+    const restoreResponse = await restoreProjectRequest(
+      organization.slug,
+      'restore-audit-project',
+      headers,
+    );
+
+    expect(restoreResponse.status).toBe(200);
+
+    const listResponse = await listAuditEventsRequest(organization.slug, headers);
+
+    expect(listResponse.status).toBe(200);
+    expect(listResponse.body.auditEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: 'project.restored',
+          actorType: 'organization_member',
+          targetDisplayName: 'Restore Audit Project',
+          targetId: createResponse.body.project.id,
+          targetSecondaryLabel: 'restore-audit-project',
+          targetType: 'project',
+        }),
+      ]),
+    );
+  });
+
+  it('records Audit Deltas when an Organization owner updates Project settings', async () => {
+    const { headers, organization } = await createSignedInOwner('project-audit-update-owner');
+    const ownerMembership = await db
+      .select({ id: members.id })
+      .from(members)
+      .where(eq(members.organizationId, organization.id))
+      .limit(1)
+      .then((rows) => rows[0]);
+
+    expect(ownerMembership?.id).toBeTruthy();
+
+    if (!ownerMembership?.id) {
+      throw new Error('Expected an owner membership.');
+    }
+
+    const createResponse = await createProjectRequest(organization.slug, headers, {
+      description: 'Initial governance work.',
+      name: 'Initial Project Name',
+      slug: 'initial-project-name',
+    });
+
+    expect(createResponse.status).toBe(201);
+
+    const updateResponse = await callTRPC(headers, (caller) =>
+      caller.projects.update({
+        description: 'Updated governance work.',
+        name: 'Updated Project Name',
+        organizationSlug: organization.slug,
+        projectOwnerMemberId: ownerMembership.id,
+        projectSlug: 'initial-project-name',
+      }),
+    );
+
+    expect(updateResponse.status).toBe(200);
+
+    const listResponse = await listAuditEventsRequest(organization.slug, headers);
+    const updateAuditEvent = listResponse.body.auditEvents.find(
+      (auditEvent: { action: string }) => auditEvent.action === 'project.updated',
+    ) as { actorDisplayName: string; actorEmail: string; metadata: unknown } | undefined;
+
+    expect(updateAuditEvent).toMatchObject({
+      actorDisplayName: 'project-audit-update-owner user',
+      actorEmail: expect.stringContaining('project-audit-update-owner-'),
+    });
+    expect(updateAuditEvent?.metadata).toMatchObject({
+      changes: {
+        description: {
+          from: 'Initial governance work.',
+          to: 'Updated governance work.',
+        },
+        name: {
+          from: 'Initial Project Name',
+          to: 'Updated Project Name',
+        },
+        projectOwner: {
+          from: null,
+          to: {
+            displayName: 'project-audit-update-owner user',
+            email: expect.stringContaining('project-audit-update-owner-'),
+            organizationMemberId: ownerMembership.id,
+          },
+        },
+      },
     });
   });
 

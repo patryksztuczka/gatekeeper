@@ -484,6 +484,10 @@ async function enforceArchivedControl(input: {
   );
 }
 
+async function listAuditEvents(organizationSlug: string, headers: Headers) {
+  return callTRPC(headers, (caller) => caller.auditLog.list({ organizationSlug }));
+}
+
 beforeEach(() => {
   const originalFetch = globalThis.fetch;
 
@@ -671,6 +675,98 @@ describe('Project Checklists', () => {
     });
   });
 
+  it('records Audit Events for Checklist creation and Checklist Item state changes', async () => {
+    const { headers: ownerHeaders, organization } =
+      await createSignedInOwner('checklist-audit-owner');
+    const projectOwner = await createSignedInMember({
+      organizationId: organization.id,
+      ownerHeaders,
+      prefix: 'checklist-audit-project-owner',
+      role: 'member',
+    });
+    const project = await createProject({
+      headers: ownerHeaders,
+      organizationSlug: organization.slug,
+      projectOwnerMemberId: projectOwner.membership.id,
+    });
+    const control = await createActiveControl({
+      headers: ownerHeaders,
+      organizationSlug: organization.slug,
+      title: 'Verify audited checklist state',
+    });
+
+    const templateResponse = await createChecklistTemplate({
+      controlIds: [control.id],
+      headers: ownerHeaders,
+      name: 'Audited checklist template',
+      organizationSlug: organization.slug,
+    });
+    const checklistTemplate = templateResponse.body.checklistTemplate;
+    const checklistResponse = await createProjectChecklist({
+      checklistTemplateId: checklistTemplate.id,
+      headers: ownerHeaders,
+      name: 'Audited project checklist',
+      organizationSlug: organization.slug,
+      projectSlug: project.slug,
+    });
+    const projectChecklist = checklistResponse.body.projectChecklist;
+    const checklistItem = projectChecklist.items[0];
+
+    expect(checklistItem?.id).toBeTruthy();
+
+    if (!checklistItem?.id) {
+      throw new Error('Expected a Checklist Item.');
+    }
+
+    await setChecklistItemChecked({
+      checked: true,
+      checklistItemId: checklistItem.id,
+      headers: projectOwner.headers,
+      organizationSlug: organization.slug,
+    });
+    await setChecklistItemChecked({
+      checked: false,
+      checklistItemId: checklistItem.id,
+      headers: projectOwner.headers,
+      organizationSlug: organization.slug,
+    });
+
+    await expect(listAuditEvents(organization.slug, ownerHeaders)).resolves.toMatchObject({
+      body: {
+        auditEvents: expect.arrayContaining([
+          expect.objectContaining({
+            action: 'checklist_template.created',
+            targetDisplayName: 'Audited checklist template',
+            targetId: checklistTemplate.id,
+            targetType: 'checklist_template',
+          }),
+          expect.objectContaining({
+            action: 'project_checklist.created',
+            targetDisplayName: 'Audited project checklist',
+            targetId: projectChecklist.id,
+            targetSecondaryLabel: project.slug,
+            targetType: 'project_checklist',
+          }),
+          expect.objectContaining({
+            action: 'checklist_item.checked',
+            targetDisplayName: 'Verify audited checklist state',
+            targetId: checklistItem.id,
+            targetSecondaryLabel: control.controlCode,
+            targetType: 'checklist_item',
+          }),
+          expect.objectContaining({
+            action: 'checklist_item.unchecked',
+            targetDisplayName: 'Verify audited checklist state',
+            targetId: checklistItem.id,
+            targetSecondaryLabel: control.controlCode,
+            targetType: 'checklist_item',
+          }),
+        ]),
+      },
+      status: 200,
+    });
+  });
+
   it('keeps Checklist Templates visible and manageable only by owners and admins', async () => {
     const { headers: ownerHeaders, organization } = await createSignedInOwner(
       'checklist-template-owner',
@@ -813,6 +909,20 @@ describe('Project Checklists', () => {
         itemStatus: 'active',
       }),
     ]);
+    await expect(listAuditEvents(organization.slug, headers)).resolves.toMatchObject({
+      body: {
+        auditEvents: expect.arrayContaining([
+          expect.objectContaining({
+            action: 'checklist_item.refreshed',
+            targetDisplayName: 'Verify rollback ownership',
+            targetId: originalItemId,
+            targetSecondaryLabel: control.controlCode,
+            targetType: 'checklist_item',
+          }),
+        ]),
+      },
+      status: 200,
+    });
   });
 
   it('retains removed Checklist Items and excludes them from completion', async () => {
@@ -987,6 +1097,39 @@ describe('Project Checklists', () => {
       id: projectChecklistId,
       status: 'active',
     });
+    await expect(listAuditEvents(organization.slug, headers)).resolves.toMatchObject({
+      body: {
+        auditEvents: expect.arrayContaining([
+          expect.objectContaining({
+            action: 'project_checklist.renamed',
+            metadata: {
+              changes: {
+                name: {
+                  from: 'Lifecycle checklist',
+                  to: 'Renamed lifecycle checklist',
+                },
+              },
+            },
+            targetDisplayName: 'Renamed lifecycle checklist',
+            targetId: projectChecklistId,
+            targetType: 'project_checklist',
+          }),
+          expect.objectContaining({
+            action: 'project_checklist.archived',
+            targetDisplayName: 'Renamed lifecycle checklist',
+            targetId: projectChecklistId,
+            targetType: 'project_checklist',
+          }),
+          expect.objectContaining({
+            action: 'project_checklist.restored',
+            targetDisplayName: 'Renamed lifecycle checklist',
+            targetId: projectChecklistId,
+            targetType: 'project_checklist',
+          }),
+        ]),
+      },
+      status: 200,
+    });
   });
 
   it('renames, archives, lists, and restores Checklist Templates', async () => {
@@ -1053,6 +1196,33 @@ describe('Project Checklists', () => {
     ]);
     expect(reusedNameResponse.status).toBe(201);
     expect(conflictingRestoreResponse.status).toBe(400);
+    await expect(listAuditEvents(organization.slug, headers)).resolves.toMatchObject({
+      body: {
+        auditEvents: expect.arrayContaining([
+          expect.objectContaining({
+            action: 'checklist_template.renamed',
+            metadata: {
+              changes: {
+                name: {
+                  from: 'Template lifecycle',
+                  to: 'Renamed template lifecycle',
+                },
+              },
+            },
+            targetDisplayName: 'Renamed template lifecycle',
+            targetId: checklistTemplateId,
+            targetType: 'checklist_template',
+          }),
+          expect.objectContaining({
+            action: 'checklist_template.archived',
+            targetDisplayName: 'Renamed template lifecycle',
+            targetId: checklistTemplateId,
+            targetType: 'checklist_template',
+          }),
+        ]),
+      },
+      status: 200,
+    });
   });
 
   it('adds active Controls and enforces Archived Control removal per Project Checklist', async () => {
@@ -1130,6 +1300,25 @@ describe('Project Checklists', () => {
       expect.objectContaining({ controlId: firstControl.id, itemStatus: 'active' }),
       expect.objectContaining({ controlId: secondControl.id, itemStatus: 'removed' }),
     ]);
+    await expect(listAuditEvents(organization.slug, headers)).resolves.toMatchObject({
+      body: {
+        auditEvents: expect.arrayContaining([
+          expect.objectContaining({
+            action: 'checklist_item.added',
+            targetDisplayName: 'Verify second add item control',
+            targetSecondaryLabel: secondControl.controlCode,
+            targetType: 'checklist_item',
+          }),
+          expect.objectContaining({
+            action: 'checklist_item.removed',
+            targetDisplayName: 'Verify second add item control',
+            targetSecondaryLabel: secondControl.controlCode,
+            targetType: 'checklist_item',
+          }),
+        ]),
+      },
+      status: 200,
+    });
   });
 
   it('keeps Project Checklists on Archived Projects read-only', async () => {
