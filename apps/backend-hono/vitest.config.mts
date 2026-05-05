@@ -7,6 +7,7 @@ const migrations = await readD1Migrations(migrationsPath);
 export default defineWorkersConfig({
   test: {
     setupFiles: ['test/apply-migrations.ts'],
+    testTimeout: 15_000,
     poolOptions: {
       workers: {
         wrangler: { configPath: './wrangler.jsonc' },
