@@ -114,6 +114,7 @@ _Avoid_: Hide when retained checklist history is meant.
 - **Project Checklists** on **Archived Projects** are retained read-only.
 - **Checklist Items** on **Archived Projects** cannot be checked, unchecked, added, removed, or refreshed.
 - All Organization Members who can view a **Project** can view its **Project Checklists**.
+- **Project Checklist** detail and actions require visibility to the parent **Project** before checklist-specific permissions apply.
 - Organization owners and admins can create **Project Checklists**.
 - Organization owners and admins can rename active **Project Checklists**.
 - Organization owners and admins can add active **Controls** to active **Project Checklists**.
@@ -124,7 +125,7 @@ _Avoid_: Hide when retained checklist history is meant.
 - **Project Checklist** management does not require a publish or approval workflow for MVP.
 - A **Project Owner** can check and uncheck **Checklist Items** on their **Project Checklists**.
 - Only the **Project Owner** can check and uncheck **Checklist Items**.
-- Organization owners and admins cannot check or uncheck **Checklist Items** unless they are also the **Project Owner**.
+- Organization owners and admins cannot check or uncheck **Checklist Items** unless they also have the Project Owner **Project Assignment Role**.
 - If a **Project** has no **Project Owner**, no one can check or uncheck its **Checklist Items**.
 - Checking a **Checklist Item** is not a permission to create, edit, archive, or publish **Controls**.
 
