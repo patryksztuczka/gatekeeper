@@ -1,4 +1,4 @@
-import { and, asc, eq, exists, isNotNull, isNull } from 'drizzle-orm';
+import { and, asc, eq, exists, isNotNull, isNull, ne } from 'drizzle-orm';
 import { db } from '../../db/client';
 import { auditEvents, members, projectAssignments, projects, users } from '../../db/schema';
 import type { AuthorizedOrganizationMember } from '../../types/organization-types';
@@ -384,20 +384,27 @@ export async function createProjectAssignmentForMember(input: {
     updatedAt: now,
   };
 
-  await db.batch([
-    db.insert(projectAssignments).values(assignment),
-    db.insert(auditEvents).values(
-      await buildProjectAuditEventValues({
-        action: 'project_assignment.created',
-        membership: input.membership,
-        metadata: {
-          organizationMemberId: assignment.organizationMemberId,
-          role: assignment.role,
-        },
-        project,
-      }),
-    ),
-  ]);
+  const auditEvent = db.insert(auditEvents).values(
+    await buildProjectAuditEventValues({
+      action: 'project_assignment.created',
+      membership: input.membership,
+      metadata: {
+        organizationMemberId: assignment.organizationMemberId,
+        role: assignment.role,
+      },
+      project,
+    }),
+  );
+
+  if (assignment.role === projectOwnerAssignmentRole) {
+    await db.batch([
+      demoteExistingProjectOwner(project.id),
+      db.insert(projectAssignments).values(assignment),
+      auditEvent,
+    ]);
+  } else {
+    await db.batch([db.insert(projectAssignments).values(assignment), auditEvent]);
+  }
 
   return {
     id: assignment.id,
@@ -504,30 +511,38 @@ export async function updateProjectAssignmentForMember(input: {
     throw new ProjectInputError('Project Assignments cannot be changed while a Project is archived.');
   }
 
-  await db.batch([
-    db
-      .update(projectAssignments)
-      .set({ role: input.assignment.role, updatedAt: new Date() })
-      .where(eq(projectAssignments.id, assignment.id)),
-    db.insert(auditEvents).values(
-      await buildProjectAuditEventValues({
-        action: 'project_assignment.role_changed',
-        membership: input.membership,
-        metadata: {
-          organizationMemberId: assignment.organizationMemberId,
-          role: {
-            from: assignment.role,
-            to: input.assignment.role,
-          },
+  const updateAssignment = db
+    .update(projectAssignments)
+    .set({ role: input.assignment.role, updatedAt: new Date() })
+    .where(eq(projectAssignments.id, assignment.id));
+  const auditEvent = db.insert(auditEvents).values(
+    await buildProjectAuditEventValues({
+      action: 'project_assignment.role_changed',
+      membership: input.membership,
+      metadata: {
+        organizationMemberId: assignment.organizationMemberId,
+        role: {
+          from: assignment.role,
+          to: input.assignment.role,
         },
-        project: {
-          id: assignment.projectId,
-          name: assignment.name,
-          slug: assignment.projectSlug,
-        },
-      }),
-    ),
-  ]);
+      },
+      project: {
+        id: assignment.projectId,
+        name: assignment.name,
+        slug: assignment.projectSlug,
+      },
+    }),
+  );
+
+  if (input.assignment.role === projectOwnerAssignmentRole) {
+    await db.batch([
+      demoteExistingProjectOwner(assignment.projectId, assignment.id),
+      updateAssignment,
+      auditEvent,
+    ]);
+  } else {
+    await db.batch([updateAssignment, auditEvent]);
+  }
 
   return {
     id: assignment.id,
@@ -772,6 +787,19 @@ export class ProjectInputError extends Error {}
 
 function canViewAllProjectsForOrganizationRole(role: string) {
   return projectManagerRoles.includes(role as (typeof projectManagerRoles)[number]);
+}
+
+function demoteExistingProjectOwner(projectId: string, exceptAssignmentId?: string) {
+  return db
+    .update(projectAssignments)
+    .set({ role: 'project_contributor', updatedAt: new Date() })
+    .where(
+      and(
+        eq(projectAssignments.projectId, projectId),
+        eq(projectAssignments.role, projectOwnerAssignmentRole),
+        exceptAssignmentId ? ne(projectAssignments.id, exceptAssignmentId) : undefined,
+      ),
+    );
 }
 
 function validateProjectInput(input: CreateProjectInput) {

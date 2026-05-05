@@ -833,6 +833,98 @@ describe('organization projects', () => {
     });
   });
 
+  it('demotes the previous Project Owner when a new Project Owner is assigned', async () => {
+    const { headers: ownerHeaders, organization } = await createSignedInOwner(
+      'project-owner-replacement-owner',
+    );
+    const firstProjectOwner = await db
+      .select({ id: members.id })
+      .from(members)
+      .where(eq(members.organizationId, organization.id))
+      .limit(1)
+      .then((rows) => rows[0]);
+    const nextOwner = createCredentials('project-owner-replacement-next');
+
+    expect(firstProjectOwner?.id).toBeTruthy();
+
+    if (!firstProjectOwner?.id) {
+      throw new Error('Expected first Project Owner membership.');
+    }
+
+    await signUpUser(nextOwner);
+
+    const invitation = await auth.api.createInvitation({
+      body: {
+        email: nextOwner.email,
+        organizationId: organization.id,
+        role: 'member',
+      },
+      headers: ownerHeaders,
+    });
+    const nextOwnerHeaders = await signInUser(nextOwner);
+
+    await auth.api.acceptInvitation({
+      body: { invitationId: invitation.id },
+      headers: nextOwnerHeaders,
+    });
+
+    const membersResponse = await listOrganizationMembersRequest(organization.slug, ownerHeaders);
+    const nextOwnerMember = membersResponse.body.members.find(
+      (organizationMember: { email: string }) => organizationMember.email === nextOwner.email,
+    ) as { id: string } | undefined;
+
+    expect(nextOwnerMember?.id).toBeTruthy();
+
+    await createProjectRequest(organization.slug, ownerHeaders, {
+      description: 'Owner replacement governance work.',
+      name: 'Owner Replacement',
+      projectOwnerMemberId: firstProjectOwner.id,
+      slug: 'owner-replacement',
+    });
+
+    const nextOwnerAssignment = await createProjectAssignmentRequest(
+      organization.slug,
+      'owner-replacement',
+      ownerHeaders,
+      {
+        organizationMemberId: nextOwnerMember?.id ?? '',
+        role: 'project_owner',
+      },
+    );
+
+    expect(nextOwnerAssignment.status).toBe(201);
+
+    const assignments = await db
+      .select({
+        organizationMemberId: projectAssignments.organizationMemberId,
+        role: projectAssignments.role,
+      })
+      .from(projectAssignments)
+      .innerJoin(projects, eq(projectAssignments.projectId, projects.id))
+      .where(and(eq(projects.organizationId, organization.id), eq(projects.slug, 'owner-replacement')));
+
+    expect(assignments).toEqual(
+      expect.arrayContaining([
+        { organizationMemberId: firstProjectOwner.id, role: 'project_contributor' },
+        { organizationMemberId: nextOwnerMember?.id, role: 'project_owner' },
+      ]),
+    );
+    await expect(listProjectsRequest(organization.slug, ownerHeaders)).resolves.toMatchObject({
+      body: {
+        projects: [
+          {
+            projectOwner: {
+              email: nextOwner.email,
+              id: nextOwnerMember?.id,
+            },
+            slug: 'owner-replacement',
+          },
+        ],
+      },
+      status: 200,
+    });
+  });
+
   it('lets Organization owners remove Project Assignments to revoke visibility', async () => {
     const { headers: ownerHeaders, organization } = await createSignedInOwner(
       'project-assignment-remove-owner',
