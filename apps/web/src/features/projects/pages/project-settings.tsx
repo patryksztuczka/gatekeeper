@@ -51,7 +51,11 @@ export function ProjectSettingsPage() {
 
   const detailQuery = useProjectDetail({ organizationSlug, projectSlug });
   const projectOptions = useProjectOwnerOptions(organizationSlug);
-  const assignmentsQuery = useProjectAssignments({ organizationSlug, projectSlug });
+  const assignmentsQuery = useProjectAssignments({
+    enabled: projectOptions.canManageProjects,
+    organizationSlug,
+    projectSlug,
+  });
   const updateProjectMutation = useProjectSettingsMutation({
     onError: (message) => {
       setSaveError(humanizeAuthError(null, message, 'Unable to save Project settings.'));
@@ -104,9 +108,12 @@ export function ProjectSettingsPage() {
     assignments.map((assignment) => assignment.organizationMemberId),
   );
   const assignableMembers = members.filter((member) => !assignedMemberIds.has(member.id));
-  const loadError = detailQuery.error ?? projectOptions.error ?? assignmentsQuery.error;
+  const loadError = detailQuery.error ?? projectOptions.error;
   const loadErrorMessage = loadError
     ? humanizeAuthError(null, loadError.message, 'Unable to load Project settings.')
+    : null;
+  const assignmentLoadErrorMessage = assignmentsQuery.error
+    ? humanizeAuthError(null, assignmentsQuery.error.message, 'Unable to load Project Assignments.')
     : null;
   const isSaving = updateProjectMutation.isPending;
   const isArchiving = projectArchiveActions.isPending;
@@ -149,7 +156,9 @@ export function ProjectSettingsPage() {
 
   if (
     hasProjectIdentity &&
-    (detailQuery.isPending || projectOptions.isPending || assignmentsQuery.isPending) &&
+    (detailQuery.isPending ||
+      projectOptions.isPending ||
+      (projectOptions.canManageProjects && assignmentsQuery.isPending)) &&
     !project
   ) {
     return (
@@ -303,8 +312,15 @@ export function ProjectSettingsPage() {
                 </AlertDescription>
               </Alert>
             ) : null}
+            {assignmentLoadErrorMessage ? (
+              <Alert variant="destructive">
+                <AlertCircle className="size-4" />
+                <AlertTitle>Unable to load assignments</AlertTitle>
+                <AlertDescription>{assignmentLoadErrorMessage}</AlertDescription>
+              </Alert>
+            ) : null}
 
-            {assignments.length === 0 ? (
+            {assignmentLoadErrorMessage ? null : assignments.length === 0 ? (
               <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
                 No Organization Members are assigned to this Project.
               </p>
@@ -354,52 +370,54 @@ export function ProjectSettingsPage() {
               </div>
             )}
 
-            <div className="grid gap-3 rounded-md border p-4 md:grid-cols-[1fr_220px_auto] md:items-end">
-              <div className="space-y-2">
-                <Label htmlFor="new-project-assignment-member">Organization Member</Label>
-                <select
-                  id="new-project-assignment-member"
-                  value={newAssignmentMemberId}
-                  disabled={assignmentsLocked || assignableMembers.length === 0}
-                  onChange={(event) => setNewAssignmentMemberId(event.target.value)}
-                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
-                >
-                  <option value="">
-                    {assignableMembers.length === 0 ? 'All members assigned' : 'Select member'}
-                  </option>
-                  {assignableMembers.map((member) => (
-                    <option key={member.id} value={member.id}>
-                      {member.name} ({member.email})
+            {assignmentLoadErrorMessage ? null : (
+              <div className="grid gap-3 rounded-md border p-4 md:grid-cols-[1fr_220px_auto] md:items-end">
+                <div className="space-y-2">
+                  <Label htmlFor="new-project-assignment-member">Organization Member</Label>
+                  <select
+                    id="new-project-assignment-member"
+                    value={newAssignmentMemberId}
+                    disabled={assignmentsLocked || assignableMembers.length === 0}
+                    onChange={(event) => setNewAssignmentMemberId(event.target.value)}
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+                  >
+                    <option value="">
+                      {assignableMembers.length === 0 ? 'All members assigned' : 'Select member'}
                     </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="new-project-assignment-role">Role</Label>
-                <select
-                  id="new-project-assignment-role"
-                  value={newAssignmentRole}
-                  disabled={assignmentsLocked}
-                  onChange={(event) =>
-                    setNewAssignmentRole(
-                      event.target.value as 'project_contributor' | 'project_owner',
-                    )
-                  }
-                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+                    {assignableMembers.map((member) => (
+                      <option key={member.id} value={member.id}>
+                        {member.name} ({member.email})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="new-project-assignment-role">Role</Label>
+                  <select
+                    id="new-project-assignment-role"
+                    value={newAssignmentRole}
+                    disabled={assignmentsLocked}
+                    onChange={(event) =>
+                      setNewAssignmentRole(
+                        event.target.value as 'project_contributor' | 'project_owner',
+                      )
+                    }
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+                  >
+                    <option value="project_contributor">Contributor</option>
+                    <option value="project_owner">Project Owner</option>
+                  </select>
+                </div>
+                <Button
+                  type="button"
+                  disabled={assignmentsLocked || !newAssignmentMemberId}
+                  onClick={handleAddAssignment}
                 >
-                  <option value="project_contributor">Contributor</option>
-                  <option value="project_owner">Project Owner</option>
-                </select>
+                  <UserPlus />
+                  Add
+                </Button>
               </div>
-              <Button
-                type="button"
-                disabled={assignmentsLocked || !newAssignmentMemberId}
-                onClick={handleAddAssignment}
-              >
-                <UserPlus />
-                Add
-              </Button>
-            </div>
+            )}
           </CardContent>
         </Card>
       ) : null}

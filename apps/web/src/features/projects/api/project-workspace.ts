@@ -153,15 +153,16 @@ export function useProjectSettingsMutation(input: {
 }
 
 export function useProjectAssignments(input: {
+  enabled?: boolean;
   organizationSlug: string | undefined;
   projectSlug: string | undefined;
 }) {
-  const hasProjectIdentity = Boolean(input.organizationSlug && input.projectSlug);
+  const isEnabled = Boolean(input.enabled && input.organizationSlug && input.projectSlug);
 
   return useQuery(
     trpc.projects.assignments.queryOptions(
       { organizationSlug: input.organizationSlug ?? '', projectSlug: input.projectSlug ?? '' },
-      { enabled: hasProjectIdentity },
+      { enabled: isEnabled },
     ),
   );
 }
