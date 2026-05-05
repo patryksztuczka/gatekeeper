@@ -14,7 +14,7 @@ Model Project participation with Project Assignments. A Project Assignment belon
 
 Project Owner is not stored as a separate Project field; it is the Project Assignment whose role is Project Owner. A Project can have at most one Project Owner assignment and at most one assignment for the same Organization Member. Projects may still be created without assignments, in which case only Organization owners and admins can see and manage them until assignments are added.
 
-Organization owners and admins can see and manage all Projects and Project Assignments in their Organization regardless of assignment. Assigned Contributors can view their assigned Projects and the Project Assignment roster, but Project Assignment does not grant Project management, checklist management, or Control Library permissions.
+Organization owners and admins can see and manage all Projects and Project Assignments in their Organization regardless of assignment. Assigned Contributors can view their assigned Projects, but they cannot view the Project Assignment roster for MVP. Project Assignment does not grant Project management, checklist management, or Control Library permissions.
 
 Project Assignment changes are governance-relevant actions. Creating, removing, or changing Project Assignments must produce Audit Events because these changes affect access and Project accountability. Stable audit actions are `project_assignment.created`, `project_assignment.role_changed`, and `project_assignment.removed`.
 

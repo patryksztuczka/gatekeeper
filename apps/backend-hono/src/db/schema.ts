@@ -135,6 +135,7 @@ export const members = sqliteTable(
   (table) => [
     index('member_organization_id_idx').on(table.organizationId),
     index('member_user_id_idx').on(table.userId),
+    uniqueIndex('member_id_organization_id_unique').on(table.id, table.organizationId),
     uniqueIndex('member_organization_user_unique').on(table.organizationId, table.userId),
   ],
 );
@@ -174,9 +175,6 @@ export const projects = sqliteTable(
     name: text('name').notNull(),
     description: text('description').notNull(),
     slug: text('slug').notNull(),
-    projectOwnerMemberId: text('project_owner_member_id').references(() => members.id, {
-      onDelete: 'set null',
-    }),
     archivedAt: integer('archived_at', { mode: 'timestamp_ms' }),
     createdAt: integer('created_at', { mode: 'timestamp_ms' })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
@@ -188,8 +186,52 @@ export const projects = sqliteTable(
   },
   (table) => [
     index('project_organization_id_idx').on(table.organizationId),
-    index('project_owner_member_id_idx').on(table.projectOwnerMemberId),
+    uniqueIndex('project_id_organization_id_unique').on(table.id, table.organizationId),
     uniqueIndex('project_organization_slug_unique').on(table.organizationId, table.slug),
+  ],
+);
+
+export const projectAssignments = sqliteTable(
+  'project_assignments',
+  {
+    id: text('id').primaryKey(),
+    organizationId: text('organization_id').notNull(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    organizationMemberId: text('organization_member_id')
+      .notNull()
+      .references(() => members.id, { onDelete: 'cascade' }),
+    role: text('role').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index('project_assignment_organization_id_idx').on(table.organizationId),
+    index('project_assignment_project_id_idx').on(table.projectId),
+    index('project_assignment_organization_member_id_idx').on(table.organizationMemberId),
+    foreignKey({
+      columns: [table.projectId, table.organizationId],
+      foreignColumns: [projects.id, projects.organizationId],
+      name: 'project_assignment_project_organization_fk',
+    }).onDelete('cascade'),
+    foreignKey({
+      columns: [table.organizationMemberId, table.organizationId],
+      foreignColumns: [members.id, members.organizationId],
+      name: 'project_assignment_member_organization_fk',
+    }).onDelete('cascade'),
+    uniqueIndex('project_assignment_project_member_unique').on(
+      table.projectId,
+      table.organizationMemberId,
+    ),
+    uniqueIndex('project_assignment_one_owner_per_project_unique')
+      .on(table.projectId)
+      .where(sql`${table.role} = 'project_owner'`),
   ],
 );
 

@@ -42,7 +42,7 @@ export function ProjectsPage() {
   const [status, setStatus] = useState<string | null>(null);
   const createProjectForm = useForm<CreateProjectFormValues>({
     resolver: zodResolver(createProjectFormSchema),
-    defaultValues: { name: '', slug: '', description: '', projectOwnerMemberId: '' },
+    defaultValues: { name: '', slug: '', description: '' },
   });
   const archivedView = isArchivedView(searchParams.get('status'));
   const projectStatus = archivedView ? 'archived' : 'active';
@@ -74,7 +74,6 @@ export function ProjectsPage() {
   });
 
   const projects = projectQuery.data?.projects ?? [];
-  const members = projectOptions.members;
   const loadError = projectQuery.error ?? projectOptions.error;
   const displayError =
     error ??
@@ -278,21 +277,6 @@ export function ProjectsPage() {
                     {createProjectForm.formState.errors.description.message}
                   </p>
                 ) : null}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="project-owner">Project Owner</Label>
-                <select
-                  id="project-owner"
-                  {...createProjectForm.register('projectOwnerMemberId')}
-                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
-                >
-                  <option value="">No Project Owner</option>
-                  {members.map((member) => (
-                    <option key={member.id} value={member.id}>
-                      {member.name} ({member.email})
-                    </option>
-                  ))}
-                </select>
               </div>
               <div className="flex justify-end gap-2">
                 <Button

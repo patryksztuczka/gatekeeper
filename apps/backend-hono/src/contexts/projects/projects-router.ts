@@ -5,16 +5,23 @@ import {
 } from '../identity-organization/organization-authorization';
 import {
   archiveProjectForMember,
+  createProjectAssignmentForMember,
   createProjectForMember,
+  listProjectAssignmentsForMember,
   listProjectsForMember,
   projectAuthorizationActions,
   ProjectInputError,
+  removeProjectAssignmentForMember,
   restoreProjectForMember,
   updateProjectSettingsForMember,
+  updateProjectAssignmentForMember,
   viewProjectForMember,
 } from './projects';
 import {
   projectCreateInput,
+  projectAssignmentCreateInput,
+  projectAssignmentRemoveInput,
+  projectAssignmentUpdateInput,
   projectIdentityInput,
   projectListInput,
   projectUpdateInput,
@@ -51,6 +58,28 @@ export const projectsRouter = router({
       return {
         projects: await listProjectsForMember(membership, input.status),
       };
+    } catch (caughtError) {
+      toProjectInputError(caughtError);
+    }
+  }),
+
+  assignments: protectedProcedure.input(projectIdentityInput).query(async ({ ctx, input }) => {
+    try {
+      const membership = await authorizeOrganizationAction({
+        action: projectAuthorizationActions.listAssignments,
+        organizationSlug: input.organizationSlug,
+        userId: ctx.session.user.id,
+      });
+      const assignments = await listProjectAssignmentsForMember({
+        membership,
+        projectSlug: input.projectSlug,
+      });
+
+      if (!assignments) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Project unavailable' });
+      }
+
+      return { assignments };
     } catch (caughtError) {
       toProjectInputError(caughtError);
     }
@@ -93,6 +122,81 @@ export const projectsRouter = router({
       toProjectInputError(caughtError);
     }
   }),
+
+  createAssignment: protectedProcedure
+    .input(projectAssignmentCreateInput)
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const membership = await authorizeOrganizationAction({
+          action: projectAuthorizationActions.createAssignment,
+          organizationSlug: input.organizationSlug,
+          userId: ctx.session.user.id,
+        });
+        const assignment = await createProjectAssignmentForMember({
+          assignment: input,
+          membership,
+          projectSlug: input.projectSlug,
+        });
+
+        if (!assignment) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Project unavailable' });
+        }
+
+        return { assignment };
+      } catch (caughtError) {
+        toProjectInputError(caughtError);
+      }
+    }),
+
+  updateAssignment: protectedProcedure
+    .input(projectAssignmentUpdateInput)
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const membership = await authorizeOrganizationAction({
+          action: projectAuthorizationActions.updateAssignment,
+          organizationSlug: input.organizationSlug,
+          userId: ctx.session.user.id,
+        });
+        const assignment = await updateProjectAssignmentForMember({
+          assignment: input,
+          membership,
+          projectSlug: input.projectSlug,
+        });
+
+        if (!assignment) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Project Assignment unavailable' });
+        }
+
+        return { assignment };
+      } catch (caughtError) {
+        toProjectInputError(caughtError);
+      }
+    }),
+
+  removeAssignment: protectedProcedure
+    .input(projectAssignmentRemoveInput)
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const membership = await authorizeOrganizationAction({
+          action: projectAuthorizationActions.removeAssignment,
+          organizationSlug: input.organizationSlug,
+          userId: ctx.session.user.id,
+        });
+        const assignment = await removeProjectAssignmentForMember({
+          assignment: input,
+          membership,
+          projectSlug: input.projectSlug,
+        });
+
+        if (!assignment) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Project Assignment unavailable' });
+        }
+
+        return { assignment };
+      } catch (caughtError) {
+        toProjectInputError(caughtError);
+      }
+    }),
 
   update: protectedProcedure.input(projectUpdateInput).mutation(async ({ ctx, input }) => {
     try {

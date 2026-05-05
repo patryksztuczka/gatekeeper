@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 
 import { db } from '../src/db/client';
-import { members, projects, users } from '../src/db/schema';
+import { members, projectAssignments, projects, users } from '../src/db/schema';
 import { auth } from '../src/lib/auth';
 import { callTRPC } from './trpc-test-utils';
 
@@ -137,7 +137,7 @@ async function addMemberToOrganization(organizationId: string, prefix: string) {
 
 async function createProject(input: {
   organizationId: string;
-  projectOwnerMemberId: string | null;
+  projectOwnerAssignmentMemberId: string | null;
   slug: string;
 }) {
   const now = new Date();
@@ -149,10 +149,21 @@ async function createProject(input: {
     name: 'Vendor Risk Review',
     description: 'Governance work for reviewing critical vendor risk.',
     slug: input.slug,
-    projectOwnerMemberId: input.projectOwnerMemberId,
     createdAt: now,
     updatedAt: now,
   });
+
+  if (input.projectOwnerAssignmentMemberId) {
+    await db.insert(projectAssignments).values({
+      createdAt: now,
+      id: crypto.randomUUID(),
+      organizationId: input.organizationId,
+      organizationMemberId: input.projectOwnerAssignmentMemberId,
+      projectId: id,
+      role: 'project_owner',
+      updatedAt: now,
+    });
+  }
 
   return id;
 }
@@ -172,10 +183,6 @@ async function updateProject(
   );
 }
 
-async function listOrganizationMembers(headers: Headers, organizationSlug: string) {
-  return callTRPC(headers, (caller) => caller.organizations.members({ organizationSlug }));
-}
-
 describe('Project detail API', () => {
   it('requires authentication', async () => {
     const response = await callTRPC(undefined, (caller) =>
@@ -185,13 +192,13 @@ describe('Project detail API', () => {
     expect(response.status).toBe(401);
   });
 
-  it('loads a Project by organization-local slug for Organization members', async () => {
+  it('loads a Project by organization-local slug for assigned Organization members', async () => {
     const owner = await createSignedInOwner('project-detail-owner');
     const member = await addMemberToOrganization(owner.organization.id, 'project-detail-member');
 
     await createProject({
       organizationId: owner.organization.id,
-      projectOwnerMemberId: owner.member.id,
+      projectOwnerAssignmentMemberId: member.memberId,
       slug: 'vendor-risk',
     });
 
@@ -203,16 +210,16 @@ describe('Project detail API', () => {
       description: 'Governance work for reviewing critical vendor risk.',
       slug: 'vendor-risk',
       projectOwner: {
-        email: owner.credentials.email,
-        name: owner.credentials.name,
-        role: 'owner',
+        email: member.credentials.email,
+        name: member.credentials.name,
+        role: 'member',
       },
     });
     expect(response.body.project?.createdAt).toBeTruthy();
     expect(response.body.project?.archivedAt).toBeNull();
   });
 
-  it('keeps archived Project detail URLs reachable for Organization members', async () => {
+  it('keeps archived Project detail URLs reachable for assigned Organization members', async () => {
     const owner = await createSignedInOwner('project-detail-archived-owner');
     const member = await addMemberToOrganization(
       owner.organization.id,
@@ -220,7 +227,7 @@ describe('Project detail API', () => {
     );
     const projectId = await createProject({
       organizationId: owner.organization.id,
-      projectOwnerMemberId: null,
+      projectOwnerAssignmentMemberId: member.memberId,
       slug: 'archived-project',
     });
     const archivedAt = new Date();
@@ -246,7 +253,7 @@ describe('Project detail API', () => {
 
     await createProject({
       organizationId: owner.organization.id,
-      projectOwnerMemberId: null,
+      projectOwnerAssignmentMemberId: null,
       slug: 'internal-controls',
     });
 
@@ -261,23 +268,42 @@ describe('Project detail API', () => {
     ).resolves.toMatchObject({ body: { status: 'unavailable' }, status: 200 });
   });
 
-  it('lets Organization owners edit Project settings without changing the slug', async () => {
-    const owner = await createSignedInOwner('project-settings-owner');
-    const projectOwner = await addMemberToOrganization(
+  it('hides direct Project URLs from unassigned regular Organization members', async () => {
+    const owner = await createSignedInOwner('project-detail-unassigned-owner');
+    const member = await addMemberToOrganization(
       owner.organization.id,
-      'project-settings-accountable',
+      'project-detail-unassigned',
     );
 
     await createProject({
       organizationId: owner.organization.id,
-      projectOwnerMemberId: null,
+      projectOwnerAssignmentMemberId: null,
+      slug: 'unassigned-project',
+    });
+
+    await expect(
+      getProjectDetail(member.headers, owner.organization.slug, 'unassigned-project'),
+    ).resolves.toMatchObject({ body: { status: 'unavailable' }, status: 200 });
+    await expect(
+      getProjectDetail(owner.headers, owner.organization.slug, 'unassigned-project'),
+    ).resolves.toMatchObject({
+      body: { project: { slug: 'unassigned-project' }, status: 'available' },
+      status: 200,
+    });
+  });
+
+  it('lets Organization owners edit Project settings without changing the slug', async () => {
+    const owner = await createSignedInOwner('project-settings-owner');
+
+    await createProject({
+      organizationId: owner.organization.id,
+      projectOwnerAssignmentMemberId: null,
       slug: 'vendor-risk',
     });
 
     const response = await updateProject(owner.headers, owner.organization.slug, 'vendor-risk', {
       description: 'Updated governance work for critical vendor risk.',
       name: 'Critical Vendor Risk',
-      projectOwnerMemberId: projectOwner.memberId,
       slug: 'ignored-new-slug',
     });
 
@@ -285,11 +311,7 @@ describe('Project detail API', () => {
     expect(response.body.project).toMatchObject({
       description: 'Updated governance work for critical vendor risk.',
       name: 'Critical Vendor Risk',
-      projectOwner: {
-        email: projectOwner.credentials.email,
-        name: projectOwner.credentials.name,
-        role: 'member',
-      },
+      projectOwner: null,
       slug: 'vendor-risk',
     });
 
@@ -303,56 +325,6 @@ describe('Project detail API', () => {
     expect(renamedProject.body.project?.slug).toBe('vendor-risk');
   });
 
-  it('lets Organization owners set an accepted member as Project Owner', async () => {
-    const owner = await createSignedInOwner('project-settings-invited-owner');
-    const memberCredentials = createCredentials('project-settings-invited-member');
-
-    await signUpUser(memberCredentials);
-
-    const invitation = await auth.api.createInvitation({
-      body: {
-        email: memberCredentials.email,
-        organizationId: owner.organization.id,
-        role: 'member',
-      },
-      headers: owner.headers,
-    });
-    const memberHeaders = await signInUser(memberCredentials);
-
-    await auth.api.acceptInvitation({
-      body: { invitationId: invitation.id },
-      headers: memberHeaders,
-    });
-
-    await createProject({
-      organizationId: owner.organization.id,
-      projectOwnerMemberId: null,
-      slug: 'vendor-risk',
-    });
-
-    const membersResponse = await listOrganizationMembers(owner.headers, owner.organization.slug);
-    const projectOwner = membersResponse.body.members.find(
-      (organizationMember: { email: string }) =>
-        organizationMember.email === memberCredentials.email,
-    ) as { id: string } | undefined;
-
-    expect(projectOwner?.id).toBeTruthy();
-
-    const response = await updateProject(owner.headers, owner.organization.slug, 'vendor-risk', {
-      description: 'Updated governance work for critical vendor risk.',
-      name: 'Critical Vendor Risk',
-      projectOwnerMemberId: projectOwner?.id,
-    });
-
-    expect(response.status).toBe(200);
-    expect(response.body.project).toMatchObject({
-      projectOwner: {
-        email: memberCredentials.email,
-        id: projectOwner?.id,
-      },
-    });
-  });
-
   it('prevents members from mutating Project settings', async () => {
     const owner = await createSignedInOwner('project-settings-readonly-owner');
     const member = await addMemberToOrganization(
@@ -362,14 +334,13 @@ describe('Project detail API', () => {
 
     await createProject({
       organizationId: owner.organization.id,
-      projectOwnerMemberId: owner.member.id,
+      projectOwnerAssignmentMemberId: owner.member.id,
       slug: 'vendor-risk',
     });
 
     const response = await updateProject(member.headers, owner.organization.slug, 'vendor-risk', {
       description: 'Member mutation attempt.',
       name: 'Member Mutation',
-      projectOwnerMemberId: null,
     });
 
     expect(response.status).toBe(403);
@@ -382,47 +353,22 @@ describe('Project detail API', () => {
     });
   });
 
-  it('validates Project settings updates and Project Owner membership', async () => {
+  it('validates Project settings updates', async () => {
     const owner = await createSignedInOwner('project-settings-validation-owner');
-    const outsider = await createSignedInOwner('project-settings-validation-outsider');
 
     await createProject({
       organizationId: owner.organization.id,
-      projectOwnerMemberId: null,
+      projectOwnerAssignmentMemberId: null,
       slug: 'vendor-risk',
     });
-
-    const outsiderMembership = await db
-      .select({ id: members.id })
-      .from(members)
-      .where(eq(members.organizationId, outsider.organization.id))
-      .then((rows) => rows[0]);
-
-    expect(outsiderMembership?.id).toBeTruthy();
-
-    if (!outsiderMembership?.id) {
-      throw new Error('Expected outsider membership.');
-    }
 
     await expect(
       updateProject(owner.headers, owner.organization.slug, 'vendor-risk', {
         description: '',
         name: 'Missing Description',
-        projectOwnerMemberId: null,
       }),
     ).resolves.toMatchObject({
       body: { error: 'Project description is required.' },
-      status: 400,
-    });
-
-    await expect(
-      updateProject(owner.headers, owner.organization.slug, 'vendor-risk', {
-        description: 'Wrong owner membership.',
-        name: 'Wrong Owner',
-        projectOwnerMemberId: outsiderMembership.id,
-      }),
-    ).resolves.toMatchObject({
-      body: { error: 'Project Owner must be a member of this Organization.' },
       status: 400,
     });
   });

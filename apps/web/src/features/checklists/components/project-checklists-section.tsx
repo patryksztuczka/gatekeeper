@@ -16,7 +16,7 @@ type ProjectChecklistsSectionProps = {
   currentMemberId: string | null;
   organizationSlug: string;
   projectArchived: boolean;
-  projectOwnerMemberId: string | null;
+  projectOwnerAssignmentMemberId: string | null;
   projectSlug: string;
 };
 
@@ -33,7 +33,7 @@ export function ProjectChecklistsSection({
   currentMemberId,
   organizationSlug,
   projectArchived,
-  projectOwnerMemberId,
+  projectOwnerAssignmentMemberId,
   projectSlug,
 }: ProjectChecklistsSectionProps) {
   const [statusFilter, setStatusFilter] = useState<'active' | 'archived'>('active');
@@ -43,7 +43,8 @@ export function ProjectChecklistsSection({
   const archivedView = statusFilter === 'archived';
   const canManageActiveProject = canManage && !projectArchived;
   const canCheckItems =
-    !projectArchived && Boolean(projectOwnerMemberId && projectOwnerMemberId === currentMemberId);
+    !projectArchived &&
+    Boolean(projectOwnerAssignmentMemberId && projectOwnerAssignmentMemberId === currentMemberId);
 
   const projectChecklistQuery = useQuery(
     trpc.checklists.listProjectChecklists.queryOptions(
